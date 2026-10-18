@@ -10,8 +10,14 @@
  * --departed-user (repetível): usuários do CRM que saíram da empresa. O relatório lista quantos
  * clientes deles NÃO são candidatos (precisam ser transferidos antes de desativar o usuário).
  *
+ * --list-transfers (só junto com --departed-user): lista, um por linha, os clientes desses usuários
+ * que NÃO são candidatos, com código ERP, nome, cidade/UF, motivo da proteção e vendedor atual do ERP
+ * no cache do /partners. É a única saída com dados de cliente e vai para o stderr: redirecionar o
+ * stdout (o resumo) para um arquivo não leva a lista junto. Não copie a lista para arquivo, teste,
+ * commit, PR ou relatório.
+ *
  * Autocontido: importa só @prisma/client e módulos do Node (teste de contrato em
- * simulateClientPortfolioCleanup.test.ts). Lê tudo numa transação READ ONLY. A saída traz só
+ * simulateClientPortfolioCleanup.test.ts). Lê tudo numa transação READ ONLY. O resumo (stdout) traz só
  * contagens e nomes de usuários do CRM: nunca nome, código, documento ou ID de cliente.
  */
 import { resolve } from "node:path";
@@ -20,6 +26,7 @@ import { Prisma, PrismaClient } from "@prisma/client";
 
 // Constantes espelhadas de ultraFv3SyncService.ts (conferidas pelo teste de contrato).
 export const PARTNERS_CONFIG_KEY = "erp.ultrafv3.partners";
+export const PARTNERS_LAST_SEEN_CONFIG_KEY = "erp.ultrafv3.partners.lastSeenAt";
 export const PARTNER_CODE_KEYS = ["PARCEIRO", "CODPARCEIRO", "CODCLIENTE", "code", "erpCode", "codigo", "CODIGO", "partnerCode", "PARCEIRO_OUT", "IDPARCEIRO"];
 export const PARTNER_SELLER_CODE_KEYS = ["VENDEDOR_DO_PARCEIRO", "CODVENDEDOR", "sellerCode", "salesmanCode", "codVendedor", "vendedorCodigo", "VENDEDOR"];
 export const MERGED_ARCHIVE_REASON_PREFIX = "MERGED_INTO:";
@@ -34,6 +41,7 @@ export const SYSTEM_TIMELINE_PATTERNS: RegExp[] = [
   /^Duplicado arquivado automaticamente via UltraFV3: /,
   /^Tenant comprovado e adotado por sincronização UltraFV3 autenticada\./,
   /^Cliente reativado automaticamente pela sincronização UltraFV3 /,
+  /^Cliente reativado automaticamente por nova compra no ERP/,
   /^Duplicado legado arquivado automaticamente pelo saneamento UltraFV3/,
   /^Cadastro legado duplicado .* fundido ao cliente principal pelo saneamento UltraFV3\./,
   /^Nova mensagem recebida pelo WhatsApp oficial\.$/,
@@ -50,6 +58,10 @@ export type ClientRow = {
   ownerSellerId: string;
   lastPurchaseDate: Date | null;
   financialProfile: unknown;
+  /** Só carregados com --list-transfers. */
+  name?: string;
+  city?: string;
+  state?: string;
 };
 export type UserRow = { id: string; name: string; isActive: boolean; erpCode: string | null };
 export type TimelineRow = { clientId: string | null; description: string };
@@ -68,6 +80,8 @@ export type PortfolioInput = {
   orderOpportunityIds: string[];
   /** Linhas brutas do cache do /partners (AppConfig), ou null se não houver cache. */
   partnerCacheRows: unknown[] | null;
+  /** Código normalizado do parceiro → data em que ele veio do /partners pela última vez (null: sem registro). */
+  partnerLastSeen: Record<string, string> | null;
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -135,6 +149,37 @@ export const parsePartnerCache = (value: string | null | undefined): unknown[] |
     return null;
   }
 };
+
+export const parsePartnerLastSeen = (value: string | null | undefined): Record<string, string> | null => {
+  if (value === null || value === undefined) return null;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    return Object.fromEntries(Object.entries(parsed).filter(([, seenAt]) => typeof seenAt === "string")) as Record<string, string>;
+  } catch {
+    return null;
+  }
+};
+
+export type CacheLineAge = "semDataDeVisto" | "vistaHaAte1Dia" | "vistaHa1a7Dias" | "vistaHaMaisDe7Dias";
+const DAY_MS = 24 * 60 * 60 * 1000;
+/** Idade da linha do cache: parceiro que deixou de vir do ERP fica com a linha antiga. */
+export function cacheLineAge(seenAt: string | undefined, now: Date): CacheLineAge {
+  const seen = seenAt ? new Date(seenAt) : null;
+  if (!seen || Number.isNaN(seen.getTime())) return "semDataDeVisto";
+  const age = now.getTime() - seen.getTime();
+  return age <= DAY_MS ? "vistaHaAte1Dia" : age <= 7 * DAY_MS ? "vistaHa1a7Dias" : "vistaHaMaisDe7Dias";
+}
+
+/** Grupo do motivo de arquivamento sem IDs nem texto livre: prefixo "XXX:", identificador snake_case ou rótulo. */
+export function archiveReasonGroup(reason: string | null) {
+  const value = reason?.trim() ?? "";
+  if (!value) return "(sem motivo)";
+  const prefix = /^([A-Z][A-Z0-9_]*:)/.exec(value);
+  if (prefix) return prefix[1];
+  if (/^[a-z][a-z0-9_]*$/.test(value)) return value;
+  return "(texto livre)";
+}
 
 // ---------------------------------------------------------------------------------------------
 // Classificação.
@@ -230,24 +275,48 @@ function summarizeGroup(verdicts: ClientVerdict[]) {
 
 type ErpSellerStatus = "semCodigoDeVendedor" | "semUsuarioNoCrm" | "usuarioInativo" | "usuarioAtivo" | "codigoEmMaisDeUmUsuario";
 
-function summarizeErpCache(verdicts: ClientVerdict[], cache: Map<string, Record<string, unknown>>, users: UserRow[]) {
+type ErpCacheContext = {
+  cache: Map<string, Record<string, unknown>>;
+  lastSeen: Record<string, string>;
+  usersByErpCode: Map<string, UserRow[]>;
+  now: Date;
+};
+
+function buildErpCacheContext(input: PortfolioInput, now: Date): ErpCacheContext {
   const usersByErpCode = new Map<string, UserRow[]>();
-  for (const user of users) {
+  for (const user of input.users) {
     const code = user.erpCode ? normalizePartnerCode(user.erpCode) : "";
     if (code) usersByErpCode.set(code, [...(usersByErpCode.get(code) ?? []), user]);
   }
+  return { cache: indexPartnerCache(input.partnerCacheRows), lastSeen: input.partnerLastSeen ?? {}, usersByErpCode, now };
+}
+
+const cacheKeyOf = (client: ClientRow) => (client.code?.trim() ? normalizePartnerCode(client.code) : "");
+
+function resolveErpSeller(row: Record<string, unknown>, context: ErpCacheContext) {
+  const sellerCode = normalizePartnerCode(pickFirstString(row, PARTNER_SELLER_CODE_KEYS));
+  const sellers = sellerCode ? context.usersByErpCode.get(sellerCode) ?? [] : [];
+  const status: ErpSellerStatus = !sellerCode ? "semCodigoDeVendedor"
+    : !sellers.length ? "semUsuarioNoCrm"
+    : sellers.length > 1 ? "codigoEmMaisDeUmUsuario"
+    : sellers[0].isActive ? "usuarioAtivo" : "usuarioInativo";
+  return { sellerCode, sellers, status };
+}
+
+function summarizeErpCache(verdicts: ClientVerdict[], context: ErpCacheContext) {
   const rows = verdicts.flatMap((verdict) => {
-    const row = verdict.client.code ? cache.get(normalizePartnerCode(verdict.client.code)) : undefined;
-    return row ? [{ verdict, row }] : [];
+    const key = cacheKeyOf(verdict.client);
+    const row = key ? context.cache.get(key) : undefined;
+    return row ? [{ verdict, row, key }] : [];
   });
-  const classified = rows.map(({ verdict, row }) => {
-    const sellerCode = normalizePartnerCode(pickFirstString(row, PARTNER_SELLER_CODE_KEYS));
-    const sellers = sellerCode ? usersByErpCode.get(sellerCode) ?? [] : [];
-    const seller: ErpSellerStatus = !sellerCode ? "semCodigoDeVendedor"
-      : !sellers.length ? "semUsuarioNoCrm"
-      : sellers.length > 1 ? "codigoEmMaisDeUmUsuario"
-      : sellers[0].isActive ? "usuarioAtivo" : "usuarioInativo";
-    return { flag: classifyCustomerFlag(row), seller, otherOwner: sellers.length === 1 && sellers[0].id !== verdict.client.ownerSellerId };
+  const classified = rows.map(({ verdict, row, key }) => {
+    const { sellers, status } = resolveErpSeller(row, context);
+    return {
+      flag: classifyCustomerFlag(row),
+      seller: status,
+      otherOwner: sellers.length === 1 && sellers[0].id !== verdict.client.ownerSellerId,
+      age: cacheLineAge(context.lastSeen[key], context.now),
+    };
   });
   return {
     total: verdicts.length,
@@ -257,7 +326,30 @@ function summarizeErpCache(verdicts: ClientVerdict[], cache: Map<string, Record<
     vendedorErp: countBy(classified, (row) => row.seller),
     idnClienteNEVendedorSemUsuario: classified.filter((row) => row.flag === "N" && row.seller === "semUsuarioNoCrm").length,
     vendedorErpDiferenteDoResponsavelNoCrm: classified.filter((row) => row.otherOwner).length,
+    idadeDaLinhaNoCache: countBy(classified, (row) => row.age),
   };
+}
+
+type CandidateFlagGroup = "S" | "N" | "semCampoIdnCliente" | "ausenteDoCache";
+const CANDIDATE_FLAG_GROUPS: CandidateFlagGroup[] = ["S", "N", "semCampoIdnCliente", "ausenteDoCache"];
+
+/** Candidatos com código ERP: IDN_CLIENTE do cache × tipo de candidato (nunca comprou / comprou há mais de 24 meses). */
+function crossCandidatesByCustomerFlag(candidates: ClientVerdict[], context: ErpCacheContext) {
+  const groupOf = (verdict: ClientVerdict): CandidateFlagGroup => {
+    const key = cacheKeyOf(verdict.client);
+    const row = key ? context.cache.get(key) : undefined;
+    if (!row) return "ausenteDoCache";
+    const flag = classifyCustomerFlag(row);
+    return flag === "ausente" ? "semCampoIdnCliente" : flag;
+  };
+  return Object.fromEntries(CANDIDATE_FLAG_GROUPS.map((group) => {
+    const rows = candidates.filter((verdict) => groupOf(verdict) === group);
+    return [group, {
+      total: rows.length,
+      semDataDeCompra: rows.filter((row) => row.candidateKind === "semDataDeCompra").length,
+      ultimaCompraHaMaisDe24Meses: rows.filter((row) => row.candidateKind === "ultimaCompraHaMaisDe24Meses").length,
+    }];
+  })) as Record<CandidateFlagGroup, { total: number; semDataDeCompra: number; ultimaCompraHaMaisDe24Meses: number }>;
 }
 
 export function summarizePortfolio(input: PortfolioInput, options: { now: Date; departedUserNames: string[] }) {
@@ -291,11 +383,8 @@ export function summarizePortfolio(input: PortfolioInput, options: { now: Date; 
 
   const avisos: string[] = [];
   const departedReport = options.departedUserNames.map((name) => {
-    const users = input.users.filter((user) => normalizeName(user.name) === normalizeName(name));
+    const { users, rows, notCandidates } = departedPortfolio(input, active, name);
     if (users.length > 1) avisos.push(`Mais de um usuário com o nome informado em --departed-user (${users.length}); contagens somadas.`);
-    const ids = new Set(users.map((user) => user.id));
-    const rows = active.filter((row) => ids.has(row.client.ownerSellerId));
-    const notCandidates = rows.filter((row) => !(row.matchesRule && row.hasErpCode));
     return {
       usuario: name,
       encontrado: users.length > 0,
@@ -308,12 +397,14 @@ export function summarizePortfolio(input: PortfolioInput, options: { now: Date; 
     };
   });
 
-  const cache = indexPartnerCache(input.partnerCacheRows);
+  const erpContext = buildErpCacheContext(input, options.now);
   if (input.partnerCacheRows === null) avisos.push(`Sem cache do /partners (${PARTNERS_CONFIG_KEY}) legível: IDN_CLIENTE e vendedor do ERP não avaliados.`);
-  else avisos.push("O cache do /partners guarda a última linha recebida de cada parceiro; parceiro que deixou de vir (ex.: transferido para vendedor sem credencial no CRM) pode estar desatualizado.");
+  else avisos.push("O cache do /partners guarda a última linha recebida de cada parceiro; parceiro que deixou de vir (ex.: transferido para vendedor sem credencial no CRM) pode estar desatualizado. Veja idadeDaLinhaNoCache.");
+  if (input.partnerCacheRows !== null && input.partnerLastSeen === null) avisos.push(`Sem registro de quando cada parceiro veio do ERP (${PARTNERS_LAST_SEEN_CONFIG_KEY}): idade das linhas do cache não avaliada.`);
 
   const purchaseSourceOf = (rows: ClientVerdict[]) => countBy(rows, (row) => row.purchase.source);
   const candidatesWithCode = withCode.filter((row) => row.matchesRule);
+  const archived = verdicts.filter((row) => row.state !== "naoArquivado");
   return {
     modo: "simulação somente leitura (não existe modo de gravação)",
     referencia: {
@@ -329,13 +420,75 @@ export function summarizePortfolio(input: PortfolioInput, options: { now: Date; 
     usuariosDesligados: departedReport,
     semCodigoErp: summarizeGroup(withoutCode),
     erpCacheParceiros: {
-      linhasNoCache: cache.size,
-      candidatos: summarizeErpCache(candidatesWithCode, cache, input.users),
-      protegidos: summarizeErpCache(withCode.filter((row) => !row.matchesRule), cache, input.users),
+      linhasNoCache: erpContext.cache.size,
+      linhasComDataDeVisto: [...erpContext.cache.keys()].filter((key) => erpContext.lastSeen[key]).length,
+      candidatos: summarizeErpCache(candidatesWithCode, erpContext),
+      protegidos: summarizeErpCache(withCode.filter((row) => !row.matchesRule), erpContext),
+      candidatosIdnClientePorCompra: crossCandidatesByCustomerFlag(candidatesWithCode, erpContext),
     },
+    arquivadosPorMotivo: { total: archived.length, porPrefixo: countBy(archived, (row) => archiveReasonGroup(row.client.archiveReason)) },
     avisos,
   };
 }
+
+function departedPortfolio(input: PortfolioInput, active: ClientVerdict[], name: string) {
+  const users = input.users.filter((user) => normalizeName(user.name) === normalizeName(name));
+  const ids = new Set(users.map((user) => user.id));
+  const rows = active.filter((row) => ids.has(row.client.ownerSellerId));
+  const notCandidates = rows.filter((row) => !(row.matchesRule && row.hasErpCode));
+  return { users, rows, notCandidates };
+}
+
+export type TransferRow = {
+  usuario: string;
+  codigoErp: string;
+  nome: string;
+  cidadeUf: string;
+  motivos: string;
+  vendedorErp: string;
+  linhaDoCache: string;
+};
+
+/**
+ * --list-transfers: clientes não arquivados dos usuários desligados que NÃO são candidatos (precisam ser
+ * transferidos). Única saída com dados de cliente: o CLI manda para o stderr e nunca para o resumo.
+ */
+export function buildTransferList(input: PortfolioInput, options: { now: Date; departedUserNames: string[] }): TransferRow[] {
+  const active = classifyClients(input, options.now).filter((row) => row.state === "naoArquivado");
+  const context = buildErpCacheContext(input, options.now);
+  const list = options.departedUserNames.flatMap((name) => departedPortfolio(input, active, name).notCandidates.map((verdict) => {
+    const { client } = verdict;
+    const key = cacheKeyOf(client);
+    const row = key ? context.cache.get(key) : undefined;
+    let vendedorErp = "(sem código ERP)";
+    if (key && !row) vendedorErp = "(ausente do cache)";
+    if (row) {
+      const { sellerCode, sellers, status } = resolveErpSeller(row, context);
+      vendedorErp = status === "semCodigoDeVendedor" ? "(sem vendedor na linha)"
+        : status === "semUsuarioNoCrm" ? `${sellerCode} (sem usuário no CRM)`
+        : status === "codigoEmMaisDeUmUsuario" ? `${sellerCode} (código em mais de um usuário)`
+        : `${sellerCode} (${sellers[0].name}${sellers[0].isActive ? "" : ", inativo"})`;
+    }
+    const seenAt = key ? context.lastSeen[key] : undefined;
+    return {
+      usuario: name,
+      codigoErp: client.code?.trim() || "(sem código)",
+      nome: client.name ?? "",
+      cidadeUf: [client.city, client.state].filter(Boolean).join("/"),
+      motivos: [...verdict.reasons, ...(verdict.hasErpCode ? [] : ["semCodigoErp"])].join(","),
+      vendedorErp,
+      linhaDoCache: !row ? "-" : seenAt ? `vista em ${brasiliaDayKey(new Date(seenAt))}` : "sem data de visto",
+    };
+  }));
+  return list.sort((a, b) => a.usuario.localeCompare(b.usuario) || a.nome.localeCompare(b.nome) || a.codigoErp.localeCompare(b.codigoErp));
+}
+
+const TRANSFER_COLUMNS: (keyof TransferRow)[] = ["usuario", "codigoErp", "nome", "cidadeUf", "motivos", "vendedorErp", "linhaDoCache"];
+export const formatTransferList = (rows: TransferRow[]) => [
+  `--list-transfers: ${rows.length} cliente(s) a transferir. Só no terminal: não copie para arquivo, teste, commit, PR ou relatório.`,
+  TRANSFER_COLUMNS.join("\t"),
+  ...rows.map((row) => TRANSFER_COLUMNS.map((column) => row[column].replace(/\s+/g, " ")).join("\t")),
+];
 
 // ---------------------------------------------------------------------------------------------
 // Banco: interface mínima do Prisma usada pelo script, só leitura (o teste usa uma implementação em memória).
@@ -359,9 +512,11 @@ const clientIdsOf = async (reader: Reader) =>
   ((await reader.findMany({ where: { clientId: { not: null } }, select: { clientId: true }, distinct: ["clientId"] })) as { clientId: string | null }[])
     .map((row) => row.clientId);
 
-export async function loadPortfolioInput(db: PortfolioDb): Promise<PortfolioInput> {
-  const [clients, users, opportunities, orders, atividade, agenda, paradaDeRoteiro, contato, conversaWhatsapp, clientTimeline, partnerCache] = await Promise.all([
-    db.client.findMany({ select: { id: true, code: true, isArchived: true, archiveReason: true, ownerSellerId: true, lastPurchaseDate: true, financialProfile: true } }),
+/** withClientDetails (só --list-transfers) carrega também nome, cidade e UF dos clientes. */
+export async function loadPortfolioInput(db: PortfolioDb, options: { withClientDetails?: boolean } = {}): Promise<PortfolioInput> {
+  const details = options.withClientDetails ? { name: true, city: true, state: true } : {};
+  const [clients, users, opportunities, orders, atividade, agenda, paradaDeRoteiro, contato, conversaWhatsapp, clientTimeline, partnerCache, partnerLastSeen] = await Promise.all([
+    db.client.findMany({ select: { id: true, code: true, isArchived: true, archiveReason: true, ownerSellerId: true, lastPurchaseDate: true, financialProfile: true, ...details } }),
     db.user.findMany({ select: { id: true, name: true, isActive: true, erpCode: true } }),
     db.opportunity.findMany({ select: { id: true, clientId: true } }),
     db.erpOrderSync.findMany({ select: { opportunityId: true }, distinct: ["opportunityId"] }),
@@ -372,6 +527,7 @@ export async function loadPortfolioInput(db: PortfolioDb): Promise<PortfolioInpu
     clientIdsOf(db.communicationConversation),
     db.timelineEvent.findMany({ where: { clientId: { not: null }, opportunityId: null }, select: { clientId: true, description: true } }),
     db.appConfig.findUnique({ where: { key: PARTNERS_CONFIG_KEY }, select: { value: true } }),
+    db.appConfig.findUnique({ where: { key: PARTNERS_LAST_SEEN_CONFIG_KEY }, select: { value: true } }),
   ]);
   return {
     clients: clients as ClientRow[],
@@ -381,26 +537,34 @@ export async function loadPortfolioInput(db: PortfolioDb): Promise<PortfolioInpu
     humanSources: { atividade, agenda, paradaDeRoteiro, contato, conversaWhatsapp },
     clientTimeline: clientTimeline as TimelineRow[],
     partnerCacheRows: parsePartnerCache((partnerCache as { value: string } | null)?.value),
+    partnerLastSeen: parsePartnerLastSeen((partnerLastSeen as { value: string } | null)?.value),
   };
 }
 
 // ---------------------------------------------------------------------------------------------
 // CLI
 
-export type CliOptions = { departedUserNames: string[] };
+export type CliOptions = { departedUserNames: string[]; listTransfers: boolean };
 
-const USAGE = 'uso: simulateClientPortfolioCleanup [--departed-user="Nome do usuário"]... (somente leitura; não há modo de gravação)';
+const USAGE = 'uso: simulateClientPortfolioCleanup [--departed-user="Nome do usuário"]... [--list-transfers] (somente leitura; não há modo de gravação; --list-transfers exige --departed-user)';
 
 export function parseCliArgs(args: string[]): CliOptions {
   const departedUserNames: string[] = [];
+  let listTransfers = false;
   for (const arg of args) {
+    if (arg === "--list-transfers") {
+      if (listTransfers) throw new Error(USAGE);
+      listTransfers = true;
+      continue;
+    }
     const match = /^--departed-user=(.*\S.*)$/.exec(arg);
     if (!match) throw new Error(USAGE);
     const name = match[1].trim();
     if (departedUserNames.some((existing) => normalizeName(existing) === normalizeName(name))) throw new Error(USAGE);
     departedUserNames.push(name);
   }
-  return { departedUserNames };
+  if (listTransfers && !departedUserNames.length) throw new Error(USAGE);
+  return { departedUserNames, listTransfers };
 }
 
 export type PortfolioClient = {
@@ -409,8 +573,17 @@ export type PortfolioClient = {
 };
 type ReadOnlyTx = PortfolioDb & { $executeRaw(query: TemplateStringsArray): Promise<number> };
 
-/** Valida os argumentos antes de criar o client: argumento inválido nunca abre conexão. */
-export async function runCli(args: string[], createClient: () => PortfolioClient, log: (line: string) => void = console.log, now = new Date()) {
+/**
+ * Valida os argumentos antes de criar o client: argumento inválido nunca abre conexão. O resumo vai
+ * para `log` (stdout); a lista do --list-transfers vai para `logTransfers` (stderr).
+ */
+export async function runCli(
+  args: string[],
+  createClient: () => PortfolioClient,
+  log: (line: string) => void = console.log,
+  now = new Date(),
+  logTransfers: (line: string) => void = console.error,
+) {
   const options = parseCliArgs(args);
   const client = createClient();
   try {
@@ -418,9 +591,12 @@ export async function runCli(args: string[], createClient: () => PortfolioClient
     const input = await client.$transaction(async (tx) => {
       const readOnly = tx as ReadOnlyTx;
       await readOnly.$executeRaw`SET TRANSACTION READ ONLY`;
-      return loadPortfolioInput(readOnly);
+      return loadPortfolioInput(readOnly, { withClientDetails: options.listTransfers });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: 120_000 });
     log(JSON.stringify(summarizePortfolio(input, { now, departedUserNames: options.departedUserNames }), null, 2));
+    if (options.listTransfers) {
+      for (const line of formatTransferList(buildTransferList(input, { now, departedUserNames: options.departedUserNames }))) logTransfers(line);
+    }
   } finally {
     await client.$disconnect();
   }

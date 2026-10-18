@@ -3,8 +3,12 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
   PARTNERS_CONFIG_KEY,
+  PARTNERS_LAST_SEEN_CONFIG_KEY,
   PARTNER_CODE_KEYS,
   PARTNER_SELLER_CODE_KEYS,
+  archiveReasonGroup,
+  buildTransferList,
+  cacheLineAge,
   classifyClients,
   isSystemTimeline,
   loadPortfolioInput,
@@ -34,18 +38,22 @@ assert.doesNotMatch(scriptSource, /--apply|--write|--execute/, "não existe modo
 // Constantes espelhadas conferidas contra o código da sincronização.
 const sync = source("../services/ultraFv3SyncService.ts");
 assert.ok(sync.includes(`const PARTNERS_CONFIG_KEY = "${PARTNERS_CONFIG_KEY}";`));
+assert.ok(sync.includes(`const PARTNERS_LAST_SEEN_CONFIG_KEY = "${PARTNERS_LAST_SEEN_CONFIG_KEY}";`), "chave da data de visto do /partners divergente");
 const codeBlock = /export const pickUltraFv3PartnerCode = [\s\S]*?\]\)\);/.exec(sync)?.[0] ?? "";
 assert.deepEqual([...codeBlock.matchAll(/"([^"]+)"/g)].map((match) => match[1]), PARTNER_CODE_KEYS, "chaves do código do parceiro divergentes");
 const sellerBlock = /const partnerSellerCodeKeys = \[[\s\S]*?\];/.exec(sync)?.[0] ?? "";
 assert.deepEqual([...sellerBlock.matchAll(/"([^"]+)"/g)].map((match) => match[1]), PARTNER_SELLER_CODE_KEYS, "chaves do vendedor do parceiro divergentes");
 assert.ok(sync.includes('value.trim().replace(/^0+(?=\\d)/, "") || value.trim();'), "normalização do código do parceiro mudou");
 assert.ok(sync.includes('return String(raw).trim().toUpperCase() === "S" ? "customer" : "not_customer";'), "regra do IDN_CLIENTE mudou");
-assert.ok(sync.includes("await cachePartnerRows(rows);\n      const configuredSellers"), "cache do /partners deve guardar as linhas antes do filtro IDN_CLIENTE");
+const globalPartners = sync.slice(sync.indexOf("export async function syncPartners("), sync.indexOf("export async function syncPartnersByUser("));
+assert.ok(globalPartners.includes("await cachePartnerRows(rows);"), "cache do /partners no caminho global");
+assert.ok(globalPartners.indexOf("await cachePartnerRows(rows);") < globalPartners.indexOf("classifyPartnerCustomerFlag("), "cache do /partners deve guardar as linhas antes do filtro IDN_CLIENTE");
 assert.match(source("../services/commercialAutomationsService.ts"), /if \(client\.lastPurchaseDate\) return client\.lastPurchaseDate;\s*return parseDateValue\(readFinancialProfileRecord\(client\.financialProfile\)\.DATA_ULTFATURA\);/, "fonte da data de compra mudou");
 
 // Cada texto de evento de sistema existe no código e é reconhecido pelo script.
 const legacy = source("./erpFixLegacyDuplicates.ts");
 const communications = source("../services/communications/communicationIntegrationService.ts");
+const cleanupArchive = source("../services/portfolioCleanupArchive.ts");
 const systemSamples: [string, string, string][] = [
   [sync, "Cliente atualizado via UltraFV3. Vendedor alterado de ${", "Cliente atualizado via UltraFV3. Vendedor alterado de Fulano para Beltrano. Oportunidades, atividades, autores e datas históricas foram preservados."],
   [sync, "fundido ao cliente principal via sincronização UltraFV3.", "Cadastro duplicado Cliente Fictício (C-1) fundido ao cliente principal via sincronização UltraFV3. Histórico e relacionamentos preservados no cadastro principal."],
@@ -56,6 +64,7 @@ const systemSamples: [string, string, string][] = [
   [legacy, "Duplicado legado arquivado automaticamente pelo saneamento UltraFV3: ${", "Duplicado legado arquivado automaticamente pelo saneamento UltraFV3: Cliente Fictício."],
   [legacy, "fundido ao cliente principal pelo saneamento UltraFV3.", "Cadastro legado duplicado Cliente Fictício (C-2) fundido ao cliente principal pelo saneamento UltraFV3. Histórico, oportunidades, atividades e timeline foram preservados no cliente principal."],
   [communications, 'const timelineDescription = "Nova mensagem recebida pelo WhatsApp oficial.";', "Nova mensagem recebida pelo WhatsApp oficial."],
+  [cleanupArchive, 'PORTFOLIO_CLEANUP_REACTIVATION_DESCRIPTION = "Cliente reativado automaticamente por nova compra no ERP";', "Cliente reativado automaticamente por nova compra no ERP"],
 ];
 for (const [file, fragment, sample] of systemSamples) {
   assert.ok(file.includes(fragment), `texto de evento de sistema mudou: ${fragment}`);
@@ -92,6 +101,8 @@ const client = (key: string, overrides: Record<string, unknown> = {}) => ({
   code: String(48000 + ++sequence),
   name: `Cliente Secreto ${key}`,
   cnpj: `00.000.000/000${sequence}-00`,
+  city: "Cidade Ficticia",
+  state: "XX",
   isArchived: false,
   archiveReason: null,
   ownerSellerId: "u-ativo",
@@ -123,6 +134,9 @@ const C = {
   desligadoProtegido: client("desligado-protegido", { ownerSellerId: "u-saiu" }),
   desligadoSemCodigo: client("desligado-sem-codigo", { ownerSellerId: "u-saiu", code: null }),
   inativoCandidato: client("inativo-candidato", { ownerSellerId: "u-inativo" }),
+  arquivadoLimpeza: client("arquivado-limpeza", { isArchived: true, archiveReason: "PORTFOLIO_CLEANUP:2026-09-01T12:00:00.000Z" }),
+  arquivadoLegado: client("arquivado-legado", { isArchived: true, archiveReason: "legacy_duplicate_cleanup" }),
+  arquivadoTextoLivre: client("arquivado-texto-livre", { isArchived: true, archiveReason: "Duplicado do Cliente Secreto X" }),
 };
 const opportunities = [
   { id: "opp-1", clientId: C.oportunidade.id, title: "Oportunidade secreta" },
@@ -154,8 +168,15 @@ const tables: Record<string, Record<string, unknown>[]> = {
     { PARCEIRO: C.timelineSistema.code, VENDEDOR: "303" },
     { PARCEIRO: C.dataInvalida.code, IDN_CLIENTE: "S" },
     { PARCEIRO: C.oportunidade.code, IDN_CLIENTE: "N", VENDEDOR_DO_PARCEIRO: "999" },
+    { PARCEIRO: C.desligadoProtegido.code, IDN_CLIENTE: "S", VENDEDOR_DO_PARCEIRO: "303" },
     "linha inválida",
-  ]) }],
+  ]) }, { key: PARTNERS_LAST_SEEN_CONFIG_KEY, value: JSON.stringify({
+    [C.semNada.code]: "2026-10-16T10:00:00.000Z",
+    [C.compraAntiga.code]: "2026-10-13T12:00:00.000Z",
+    [C.perfilAntigo.code]: "2026-09-16T12:00:00.000Z",
+    [C.desligadoProtegido.code]: "2026-10-06T12:00:00.000Z",
+    [C.dataInvalida.code]: 42,
+  }) }],
 };
 
 // Banco em memória somente leitura: só findMany/findUnique (qualquer escrita quebra).
@@ -227,7 +248,7 @@ assert.equal(verdictOf(C.semCodigoProtegido).hasErpCode, false, "código em bran
 // Resumo.
 const summary = summarizePortfolio(input, { now, departedUserNames: ["vendedor desligado ficticio", "Usuário Que Não Existe"] });
 assert.deepEqual(summary.referencia, { hojeBrasilia: "2026-10-16", compraRecenteDesde: "2024-10-16 00:00 (Brasília)" });
-assert.deepEqual(summary.clientesPorEstado, { total: 23, arquivadoOutros: 1, arquivadoPorFusao: 1, naoArquivado: 21 });
+assert.deepEqual(summary.clientesPorEstado, { total: 26, arquivadoOutros: 4, arquivadoPorFusao: 1, naoArquivado: 21 });
 
 const main = summary.naoArquivadosComCodigoErp;
 assert.equal(main.total, 18);
@@ -263,15 +284,50 @@ assert.deepEqual(summary.semCodigoErp.candidatos, { total: 2, semDataDeCompra: 2
 assert.equal(summary.semCodigoErp.protegidos.porMotivo.oportunidade, 1);
 
 const erp = summary.erpCacheParceiros;
-assert.equal(erp.linhasNoCache, 6, "linha não-objeto é ignorada");
+assert.equal(erp.linhasNoCache, 7, "linha não-objeto é ignorada");
+assert.equal(erp.linhasComDataDeVisto, 4, "data de visto que não é texto é ignorada");
 assert.equal(erp.candidatos.encontradosNoCache, 5, "código com zeros à esquerda é normalizado");
 assert.equal(erp.candidatos.ausentesDoCache, 2);
 assert.deepEqual(erp.candidatos.idnCliente, { N: 1, S: 3, ausente: 1 });
 assert.deepEqual(erp.candidatos.vendedorErp, { semCodigoDeVendedor: 1, semUsuarioNoCrm: 1, usuarioAtivo: 2, usuarioInativo: 1 });
 assert.equal(erp.candidatos.idnClienteNEVendedorSemUsuario, 1);
 assert.equal(erp.candidatos.vendedorErpDiferenteDoResponsavelNoCrm, 2, "vendedor do ERP com usuário diferente do responsável no CRM");
-assert.deepEqual(erp.protegidos.idnCliente, { N: 1 });
-assert.deepEqual(erp.protegidos.vendedorErp, { semUsuarioNoCrm: 1 });
+assert.deepEqual(erp.candidatos.idadeDaLinhaNoCache, { semDataDeVisto: 2, vistaHa1a7Dias: 1, vistaHaAte1Dia: 1, vistaHaMaisDe7Dias: 1 });
+assert.deepEqual(erp.protegidos.idnCliente, { N: 1, S: 1 });
+assert.deepEqual(erp.protegidos.vendedorErp, { semUsuarioNoCrm: 1, usuarioInativo: 1 });
+assert.deepEqual(erp.protegidos.idadeDaLinhaNoCache, { semDataDeVisto: 1, vistaHaMaisDe7Dias: 1 });
+
+// Cruzamento dos candidatos com código: IDN_CLIENTE (S / N / sem campo / ausente do cache) × tipo de candidato.
+assert.deepEqual(erp.candidatosIdnClientePorCompra, {
+  S: { total: 3, semDataDeCompra: 1, ultimaCompraHaMaisDe24Meses: 2 },
+  N: { total: 1, semDataDeCompra: 1, ultimaCompraHaMaisDe24Meses: 0 },
+  semCampoIdnCliente: { total: 1, semDataDeCompra: 1, ultimaCompraHaMaisDe24Meses: 0 },
+  ausenteDoCache: { total: 2, semDataDeCompra: 2, ultimaCompraHaMaisDe24Meses: 0 },
+});
+const crossTotal = Object.values(erp.candidatosIdnClientePorCompra).reduce((total, group) => total + group.total, 0);
+assert.equal(crossTotal, main.candidatos.total, "o cruzamento cobre todos os candidatos com código");
+
+// Arquivados por prefixo do motivo, sem IDs nem texto livre.
+assert.deepEqual(summary.arquivadosPorMotivo, {
+  total: 5,
+  porPrefixo: { "(sem motivo)": 1, "(texto livre)": 1, legacy_duplicate_cleanup: 1, "MERGED_INTO:": 1, "PORTFOLIO_CLEANUP:": 1 },
+});
+assert.equal(archiveReasonGroup("MERGED_INTO:cli-123"), "MERGED_INTO:");
+assert.equal(archiveReasonGroup("  "), "(sem motivo)");
+assert.equal(archiveReasonGroup("manual_duplicate_merge"), "manual_duplicate_merge");
+assert.equal(archiveReasonGroup("Fulano: duplicado"), "(texto livre)", "texto livre com dois-pontos não vira prefixo");
+assert.equal(archiveReasonGroup("cliente 123"), "(texto livre)");
+
+assert.equal(cacheLineAge(undefined, now), "semDataDeVisto");
+assert.equal(cacheLineAge("não é data", now), "semDataDeVisto");
+assert.equal(cacheLineAge("2026-10-15T12:00:00.000Z", now), "vistaHaAte1Dia", "exatamente 24 horas");
+assert.equal(cacheLineAge("2026-10-09T12:00:00.000Z", now), "vistaHa1a7Dias", "exatamente 7 dias");
+assert.equal(cacheLineAge("2026-10-09T11:59:59.000Z", now), "vistaHaMaisDe7Dias");
+
+// Sem registro de data de visto (cache anterior a este PR): avisa.
+const noLastSeen = summarizePortfolio({ ...input, partnerLastSeen: null }, { now, departedUserNames: [] });
+assert.ok(noLastSeen.avisos.some((line) => line.includes(PARTNERS_LAST_SEEN_CONFIG_KEY)));
+assert.deepEqual(noLastSeen.erpCacheParceiros.candidatos.idadeDaLinhaNoCache, { semDataDeVisto: 5 });
 
 // Sem cache: avisa e não quebra.
 const noCache = summarizePortfolio({ ...input, partnerCacheRows: null }, { now, departedUserNames: [] });
@@ -280,9 +336,14 @@ assert.ok(noCache.avisos.some((line) => line.includes("Sem cache")));
 
 // ---------------------------------------------------------------------------------------------
 // CLI: argumentos, client criado só depois da validação, transação READ ONLY e nada vazado.
-assert.deepEqual(parseCliArgs([]), { departedUserNames: [] });
-assert.deepEqual(parseCliArgs(["--departed-user=Fulano de Tal", "--departed-user= Beltrano "]), { departedUserNames: ["Fulano de Tal", "Beltrano"] });
-const invalidArgs = [["--apply"], ["--departed-user="], ["--departed-user=  "], ["--departed-user"], ["--departed-user=Fulano", "--departed-user=fulano"], ["Fulano"], ["--write"]];
+assert.deepEqual(parseCliArgs([]), { departedUserNames: [], listTransfers: false });
+assert.deepEqual(parseCliArgs(["--departed-user=Fulano de Tal", "--departed-user= Beltrano "]), { departedUserNames: ["Fulano de Tal", "Beltrano"], listTransfers: false });
+assert.deepEqual(parseCliArgs(["--list-transfers", "--departed-user=Fulano"]), { departedUserNames: ["Fulano"], listTransfers: true });
+const invalidArgs = [
+  ["--apply"], ["--departed-user="], ["--departed-user=  "], ["--departed-user"], ["--departed-user=Fulano", "--departed-user=fulano"], ["Fulano"], ["--write"],
+  // --list-transfers só junto com --departed-user.
+  ["--list-transfers"], ["--list-transfers", "--list-transfers", "--departed-user=Fulano"], ["--list-transfers=1", "--departed-user=Fulano"],
+];
 for (const args of invalidArgs) {
   assert.throws(() => parseCliArgs(args), /uso: simulateClientPortfolioCleanup/, JSON.stringify(args));
   let created = 0;
@@ -314,18 +375,49 @@ const fakeClient: PortfolioClient = {
   async $disconnect() { disconnected = true; },
 };
 const printed: string[] = [];
-await runCli(["--departed-user=Vendedor Desligado Ficticio"], () => fakeClient, (line) => printed.push(line), now);
+const transfersWithoutFlag: string[] = [];
+await runCli(["--departed-user=Vendedor Desligado Ficticio"], () => fakeClient, (line) => printed.push(line), now, (line) => transfersWithoutFlag.push(line));
+assert.deepEqual(transfersWithoutFlag, [], "sem --list-transfers não lista clientes");
 assert.ok(disconnected);
 assert.deepEqual(statements, ["SET TRANSACTION READ ONLY"]);
 assert.deepEqual(transactionOptions, { isolationLevel: "RepeatableRead", timeout: 120_000 });
 const output = printed.join("\n");
 assert.deepEqual(JSON.parse(output).naoArquivadosComCodigoErp.candidatos, main.candidatos);
-for (const row of [...Object.values(C), ...opportunities, ...tables.contact]) {
-  for (const value of Object.values(row)) {
-    if (typeof value !== "string" || !value.trim() || value.startsWith("u-") || value === "x") continue;
-    assert.ok(!output.includes(value), `saída vazou ${value}`);
+const assertNoClientData = (text: string) => {
+  for (const row of [...Object.values(C), ...opportunities, ...tables.contact]) {
+    for (const [key, value] of Object.entries(row)) {
+      if (typeof value !== "string" || !value.trim() || value.startsWith("u-") || value === "x") continue;
+      // Identificador de motivo de arquivamento (snake_case) sai agrupado; não é dado de cliente.
+      if (key === "archiveReason" && archiveReasonGroup(value) === value) continue;
+      assert.ok(!text.includes(value), `saída vazou ${value}`);
+    }
   }
-}
-for (const secret of ["999", "0101", "Anotação fictícia", "Cliente Secreto"]) assert.ok(!output.includes(secret), `saída vazou ${secret}`);
+  for (const secret of ["999", "0101", "Anotação fictícia", "Cliente Secreto", "2026-09-01T12"]) assert.ok(!text.includes(secret), `saída vazou ${secret}`);
+};
+assertNoClientData(output);
+
+// --list-transfers: a lista vai só para o logger de transferências (stderr); o resumo (stdout) não muda.
+statements.length = 0;
+const listedSummary: string[] = [];
+const transfers: string[] = [];
+await runCli(["--departed-user=Vendedor Desligado Ficticio", "--list-transfers"], () => fakeClient, (line) => listedSummary.push(line), now, (line) => transfers.push(line));
+assert.deepEqual(statements, ["SET TRANSACTION READ ONLY"]);
+assert.deepEqual(JSON.parse(listedSummary.join("\n")), JSON.parse(output), "o resumo é o mesmo com ou sem a lista");
+assertNoClientData(listedSummary.join("\n"));
+assert.match(transfers[0], /^--list-transfers: 2 cliente\(s\) a transferir\. Só no terminal/);
+assert.equal(transfers[1], "usuario\tcodigoErp\tnome\tcidadeUf\tmotivos\tvendedorErp\tlinhaDoCache");
+assert.deepEqual(transfers.slice(2), [
+  ["Vendedor Desligado Ficticio", C.desligadoProtegido.code, C.desligadoProtegido.name, "Cidade Ficticia/XX", "oportunidade", "303 (Vendedor Inativo Ficticio, inativo)", "vista em 2026-10-06"].join("\t"),
+  ["Vendedor Desligado Ficticio", "(sem código)", C.desligadoSemCodigo.name, "Cidade Ficticia/XX", "semCodigoErp", "(sem código ERP)", "-"].join("\t"),
+], "só os não candidatos do usuário desligado");
+assert.ok(!transfers.join("\n").includes(C.desligadoCandidato.name), "candidato não entra na lista de transferência");
+
+// Sem --list-transfers o loader nem lê nome, cidade e UF dos clientes.
+assert.equal((await loadPortfolioInput(createDb())).clients[0].name, undefined);
+const detailed = await loadPortfolioInput(createDb(), { withClientDetails: true });
+assert.equal(detailed.clients[0].name, C.semNada.name);
+assert.deepEqual(buildTransferList(detailed, { now, departedUserNames: ["Usuário Que Não Existe"] }), [], "usuário desligado inexistente: lista vazia");
+const sellerStatuses = buildTransferList({ ...detailed, partnerCacheRows: null }, { now, departedUserNames: ["Vendedor Desligado Ficticio"] }).map((row) => row.vendedorErp);
+assert.deepEqual(sellerStatuses, ["(ausente do cache)", "(sem código ERP)"]);
 
 console.log("simulateClientPortfolioCleanup tests passed");

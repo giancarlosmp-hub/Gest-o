@@ -90,6 +90,7 @@ setModel("clientCodeAudit", { create: async ({ data }: Row) => data });
 setModel("user", {
   findFirst: async ({ where }: Row) => sellers.find((seller) => seller.id === where.id && seller.isActive === where.isActive) ?? null,
   findUnique: async ({ where }: Row) => sellers.find((seller) => seller.id === where.id) ?? null,
+  findMany: async ({ where }: Row) => sellers.filter((seller) => seller.isActive === where.isActive && seller.erpCode),
 });
 setModel("tenantMembership", { findMany: async () => [{ tenantId: TENANT }] });
 setModel("appConfig", {
