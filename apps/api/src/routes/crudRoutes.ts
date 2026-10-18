@@ -101,6 +101,7 @@ import { ensureInitialKnowledgeDocuments, getKnowledgeContextForAi, searchKnowle
 import { formatTenantReadPilotMarker, isTenantReadPilotActive, runClientListShadowPilot } from "../tenancy/tenantReadPilot.js";
 import { PrismaTenantControlPlaneReader } from "../tenancy/prismaTenantControlPlaneReader.js";
 import type { ClientTenantDelegate } from "../tenancy/clientTenantRepository.js";
+import { isPortfolioCleanupArchiveReason, PORTFOLIO_CLEANUP_ARCHIVED_OPPORTUNITY_MESSAGE } from "../services/portfolioCleanupArchive.js";
 
 const router = Router();
 
@@ -7857,6 +7858,12 @@ router.post("/opportunities", validateBody(opportunitySchema), async (req, res) 
   const expectedCloseDate = (req.body.expectedCloseDate || req.body.expectedReturnDate) as string | undefined;
   if (!validateDateOrder(proposalDate, expectedCloseDate)) {
     return res.status(400).json({ message: "expectedReturnDate não pode ser anterior a proposalEntryDate" });
+  }
+
+  // Cliente arquivado não recebe oportunidade nova: o gerente reativa o cadastro antes.
+  const client = await prisma.client.findUnique({ where: { id: req.body.clientId }, select: { isArchived: true, archiveReason: true } });
+  if (client?.isArchived) {
+    return res.status(409).json({ message: isPortfolioCleanupArchiveReason(client.archiveReason) ? PORTFOLIO_CLEANUP_ARCHIVED_OPPORTUNITY_MESSAGE : "Cliente arquivado. Peça ao gerente para reativar o cadastro." });
   }
 
   const ownerSellerId = resolveOwnerId(req, req.body.ownerSellerId);

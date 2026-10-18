@@ -22,7 +22,7 @@ assert.equal(archive.parsePortfolioCleanupArchivedAt("MERGED_INTO:cli-1"), null)
 assert.equal(archive.isPortfolioCleanupArchiveReason("portfolio_cleanup:2026-09-01T12:00:00Z"), false, "prefixo exato");
 assert.equal(archive.isPortfolioCleanupArchiveReason(null), false);
 
-const planOf = (raw: unknown, reason = CLEANUP_REASON) => archive.planPortfolioCleanupPurchase(reason, raw);
+const planOf = (raw: unknown, reason = CLEANUP_REASON, erpPortfolioCustomer = true) => archive.planPortfolioCleanupPurchase(reason, raw, erpPortfolioCustomer);
 assert.equal(planOf("2026-09-02T03:00:00.000Z").action, "reactivate", "00:00 do dia seguinte em Brasília");
 assert.equal(planOf("2026-09-02T02:59:59.000Z").action, "updatePurchaseDate", "23:59 do mesmo dia em Brasília");
 assert.equal(planOf("2026-09-01T20:00:00.000Z").action, "updatePurchaseDate", "mesmo dia, mais tarde: não é posterior");
@@ -33,6 +33,12 @@ assert.deepEqual(planOf("não é data"), { action: "none", reason: "semDataDeCom
 const unreadable = planOf("2026-10-01T03:00:00.000Z", "PORTFOLIO_CLEANUP:sem-data");
 assert.equal(unreadable.action, "updatePurchaseDate");
 assert.equal(unreadable.action === "updatePurchaseDate" && unreadable.reason, "dataDoArquivamentoIlegivel", "sem data no motivo: na dúvida, não reativa");
+// Compra posterior de quem o ERP não diz ser cliente da carteira (ex.: fornecedor): só a data da compra.
+const notCustomer = planOf("2026-09-02T03:00:00.000Z", CLEANUP_REASON, false);
+assert.equal(notCustomer.action, "updatePurchaseDate");
+assert.equal(notCustomer.action === "updatePurchaseDate" && notCustomer.reason, "naoEClienteDaCarteiraNoErp");
+const earlierNotCustomer = planOf("2025-01-10T03:00:00.000Z", CLEANUP_REASON, false);
+assert.equal(earlierNotCustomer.action === "updatePurchaseDate" && earlierNotCustomer.reason, "compraNaoPosterior");
 
 // ---------------------------------------------------------------------------------------------------
 // Prisma e ERP em memória.
@@ -163,7 +169,8 @@ const timelineOf = (id: string) => timeline.filter((event) => event.clientId ===
 const PARTNER_REACTIVATION = "Cliente reativado automaticamente pela sincronização UltraFV3 por corresponder ao cadastro principal do ERP.";
 
 // ---------------------------------------------------------------------------------------------------
-// 1) Sincronização cadastral (/partners): arquivado pela limpeza não reativa; outros motivos como hoje.
+// 1) Sincronização cadastral (/partners): arquivado pela limpeza reativa só com IDN_CLIENTE = S e vendedor do
+//    ERP de usuário ativo; senão o cadastro é atualizado e o arquivamento mantido. Outros motivos como hoje.
 // ---------------------------------------------------------------------------------------------------
 const partner = (code: string, name: string, flags: Row = {}) =>
   ({ PARCEIRO: code, RAZAO_SOCIAL: name, CIDADE: "Cidade Nova Ficticia", UF: "SC", VENDEDOR_DO_PARCEIRO: "77", IDN_CLIENTE: "S", ...flags });
@@ -185,6 +192,8 @@ const resetPartnerScenario = () => {
       isArchived: true, archiveReason: CLEANUP_REASON, name: "Cliente Documento Ficticio", nameNormalized: "cliente documento ficticio" }),
     baseClient({ id: "limpeza-identidade", code: null, isArchived: true, archiveReason: CLEANUP_REASON, name: "Cliente Identidade Ficticio",
       nameNormalized: "cliente identidade ficticio", city: "Cidade Nova Ficticia", cityNormalized: "cidade nova ficticia", state: "SC" }),
+    baseClient({ id: "limpeza-vendedor-inativo", code: "8009", isArchived: true, archiveReason: CLEANUP_REASON, ownerSellerId: "seller-saiu" }),
+    baseClient({ id: "limpeza-fornecedor", code: "8010", isArchived: true, archiveReason: CLEANUP_REASON, name: "Fornecedor Arquivado Ficticio" }),
   ];
   partnerRows.splice(0, partnerRows.length,
     partner("8001", "Cliente Limpeza Ficticio Renomeado"),
@@ -197,29 +206,44 @@ const resetPartnerScenario = () => {
     partner("8008", "Cliente Vendedor Desligado Ficticio", { VENDEDOR_DO_PARCEIRO: "066" }),
     partner("8101", "Cliente Documento Ficticio", { CNPJ: "11.222.333/0001-81" }),
     partner("8102", "Cliente Identidade Ficticio"),
+    partner("8009", "Cliente Vendedor Inativo Renomeado", { VENDEDOR_DO_PARCEIRO: "066" }),
+    partner("8010", "Fornecedor Arquivado Renomeado", { IDN_CLIENTE: "N" }),
   );
 };
-const expectPartnerOutcome = (label: string) => {
-  const kept = byId("limpeza");
-  assert.equal(kept.isArchived, true, `${label}: arquivado pela limpeza continua arquivado`);
-  assert.equal(kept.archiveReason, CLEANUP_REASON, `${label}: motivo mantido`);
-  assert.equal(kept.name, "Cliente Limpeza Ficticio Renomeado", `${label}: dados cadastrais atualizados`);
-  assert.equal(kept.city, "Cidade Nova Ficticia", label);
-  assert.equal(kept.ownerSellerId, "seller-novo", `${label}: vendedor do ERP atualizado`);
-  assert.ok(!timelineOf("limpeza").includes(PARTNER_REACTIVATION), `${label}: sem evento de reativação`);
+const PORTFOLIO_PARTNER_REACTIVATION = archive.PORTFOLIO_CLEANUP_PARTNER_REACTIVATION_DESCRIPTION;
+const expectPartnerOutcome = (label: string, path: "porVendedor" | "global") => {
+  // IDN_CLIENTE = S e vendedor do ERP (77) de usuário ativo: reativa, com timeline e auditoria próprias.
+  const reactivated = byId("limpeza");
+  assert.equal(reactivated.name, "Cliente Limpeza Ficticio Renomeado", `${label}: dados cadastrais atualizados`);
+  assert.equal(reactivated.city, "Cidade Nova Ficticia", label);
+  assert.equal(reactivated.ownerSellerId, "seller-novo", `${label}: vendedor do ERP atualizado`);
   // Duplicidade: o arquivado é encontrado (código, documento, nome + cidade + UF) e nenhum cliente novo é criado.
   assert.equal(clients.filter((client) => String(client.id).startsWith("created-")).length, 0, `${label}: nenhum cliente novo`);
   for (const [id, code] of [["limpeza", "8001"], ["limpeza-documento", "8101"], ["limpeza-identidade", "8102"]]) {
     const matched = clients.filter((client) => client.code === code);
     assert.deepEqual(matched.map((client) => client.id), [id], `${label}: ${code} casou com o arquivado ${id}`);
-    assert.equal(matched[0].isArchived, true, `${label}: ${id} segue arquivado`);
-    assert.equal(matched[0].archiveReason, CLEANUP_REASON, label);
-    assert.ok(!timelineOf(id).includes(PARTNER_REACTIVATION), label);
+    assert.equal(matched[0].isArchived, false, `${label}: ${id} reativado (o ERP indica cliente da carteira)`);
+    assert.equal(matched[0].archiveReason, null, label);
+    assert.ok(timelineOf(id).includes(PORTFOLIO_PARTNER_REACTIVATION), `${label}: ${id} com o evento da reativação pela carteira`);
+    assert.ok(!timelineOf(id).includes(PARTNER_REACTIVATION), `${label}: ${id} sem o evento genérico`);
+    const audit = audits.filter((row) => row.clientId === id && row.origin === archive.PORTFOLIO_CLEANUP_REACTIVATION_AUDIT_ORIGIN);
+    assert.equal(audit.length, 1, `${label}: ${id} auditado`);
+    assert.deepEqual(audit[0].metadata, { operation: "portfolio_cleanup_reactivation", trigger: "partners", archivedAt: ARCHIVED_AT.toISOString() }, label);
   }
+  // Vendedor do ERP de usuário inativo: por vendedor, atualiza o cadastro e mantém o arquivamento; no
+  // caminho global a linha nem é gravada (sem vendedor ativo para o tenant).
+  const inactiveSeller = byId("limpeza-vendedor-inativo");
+  assert.equal(inactiveSeller.isArchived, true, `${label}: vendedor do ERP inativo não reativa`);
+  assert.equal(inactiveSeller.archiveReason, CLEANUP_REASON, label);
+  assert.equal(inactiveSeller.name, path === "porVendedor" ? "Cliente Vendedor Inativo Renomeado" : "Cliente Ficticio", label);
+  assert.ok(!timelineOf("limpeza-vendedor-inativo").some((text) => text.startsWith("Cliente reativado")), `${label}: sem evento de reativação`);
+  // IDN_CLIENTE = N: não é gravado nem reativado.
+  assert.equal(byId("limpeza-fornecedor").isArchived, true, `${label}: fornecedor segue arquivado`);
+  assert.equal(byId("limpeza-fornecedor").name, "Fornecedor Arquivado Ficticio", label);
   for (const id of ["legado", "manual", "sem-motivo"]) {
     assert.equal(byId(id).isArchived, false, `${label}: ${id} reativado como hoje`);
     assert.equal(byId(id).archiveReason, null, label);
-    assert.ok(timelineOf(id).includes(PARTNER_REACTIVATION), `${label}: ${id} com evento de reativação`);
+    assert.deepEqual(timelineOf(id), [PARTNER_REACTIVATION], `${label}: ${id} com o evento de reativação de hoje`);
   }
 };
 const lastSeen = () => JSON.parse(appConfig.get("erp.ultrafv3.partners.lastSeenAt") ?? "{}") as Record<string, string>;
@@ -229,8 +253,9 @@ const lastSeen = () => JSON.parse(appConfig.get("erp.ultrafv3.partners.lastSeenA
   resetPartnerScenario();
   const before = Date.now();
   const result = await sync.syncPartnersByUser("seller-novo");
-  expectPartnerOutcome("por vendedor");
-  assert.equal(result.diagnostics?.portfolioCleanupKeptArchived, 3);
+  expectPartnerOutcome("por vendedor", "porVendedor");
+  assert.equal(result.diagnostics?.portfolioCleanupReactivated, 3);
+  assert.equal(result.diagnostics?.portfolioCleanupKeptArchived, 1);
   // Diagnóstico (só conta): 8005 com N; 8006 com vendedor 999 e 8008 com vendedor desligado. 8007 não existe no CRM.
   assert.equal(result.diagnostics?.existingClientsNotCustomer, 1);
   assert.equal(result.diagnostics?.existingClientsSellerWithoutActiveUser, 2);
@@ -238,7 +263,7 @@ const lastSeen = () => JSON.parse(appConfig.get("erp.ultrafv3.partners.lastSeenA
   assert.equal(runs.at(-1)!.metrics.existingClientsNotCustomer, 1, "contagens no Histórico da rodada");
   // Cache: data de visto por parceiro, inclusive os N (o cache guarda o retorno bruto).
   const seen = lastSeen();
-  assert.deepEqual(Object.keys(seen).sort(), ["8001", "8002", "8003", "8004", "8005", "8006", "8007", "8008", "8101", "8102"]);
+  assert.deepEqual(Object.keys(seen).sort(), ["8001", "8002", "8003", "8004", "8005", "8006", "8007", "8008", "8009", "8010", "8101", "8102"]);
   assert.ok(Object.values(seen).every((value) => Date.parse(value) >= before - 1000));
 
   // Próxima rodada sem 8001: a linha do cache fica, mas a data de visto não avança.
@@ -271,8 +296,9 @@ const lastSeen = () => JSON.parse(appConfig.get("erp.ultrafv3.partners.lastSeenA
   // Caminho global (credencial de referência, vendedor pelo VENDEDOR_DO_PARCEIRO).
   resetPartnerScenario();
   const result = await sync.syncPartners();
-  expectPartnerOutcome("global");
-  assert.equal(result.diagnostics?.portfolioCleanupKeptArchived, 3);
+  expectPartnerOutcome("global", "global");
+  assert.equal(result.diagnostics?.portfolioCleanupReactivated, 3);
+  assert.equal(result.diagnostics?.portfolioCleanupKeptArchived ?? 0, 0);
   assert.equal(result.diagnostics?.existingClientsNotCustomer, 1);
   assert.equal(result.diagnostics?.existingClientsSellerWithoutActiveUser, 2);
 }
@@ -281,13 +307,16 @@ const lastSeen = () => JSON.parse(appConfig.get("erp.ultrafv3.partners.lastSeenA
   // Todos os vendedores: contagens somadas no resumo.
   resetPartnerScenario();
   const summary = await sync.syncPartnersForAllConfiguredSellers();
-  assert.equal(summary.portfolioCleanupKeptArchived, 3);
+  expectPartnerOutcome("todos os vendedores", "porVendedor");
+  assert.equal(summary.portfolioCleanupReactivated, 3);
+  assert.equal(summary.portfolioCleanupKeptArchived, 1);
   assert.equal(summary.existingClientsNotCustomer, 1);
   assert.equal(summary.existingClientsSellerWithoutActiveUser, 2);
 }
 
 // ---------------------------------------------------------------------------------------------------
-// 2) Sincronização financeira: reativa só com compra posterior ao arquivamento.
+// 2) Sincronização financeira: reativa só com compra posterior ao arquivamento E linha do cache do /partners
+//    com IDN_CLIENTE = S e vendedor do ERP de usuário ativo. Fora isso, só a data da última compra.
 // ---------------------------------------------------------------------------------------------------
 const REACTIVATION = archive.PORTFOLIO_CLEANUP_REACTIVATION_DESCRIPTION;
 const resetFinancialScenario = () => {
@@ -303,7 +332,16 @@ const resetFinancialScenario = () => {
     baseClient({ id: "ativo", code: "9006" }),
     baseClient({ id: "sem-data-de-compra", code: "9007", isArchived: true, archiveReason: CLEANUP_REASON }),
     baseClient({ id: "fusao", code: "9008", isArchived: true, archiveReason: "MERGED_INTO:ativo" }),
+    baseClient({ id: "fornecedor-comprou", code: "9009", isArchived: true, archiveReason: CLEANUP_REASON }),
+    baseClient({ id: "vendedor-inativo-comprou", code: "9010", isArchived: true, archiveReason: CLEANUP_REASON }),
+    baseClient({ id: "ausente-do-cache-comprou", code: "9011", isArchived: true, archiveReason: CLEANUP_REASON }),
   ];
+  appConfig.set("erp.ultrafv3.partners", JSON.stringify([
+    { PARCEIRO: "09001", IDN_CLIENTE: "S", VENDEDOR_DO_PARCEIRO: "077" },
+    { PARCEIRO: "9002", IDN_CLIENTE: "S", VENDEDOR_DO_PARCEIRO: "77" },
+    { PARCEIRO: "9009", IDN_CLIENTE: "N", VENDEDOR_DO_PARCEIRO: "77" },
+    { PARCEIRO: "9010", IDN_CLIENTE: "S", VENDEDOR_DO_PARCEIRO: "66" },
+  ]));
   financialRows.splice(0, financialRows.length,
     { PARCEIRO: "9001", DATA_ULTFATURA: "2026-09-02T03:00:00.000Z", VALOR_ULTFATURA: 10, VALOR_MEDIO: 1 },
     { PARCEIRO: "9002", DATA_ULTFATURA: "2026-09-01T20:00:00.000Z", VALOR_ULTFATURA: 10 },
@@ -313,6 +351,9 @@ const resetFinancialScenario = () => {
     { PARCEIRO: "9006", DATA_ULTFATURA: "2026-10-01T03:00:00.000Z", VALOR_ULTFATURA: 25, VALOR_MEDIO: 7 },
     { PARCEIRO: "9007", VALOR_MEDIO: 3 },
     { PARCEIRO: "09008", DATA_ULTFATURA: "2026-10-01T03:00:00.000Z" },
+    { PARCEIRO: "9009", DATA_ULTFATURA: "2026-10-01T03:00:00.000Z", VALOR_ULTFATURA: 10 },
+    { PARCEIRO: "9010", DATA_ULTFATURA: "2026-10-01T03:00:00.000Z", VALOR_ULTFATURA: 10 },
+    { PARCEIRO: "9011", DATA_ULTFATURA: "2026-10-01T03:00:00.000Z", VALOR_ULTFATURA: 10 },
   );
 };
 const expectFinancialOutcome = (label: string, diagnostics: Record<string, unknown> | undefined) => {
@@ -326,9 +367,13 @@ const expectFinancialOutcome = (label: string, diagnostics: Record<string, unkno
   const audit = audits.filter((row) => row.clientId === "compra-posterior");
   assert.equal(audit.length, 1, `${label}: auditoria`);
   assert.equal(audit[0].origin, archive.PORTFOLIO_CLEANUP_REACTIVATION_AUDIT_ORIGIN);
-  assert.deepEqual(audit[0].metadata, { operation: "portfolio_cleanup_reactivation", archivedAt: ARCHIVED_AT.toISOString(), lastPurchaseDate: "2026-09-02T03:00:00.000Z" });
+  assert.deepEqual(audit[0].metadata, { operation: "portfolio_cleanup_reactivation", trigger: "financialProfiles", archivedAt: ARCHIVED_AT.toISOString(), lastPurchaseDate: "2026-09-02T03:00:00.000Z" });
 
-  for (const [id, purchase] of [["compra-mesmo-dia", "2026-09-01T20:00:00.000Z"], ["compra-anterior", "2025-01-10T03:00:00.000Z"], ["motivo-sem-data", "2026-10-01T03:00:00.000Z"]]) {
+  for (const [id, purchase] of [
+    ["compra-mesmo-dia", "2026-09-01T20:00:00.000Z"], ["compra-anterior", "2025-01-10T03:00:00.000Z"], ["motivo-sem-data", "2026-10-01T03:00:00.000Z"],
+    // Compra posterior, mas o ERP não diz que é cliente da carteira: IDN_CLIENTE = N, vendedor inativo, ausente do cache.
+    ["fornecedor-comprou", "2026-10-01T03:00:00.000Z"], ["vendedor-inativo-comprou", "2026-10-01T03:00:00.000Z"], ["ausente-do-cache-comprou", "2026-10-01T03:00:00.000Z"],
+  ]) {
     const kept = byId(id);
     assert.equal(kept.isArchived, true, `${label}: ${id} não reativa`);
     assert.equal(kept.archiveReason, clients.find((client) => client.id === id)!.archiveReason, label);
@@ -346,11 +391,12 @@ const expectFinancialOutcome = (label: string, diagnostics: Record<string, unkno
   assert.deepEqual(byId("ativo").financialProfile, financialRows.find((row) => row.PARCEIRO === "9006"), `${label}: não arquivado como hoje`);
   assert.equal(byId("ativo").lastPurchaseValue, 25);
   assert.equal(audits.length, 1, `${label}: só a reativação audita`);
-  assert.equal(diagnostics?.portfolioCleanupArchivedMatched, 5, label);
+  assert.equal(diagnostics?.portfolioCleanupArchivedMatched, 8, label);
   assert.equal(diagnostics?.portfolioCleanupReactivated, 1, label);
-  assert.equal(diagnostics?.portfolioCleanupPurchaseDateUpdated, 4, label);
+  assert.equal(diagnostics?.portfolioCleanupPurchaseDateUpdated, 7, label);
   assert.equal(diagnostics?.portfolioCleanupWithoutPurchaseDate, 1, label);
   assert.equal(diagnostics?.portfolioCleanupArchiveDateUnreadable, 1, label);
+  assert.equal(diagnostics?.portfolioCleanupNotPortfolioCustomer, 3, label);
 };
 
 {
@@ -392,4 +438,4 @@ const expectFinancialOutcome = (label: string, diagnostics: Record<string, unkno
 }
 
 await (prisma as any).$disconnect?.();
-console.log("PORTFOLIO_CLEANUP_REACTIVATION=PASS partners_keep_archive=PASS other_reasons_unchanged=PASS later_purchase_reactivates=PASS earlier_or_same_day_kept=PASS round_counts=PASS last_seen_cache=PASS");
+console.log("PORTFOLIO_CLEANUP_REACTIVATION=PASS partners_portfolio_customer_reactivates=PASS partners_keep_archive=PASS other_reasons_unchanged=PASS later_purchase_portfolio_customer_reactivates=PASS supplier_purchase_kept=PASS earlier_or_same_day_kept=PASS round_counts=PASS last_seen_cache=PASS");

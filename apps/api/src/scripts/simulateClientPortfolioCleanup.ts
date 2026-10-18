@@ -42,6 +42,8 @@ export const SYSTEM_TIMELINE_PATTERNS: RegExp[] = [
   /^Tenant comprovado e adotado por sincronização UltraFV3 autenticada\./,
   /^Cliente reativado automaticamente pela sincronização UltraFV3 /,
   /^Cliente reativado automaticamente por nova compra no ERP/,
+  /^Cliente reativado automaticamente: o ERP voltou a indicar cliente da carteira/,
+  /^Cliente arquivado pela limpeza da carteira \(regra [ab]\)$/,
   /^Duplicado legado arquivado automaticamente pelo saneamento UltraFV3/,
   /^Cadastro legado duplicado .* fundido ao cliente principal pelo saneamento UltraFV3\./,
   /^Nova mensagem recebida pelo WhatsApp oficial\.$/,

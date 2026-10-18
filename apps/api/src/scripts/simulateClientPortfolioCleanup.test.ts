@@ -65,12 +65,15 @@ const systemSamples: [string, string, string][] = [
   [legacy, "fundido ao cliente principal pelo saneamento UltraFV3.", "Cadastro legado duplicado Cliente Fictício (C-2) fundido ao cliente principal pelo saneamento UltraFV3. Histórico, oportunidades, atividades e timeline foram preservados no cliente principal."],
   [communications, 'const timelineDescription = "Nova mensagem recebida pelo WhatsApp oficial.";', "Nova mensagem recebida pelo WhatsApp oficial."],
   [cleanupArchive, 'PORTFOLIO_CLEANUP_REACTIVATION_DESCRIPTION = "Cliente reativado automaticamente por nova compra no ERP";', "Cliente reativado automaticamente por nova compra no ERP"],
+  [cleanupArchive, 'PORTFOLIO_CLEANUP_PARTNER_REACTIVATION_DESCRIPTION = "Cliente reativado automaticamente: o ERP voltou a indicar cliente da carteira";', "Cliente reativado automaticamente: o ERP voltou a indicar cliente da carteira"],
+  [cleanupArchive, 'PORTFOLIO_CLEANUP_ARCHIVE_TIMELINE_PREFIX = "Cliente arquivado pela limpeza da carteira (regra ";', "Cliente arquivado pela limpeza da carteira (regra a)"],
+  [cleanupArchive, "`${PORTFOLIO_CLEANUP_ARCHIVE_TIMELINE_PREFIX}${rule})`", "Cliente arquivado pela limpeza da carteira (regra b)"],
 ];
 for (const [file, fragment, sample] of systemSamples) {
   assert.ok(file.includes(fragment), `texto de evento de sistema mudou: ${fragment}`);
   assert.ok(isSystemTimeline(sample), `não reconheceu evento de sistema: ${sample}`);
 }
-for (const human of ["Contato via WhatsApp", "Atividade criada: visita", "Anotação fictícia do vendedor", "Cliente atualizado via UltraFV3 manualmente", "Nova mensagem recebida pelo WhatsApp oficial. Resposta do vendedor"]) {
+for (const human of ["Cliente arquivado pela limpeza da carteira (regra c)", "Contato via WhatsApp", "Atividade criada: visita", "Anotação fictícia do vendedor", "Cliente atualizado via UltraFV3 manualmente", "Nova mensagem recebida pelo WhatsApp oficial. Resposta do vendedor"]) {
   assert.equal(isSystemTimeline(human), false, `evento humano tratado como sistema: ${human}`);
 }
 
