@@ -18,6 +18,7 @@ import { buildDuplicateClientMessage, checkClientDuplicate } from "../lib/client
 import { canManageArchivedClients, clientArchiveBadgeLabel, isPortfolioCleanupArchivedClient } from "../lib/clientArchiveStatus";
 import { getApiErrorMessage } from "../lib/apiError";
 import { portfolioStatusBadgeClass } from "../lib/portfolioStatusBadge";
+import { EMPTY_CLIENT_QUICK_FILTERS, buildClientListParams, ownerSellerIdFromUrl, withUrlFilters } from "../lib/clientListFilters";
 
 type CrudSimplePageProps = {
   endpoint: string;
@@ -281,13 +282,14 @@ export default function CrudSimplePage({
   const [debouncedSearch, setDebouncedSearch] = useState("");
   // Situação da carteira vem de ?status= (links do donut do Dashboard); valor inválido é ignorado.
   const urlPortfolioStatus = endpoint === "/clients" && isPortfolioStatus(searchParams.get("status")) ? searchParams.get("status")! : "";
+  // Vendedor vem de ?ownerSellerId= (donut do Dashboard com vendedor escolhido); só gerente e diretor.
+  const urlOwnerSellerId = endpoint === "/clients" ? ownerSellerIdFromUrl(searchParams, user?.role) : "";
   const [quickFilters, setQuickFilters] = useState({
-    uf: "",
-    region: "",
-    clientType: "",
-    ownerSellerId: "",
+    ...EMPTY_CLIENT_QUICK_FILTERS,
+    ownerSellerId: urlOwnerSellerId,
     portfolioStatus: urlPortfolioStatus
   });
+  const [clientFilterOptions, setClientFilterOptions] = useState<{ ufs: string[]; regions: string[] }>({ ufs: [], regions: [] });
   const [userStatusFilter, setUserStatusFilter] = useState<"active" | "inactive" | "all">("active");
   const [showArchived, setShowArchived] = useState(false);
 
@@ -351,18 +353,14 @@ export default function CrudSimplePage({
     setError(null);
     setIsApplyingFilters(true);
 
-    const params: Record<string, string | number> = {
+    const params = buildClientListParams({
       page,
-      pageSize
-    };
-
-    if (debouncedSearch) params.q = debouncedSearch;
-    if (quickFilters.uf) params.state = quickFilters.uf;
-    if (quickFilters.region) params.region = quickFilters.region;
-    if (quickFilters.clientType) params.clientType = quickFilters.clientType;
-    if (canFilterBySeller && quickFilters.ownerSellerId) params.ownerSellerId = quickFilters.ownerSellerId;
-    if (canShowArchived && showArchived) params.includeArchived = 1;
-    if (quickFilters.portfolioStatus) params.status = quickFilters.portfolioStatus;
+      pageSize,
+      search: debouncedSearch,
+      filters: quickFilters,
+      canFilterBySeller,
+      includeArchived: canShowArchived && showArchived
+    });
 
     try {
       const response = await api.get(endpoint, { params });
@@ -438,24 +436,39 @@ export default function CrudSimplePage({
     userStatusFilter
   ]);
 
-  // URL e filtro de situação andam juntos: voltar/avançar no navegador muda o filtro e o filtro muda a URL.
+  // URL e filtros de situação e vendedor andam juntos: voltar/avançar no navegador muda o filtro e o filtro muda a URL.
   useEffect(() => {
     if (!isClientsPage) return;
     setQuickFilters((prev) => (prev.portfolioStatus === urlPortfolioStatus ? prev : { ...prev, portfolioStatus: urlPortfolioStatus }));
   }, [isClientsPage, urlPortfolioStatus]);
 
+  useEffect(() => {
+    if (!isClientsPage) return;
+    setQuickFilters((prev) => (prev.ownerSellerId === urlOwnerSellerId ? prev : { ...prev, ownerSellerId: urlOwnerSellerId }));
+  }, [isClientsPage, urlOwnerSellerId]);
+
+  // Uma chamada só por mudança: duas chamadas seguidas de setSearchParams se sobrescrevem.
+  const updateUrlFilters = (values: Record<string, string>) => {
+    setSearchParams((prev) => withUrlFilters(prev, values), { replace: true });
+  };
+
   const changePortfolioStatus = (value: string) => {
     setQuickFilters((prev) => ({ ...prev, portfolioStatus: value }));
-    setSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        if (value) next.set("status", value);
-        else next.delete("status");
-        return next;
-      },
-      { replace: true }
-    );
+    updateUrlFilters({ status: value });
   };
+
+  const changeOwnerSellerId = (value: string) => {
+    setQuickFilters((prev) => ({ ...prev, ownerSellerId: value }));
+    updateUrlFilters({ ownerSellerId: value });
+  };
+
+  useEffect(() => {
+    if (!isClientsPage) return;
+    api
+      .get<{ ufs?: string[]; regions?: string[] }>("/clients/filter-options")
+      .then((response) => setClientFilterOptions({ ufs: response.data?.ufs ?? [], regions: response.data?.regions ?? [] }))
+      .catch(() => setClientFilterOptions({ ufs: [], regions: [] }));
+  }, [isClientsPage]);
 
   useEffect(() => {
     if (!isClientsPage || !canFilterBySeller) {
@@ -482,36 +495,6 @@ export default function CrudSimplePage({
 
   const filterOptions = useMemo(
     () => ({
-      ufs: [
-        "AC",
-        "AL",
-        "AP",
-        "AM",
-        "BA",
-        "CE",
-        "DF",
-        "ES",
-        "GO",
-        "MA",
-        "MT",
-        "MS",
-        "MG",
-        "PA",
-        "PB",
-        "PR",
-        "PE",
-        "PI",
-        "RJ",
-        "RN",
-        "RS",
-        "RO",
-        "RR",
-        "SC",
-        "SP",
-        "SE",
-        "TO"
-      ],
-      regions: ["Norte", "Nordeste", "Centro-Oeste", "Sudeste", "Sul"],
       clientTypes: ["PJ", "PF"]
     }),
     []
@@ -567,8 +550,8 @@ export default function CrudSimplePage({
   const clearClientFilters = () => {
     setSearch("");
     setDebouncedSearch("");
-    setQuickFilters({ uf: "", region: "", clientType: "", ownerSellerId: "", portfolioStatus: "" });
-    changePortfolioStatus("");
+    setQuickFilters(EMPTY_CLIENT_QUICK_FILTERS);
+    updateUrlFilters({ status: "", ownerSellerId: "" });
     setShowArchived(false);
     setPage(1);
   };
@@ -1954,9 +1937,9 @@ export default function CrudSimplePage({
               onChange={(e) => setQuickFilters((prev) => ({ ...prev, uf: e.target.value }))}
             >
               <option value="">UF (todas)</option>
-              {filterOptions.ufs.map((uf) => (
+              {clientFilterOptions.ufs.map((uf) => (
                 <option key={uf} value={uf}>
-                  {uf}
+                  {uf === "NI" ? "NI (não informada)" : uf}
                 </option>
               ))}
             </select>
@@ -1966,7 +1949,7 @@ export default function CrudSimplePage({
               onChange={(e) => setQuickFilters((prev) => ({ ...prev, region: e.target.value }))}
             >
               <option value="">Região (todas)</option>
-              {filterOptions.regions.map((region) => (
+              {clientFilterOptions.regions.map((region) => (
                 <option key={region} value={region}>
                   {region}
                 </option>
@@ -1989,7 +1972,7 @@ export default function CrudSimplePage({
               <select
                 className="rounded-lg border border-slate-300 px-3 py-2"
                 value={quickFilters.ownerSellerId}
-                onChange={(e) => setQuickFilters((prev) => ({ ...prev, ownerSellerId: e.target.value }))}
+                onChange={(e) => changeOwnerSellerId(e.target.value)}
               >
                 <option value="">Vendedor (todos)</option>
                 {users.map((seller) => (

@@ -4015,6 +4015,26 @@ router.get("/clients/alerts/cooling", async (req, res) => {
   return res.json({ count, clients, items: clients, days, generatedAt: new Date().toISOString() });
 });
 
+// Valores distintos sem vazios; maiúsculas/minúsculas iguais viram uma opção só (o filtro da lista é insensível).
+const distinctFilterValues = (values: Array<string | null>) => {
+  const byKey = new Map<string, string>();
+  for (const value of values) {
+    const trimmed = String(value ?? "").trim();
+    if (trimmed && !byKey.has(trimmed.toLowerCase())) byKey.set(trimmed.toLowerCase(), trimmed);
+  }
+  return [...byKey.values()].sort((a, b) => a.localeCompare(b, "pt-BR"));
+};
+
+// Opções dos filtros de UF e Região da lista de clientes: o que está gravado na carteira visível (só não arquivados).
+router.get("/clients/filter-options", async (req, res) => {
+  const where: Prisma.ClientWhereInput = { ...sellerWhere(req), isArchived: false };
+  const [states, regions] = await Promise.all([
+    prisma.client.findMany({ where, distinct: ["state"], select: { state: true } }),
+    prisma.client.findMany({ where, distinct: ["region"], select: { region: true } })
+  ]);
+  return res.json({ ufs: distinctFilterValues(states.map((row) => row.state)), regions: distinctFilterValues(regions.map((row) => row.region)) });
+});
+
 router.get("/clients", async (req, res) => {
   const search = String(req.query.q || "").trim();
   const state = String(req.query.uf || "").trim();

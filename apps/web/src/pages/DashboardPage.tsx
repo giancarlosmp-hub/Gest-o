@@ -37,6 +37,7 @@ import { DASHBOARD_REFRESH_EVENT } from "../lib/dashboardRefresh";
 import { normalizeActivityType, toLabel } from "../constants/activityTypes";
 import DonutLegendChips from "../components/DonutLegendChips";
 import { brazilMonthKey, brazilTodayKey } from "../lib/brazilDate";
+import { portfolioStatusClientsPath } from "../lib/clientListFilters";
 
 ChartJS.register(
   CategoryScale,
@@ -661,10 +662,10 @@ export default function DashboardPage() {
     () =>
       buildInteractiveDoughnutOptions(
         {
-          0: "/clientes?status=ativo",
-          1: "/clientes?status=inativoRecente",
-          2: "/clientes?status=exCliente",
-          3: "/clientes?status=prospect",
+          0: portfolioStatusClientsPath("ativo", debouncedSellerId),
+          1: portfolioStatusClientsPath("inativoRecente", debouncedSellerId),
+          2: portfolioStatusClientsPath("exCliente", debouncedSellerId),
+          3: portfolioStatusClientsPath("prospect", debouncedSellerId),
         },
         {
           tooltip: {
@@ -684,7 +685,7 @@ export default function DashboardPage() {
           },
         }
       ),
-    [buildInteractiveDoughnutOptions, walletTotal]
+    [buildInteractiveDoughnutOptions, debouncedSellerId, walletTotal]
   );
 
   const abcDoughnutOptions = useMemo<ChartOptions<"doughnut">>(

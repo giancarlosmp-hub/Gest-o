@@ -36,7 +36,7 @@ for (const duplicate of [merged, legacy, manualMerge, active]) {
 const list = fs.readFileSync(new URL("../src/pages/CrudSimplePage.tsx", import.meta.url), "utf8");
 assert.match(list, /const canShowArchived = isClientsPage && canManageArchivedClients\(user\?\.role\);/);
 assert.match(list, /\{canShowArchived \? \(\s*<label[\s\S]*?Mostrar arquivados\s*<\/label>\s*\) : null\}/);
-assert.match(list, /if \(canShowArchived && showArchived\) params\.includeArchived = 1;/);
+assert.match(list, /includeArchived: canShowArchived && showArchived/);
 assert.equal(list.match(/Mostrar arquivados/g)?.length, 1, "um único filtro, dentro do bloco condicionado");
 
 // O detalhe só mostra o botão quando canReactivateClient permite.
