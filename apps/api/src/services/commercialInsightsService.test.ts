@@ -16,7 +16,7 @@ test("CommercialInsightsService usa calculateCommercialPriority como fonte ofici
 test("ranking executivo é ordenado pelo score oficial e inclui motivo e próxima ação", () => {
   assert.match(serviceSource, /sort\(\(a, b\) => b\.score - a\.score\)/);
   const fallback = __commercialInsightsInternals.deterministicSummary([
-    { entityType: "client", entityId: "c1", title: "Cliente A", score: 20, level: "baixa", reason: "Cliente sem compra há 100 dias", recommendedAction: "Reativar em até 24h" },
+    { entityType: "client", entityId: "c1", title: "Cliente A", score: 20, level: "baixa", reason: "Inativo recente: sem comprar há mais de 12 meses (última compra em 10/03/2025)", recommendedAction: "Reativar em até 24h" },
     { entityType: "opportunity", entityId: "o1", title: "Cliente B · Venda", score: 87, level: "urgente", reason: "Follow-up vencido", recommendedAction: "Ligar hoje" }
   ], { clients: { total: 2 }, opportunities: { open: 1 } });
   assert.equal(fallback.highPriority[0].score, 87);

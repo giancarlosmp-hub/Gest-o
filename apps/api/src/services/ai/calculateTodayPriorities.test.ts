@@ -42,7 +42,7 @@ test("usa CommercialPriorityService para follow-up vencido, alto valor, inativid
         id: "client-1",
         name: "Cliente A",
         ownerSellerId: "seller-1",
-        lastPurchaseDate: new Date("2025-12-01T00:00:00.000Z"),
+        lastPurchaseDate: new Date("2025-06-01T12:00:00.000Z"),
         lastPurchaseValue: 1000,
         financialProfile: null,
         openTitlesTotal: 0,
@@ -59,12 +59,27 @@ test("usa CommercialPriorityService para follow-up vencido, alto valor, inativid
   assert.ok(item.reason.includes("Follow-up vencido"));
   assert.ok(item.priorityReasons.includes("Follow-up vencido"));
   assert.ok(item.priorityReasons.includes(`Oportunidade acima de R$ ${COMMERCIAL_PRIORITY_THRESHOLDS.highOpportunityValue.toLocaleString("pt-BR")}`));
-  assert.ok(item.priorityReasons.some((reason) => reason.includes("Cliente sem compra")));
+  assert.ok(item.priorityReasons.includes("Inativo recente: sem comprar há mais de 12 meses (última compra em 01/06/2025)"));
   assert.ok(item.priorityReasons.includes("Cliente com título vencido"));
   assert.ok(item.priorityReasons.includes("Oportunidade criada automaticamente"));
   assert.ok(item.priorityScore >= 0 && item.priorityScore <= 100);
   assert.ok("priorityScore" in item && "risk" in item && "reason" in item && "suggestedAction" in item);
   assert.ok("priorityLevel" in item && "priorityColor" in item && "priorityReasons" in item);
+});
+
+test("cliente sem compra não ganha o falso \"Workflow de cliente sem compra ativo\"", () => {
+  const prospect = makeOpportunity({ client: { id: "client-p", name: "Prospect Ficticio", ownerSellerId: "seller-1", lastPurchaseDate: null, lastPurchaseValue: null, financialProfile: null, openTitlesTotal: 0, overdueTitlesTotal: 0 } });
+  const [item] = calculateTodayPriorities([prospect], todayStart);
+  assert.ok(!item.priorityReasons.some((reason) => reason.includes("Workflow")));
+  assert.equal(item.priorityScore, 0);
+});
+
+test("usa o pedido sent do CRM como última compra quando é mais recente que o ERP", () => {
+  const client = { id: "client-c", name: "Cliente Ficticio C", ownerSellerId: "seller-1", lastPurchaseDate: new Date("2023-01-10T12:00:00.000Z"), lastPurchaseValue: null, financialProfile: null, openTitlesTotal: 0, overdueTitlesTotal: 0 };
+  const [withoutOrder] = calculateTodayPriorities([makeOpportunity({ client })], todayStart);
+  const [withOrder] = calculateTodayPriorities([makeOpportunity({ client: { ...client, lastSentCrmOrderDate: new Date("2025-09-20T12:00:00.000Z") } })], todayStart);
+  assert.ok(withoutOrder.priorityReasons[0].startsWith("Ex-cliente"));
+  assert.ok(withOrder.priorityReasons.includes("Esfriando: ativo sem comprar há mais de 9 meses (última compra em 20/09/2025)"));
 });
 
 test("atividade recente evita motivo incorreto de falta de contato", () => {
@@ -111,7 +126,7 @@ test("HomePage mantém Minha IA Comercial usando todayPriorities[0] sem recalcul
   const source = readFileSync(new URL("../../../../web/src/pages/HomePage.tsx", import.meta.url), "utf8");
   assert.ok(source.includes("const topTodayPriority = todayPriorities[0];"));
   assert.ok(source.includes("reason: topTodayPriority.reason"));
-  assert.ok(source.includes("suggestedAction: topTodayPriority.suggestedAction"));
+  assert.ok(source.includes("${topTodayPriority.suggestedAction}"));
   assert.ok(!source.includes("priorityScore +="));
 });
 

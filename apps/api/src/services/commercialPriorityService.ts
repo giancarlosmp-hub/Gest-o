@@ -1,3 +1,4 @@
+import { classifyPortfolioStatus, isCoolingActive } from "@salesforce-pro/shared";
 import { WORKFLOW_INACTIVE_CLIENT_ORIGIN } from "./commercialAutomationsService.js";
 
 export type CommercialPriorityLevel = "baixa" | "normal" | "alta" | "urgente";
@@ -16,6 +17,8 @@ type FinancialProfileLike = Record<string, unknown> | string | null | undefined;
 
 type CommercialPriorityClientInput = {
   lastPurchaseDate?: DateLike;
+  // Pedido do CRM sent não cancelado mais recente (loadLastSentCrmOrderByClient). Sem ele, só a data do ERP conta.
+  lastSentCrmOrderDate?: DateLike;
   lastPurchaseValue?: number | string | null;
   ownerSellerId?: string | null;
   financialProfile?: FinancialProfileLike;
@@ -52,8 +55,8 @@ type CommercialPriorityTimelineEventInput = {
 };
 
 type CommercialPriorityWorkflowInput = {
+  // Só quando o workflow de cliente sem compra está ligado e o cliente é elegível a ele.
   inactiveClient?: boolean | null;
-  clientWithoutPurchase?: boolean | null;
   automaticallyCreatedOpportunity?: boolean | null;
 };
 
@@ -75,8 +78,9 @@ export type CommercialPriorityInput = {
 export const COMMERCIAL_PRIORITY_WEIGHTS = {
   overdueFollowUp: 30,
   overdueActivity: 20,
-  inactiveClient90Days: 20,
-  inactiveClient180Days: 30,
+  inactiveRecentClient: 30,
+  coolingActiveClient: 20,
+  exClient: 10,
   highValueOpportunity: 20,
   mediumValueOpportunity: 10,
   advancedOpportunityStage: 15,
@@ -93,8 +97,6 @@ export const COMMERCIAL_PRIORITY_WEIGHTS = {
 export const COMMERCIAL_PRIORITY_THRESHOLDS = {
   mediumOpportunityValue: 15000,
   highOpportunityValue: 45000,
-  inactiveClientDays: 90,
-  veryInactiveClientDays: 180,
   staleContactDays: 14,
   manyActivitiesCount: 3
 } as const;
@@ -138,10 +140,21 @@ const readFinancialProfile = (value: FinancialProfileLike) => {
   return typeof value === "object" && !Array.isArray(value) ? value : {};
 };
 
-const readFinancialDate = (profile: Record<string, unknown>) =>
-  parseDate(profile.DATA_ULTFATURA as DateLike) ||
-  parseDate(profile.lastPurchaseDate as DateLike) ||
-  parseDate(profile.ultimaCompra as DateLike);
+const formatBrazilDate = (date: Date) => date.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" });
+
+// Situação da carteira pela regra oficial (classifyPortfolioStatus): data do ERP com fallback DATA_ULTFATURA, ou o
+// pedido sent mais recente. Ativo não esfriando e prospect não pontuam.
+const purchaseReason = (client: CommercialPriorityClientInput, profile: Record<string, unknown>, now: Date) => {
+  const erpDate = parseDate(client.lastPurchaseDate) || parseDate(profile.DATA_ULTFATURA as DateLike);
+  const crmOrderDate = parseDate(client.lastSentCrmOrderDate);
+  const lastPurchase = getLatestDate([erpDate, crmOrderDate]);
+  const lastPurchaseText = lastPurchase ? ` (última compra em ${formatBrazilDate(lastPurchase)})` : "";
+  const status = classifyPortfolioStatus(erpDate, crmOrderDate, now);
+  if (status === "inativoRecente") return { weight: COMMERCIAL_PRIORITY_WEIGHTS.inactiveRecentClient, reason: `Inativo recente: sem comprar há mais de 12 meses${lastPurchaseText}` };
+  if (status === "exCliente") return { weight: COMMERCIAL_PRIORITY_WEIGHTS.exClient, reason: `Ex-cliente: sem comprar há mais de 24 meses${lastPurchaseText}` };
+  if (isCoolingActive(erpDate, crmOrderDate, now)) return { weight: COMMERCIAL_PRIORITY_WEIGHTS.coolingActiveClient, reason: `Esfriando: ativo sem comprar há mais de 9 meses${lastPurchaseText}` };
+  return null;
+};
 
 const isAdvancedStage = (stage?: string | null) => {
   const normalized = (stage || "").toLowerCase();
@@ -187,12 +200,8 @@ export class CommercialPriorityService {
     const followUpDate = parseDate(opportunity?.followUpDate);
     if (followUpDate && followUpDate < now) addReason(COMMERCIAL_PRIORITY_WEIGHTS.overdueFollowUp, "Follow-up vencido");
 
-    const lastPurchaseDate = parseDate(client?.lastPurchaseDate) || readFinancialDate(financialProfile);
-    if (lastPurchaseDate) {
-      const daysWithoutPurchase = daysBetween(lastPurchaseDate, now);
-      if (daysWithoutPurchase >= COMMERCIAL_PRIORITY_THRESHOLDS.veryInactiveClientDays) addReason(COMMERCIAL_PRIORITY_WEIGHTS.inactiveClient180Days, `Cliente sem compra há ${daysWithoutPurchase} dias`);
-      else if (daysWithoutPurchase >= COMMERCIAL_PRIORITY_THRESHOLDS.inactiveClientDays) addReason(COMMERCIAL_PRIORITY_WEIGHTS.inactiveClient90Days, `Cliente sem compra há ${daysWithoutPurchase} dias`);
-    }
+    const purchase = client ? purchaseReason(client, financialProfile, now) : null;
+    if (purchase) addReason(purchase.weight, purchase.reason);
 
     const opportunityValue = toNumber(opportunity?.value);
     if (opportunityValue >= COMMERCIAL_PRIORITY_THRESHOLDS.highOpportunityValue) addReason(COMMERCIAL_PRIORITY_WEIGHTS.highValueOpportunity, `Oportunidade acima de ${formatCurrency(COMMERCIAL_PRIORITY_THRESHOLDS.highOpportunityValue)}`);
@@ -218,7 +227,7 @@ export class CommercialPriorityService {
     else if (countItems(client?.openTitles, client?.openTitlesTotal, financialProfile.openTitlesTotal as number | string | null | undefined, financialProfile.openTitles as unknown[] | number | undefined) > 0) addReason(COMMERCIAL_PRIORITY_WEIGHTS.openFinancialTitles, "Cliente com títulos em aberto");
 
     if (client && !client.ownerSellerId) addReason(COMMERCIAL_PRIORITY_WEIGHTS.noOwnerSeller, "Cliente sem vendedor responsável");
-    if (workflow?.inactiveClient || workflow?.clientWithoutPurchase) addReason(COMMERCIAL_PRIORITY_WEIGHTS.workflowInactiveClient, "Workflow de cliente sem compra ativo");
+    if (workflow?.inactiveClient) addReason(COMMERCIAL_PRIORITY_WEIGHTS.workflowInactiveClient, "Workflow de cliente sem compra ativo");
     if (workflow?.automaticallyCreatedOpportunity || opportunity?.automatic || opportunity?.createdAutomatically || opportunity?.source === "automatic" || opportunity?.notes?.includes(WORKFLOW_INACTIVE_CLIENT_ORIGIN)) addReason(COMMERCIAL_PRIORITY_WEIGHTS.workflowAutomaticOpportunity, "Oportunidade criada automaticamente");
     if (countItems(ai?.suggestions) > 0 || ai?.hasContext) addReason(COMMERCIAL_PRIORITY_WEIGHTS.aiSuggestion, "Sugestão inteligente disponível");
 

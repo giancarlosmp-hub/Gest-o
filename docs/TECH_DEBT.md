@@ -537,8 +537,9 @@ Fica em aberto:
   `weekly-discipline`, `planned-vs-realized`, `discipline-ranking`, a parte de execução do
   `commercial-score` e `getActivityCountByTypeInMonth`. Antes de corrigir, decidir se o campo é dia ou
   instante e normalizar os dados.
-- "Atrasada" (`getUtcTodayStart`) e a semana do plano comercial de IA (`planningIntelligenceService`)
-  usam o dia UTC: das 21h à meia-noite de Brasília já contam o dia seguinte.
+- "Atrasada" (`getUtcTodayStart`, também o `now` das prioridades do dia) usa o dia UTC: das 21h à
+  meia-noite de Brasília já conta o dia seguinte. No plano comercial de IA (`planningIntelligenceService`)
+  a semana padrão já segue o dia de Brasília, mas a distribuição por dia (`dateOnly`) ainda usa o dia UTC.
 - Datas padrão de cadastro na web ainda usam `toISOString()` (nova atividade pelo atalho móvel, entrega
   prevista do pedido em `OpportunityDetailsPage`, data de entrada da oportunidade rápida na Agenda).
 - Código morto: `getWeekRangeFromStart` (`crudRoutes.ts`) e `startOfDay`/`endOfDay` em

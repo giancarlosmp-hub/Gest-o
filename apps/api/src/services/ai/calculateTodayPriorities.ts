@@ -15,6 +15,7 @@ export type TodayPriorityInput = OpportunityInsightInput & {
     id?: string | null;
     name?: string | null;
     lastPurchaseDate?: Date | null;
+    lastSentCrmOrderDate?: Date | null;
     lastPurchaseValue?: number | null;
     ownerSellerId?: string | null;
     financialProfile?: Record<string, unknown> | string | null;
@@ -80,6 +81,7 @@ export const buildCommercialPriorityInput = (opportunity: TodayPriorityInput, no
   now,
   client: opportunity.client ? {
     lastPurchaseDate: opportunity.client.lastPurchaseDate,
+    lastSentCrmOrderDate: opportunity.client.lastSentCrmOrderDate,
     lastPurchaseValue: opportunity.client.lastPurchaseValue,
     ownerSellerId: opportunity.client.ownerSellerId,
     financialProfile: opportunity.client.financialProfile,
@@ -108,7 +110,6 @@ export const buildCommercialPriorityInput = (opportunity: TodayPriorityInput, no
     description: event.description
   })),
   workflow: {
-    clientWithoutPurchase: !opportunity.client?.lastPurchaseDate,
     automaticallyCreatedOpportunity: Boolean(opportunity.notes?.includes(WORKFLOW_INACTIVE_CLIENT_ORIGIN))
   },
   ai: {
