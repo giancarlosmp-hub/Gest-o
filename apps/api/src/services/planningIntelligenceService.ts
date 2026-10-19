@@ -4,6 +4,7 @@ import { logApiEvent } from "../utils/logger.js";
 import { parseAiJsonObject } from "./ai/aiResponseParser.js";
 import { aiService } from "./ai/aiService.js";
 import { calculateCommercialPriority } from "./commercialPriorityService.js";
+import { isClientCoolingActive, loadLastSentCrmOrderByClient, portfolioStatusOf, resolveLastPurchase } from "./clientPortfolioStatus.js";
 import type { Prisma, Role } from "@prisma/client";
 
 export const COMMERCIAL_PLANNING_DEFAULTS = {
@@ -11,6 +12,8 @@ export const COMMERCIAL_PLANNING_DEFAULTS = {
   maxActionsPerDay: 8,
   maxCandidates: 50,
   maxPlannedActions: 30,
+  maxReactivationCandidates: 40,
+  maxExClientsPerWeek: 5,
   cacheTtlMs: 30 * 60 * 1000,
   durations: { visit: 60, call: 20, follow_up: 15, proposal: 45, review: 30, whatsapp: 20 }
 } as const;
@@ -51,6 +54,7 @@ export type WeeklyCommercialPlan = {
 
 type Input = { viewerUserId: string; viewerRole: Role | string; sellerId?: string; weekStart?: string; refresh?: boolean };
 const DAY_MS = 86400000;
+const BRAZIL_UTC_OFFSET_MS = 3 * 3_600_000;
 const CLOSED_STAGES = ["ganho", "perdido"] as const;
 const labels = ["Domingo", "Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado"];
 const cache = new Map<string, { expiresAt: number; value: WeeklyCommercialPlan }>();
@@ -60,6 +64,8 @@ const dateOnly = (date: Date) => date.toISOString().slice(0, 10);
 const startOfDay = (date: Date) => new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
 const mondayOf = (date: Date) => { const d = startOfDay(date); const day = d.getUTCDay() || 7; d.setUTCDate(d.getUTCDate() - day + 1); return d; };
 const addDays = (date: Date, days: number) => new Date(date.getTime() + days * DAY_MS);
+// Dia de Brasília (UTC-3 fixo) como meia-noite UTC: das 21h à meia-noite ainda é o mesmo dia.
+const brazilToday = () => startOfDay(new Date(Date.now() - BRAZIL_UTC_OFFSET_MS));
 const sanitize = (value: string | null | undefined, max = 160) => (value || "").replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[contato]").replace(/\b\d{10,}\b/g, "[numero]").replace(/\b\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}\b/g, "[documento]").slice(0, max);
 const stripInternal = ({ fixedDate, dedupeKey, ...candidate }: Candidate) => candidate;
 
@@ -67,7 +73,7 @@ export class PlanningIntelligenceService {
   async generateWeeklyCommercialPlan(input: Input): Promise<WeeklyCommercialPlan> {
     const startedAt = Date.now();
     const sellerId = await this.resolveSeller(input);
-    const weekStartDate = input.weekStart ? startOfDay(new Date(`${input.weekStart}T00:00:00.000Z`)) : mondayOf(new Date());
+    const weekStartDate = input.weekStart ? startOfDay(new Date(`${input.weekStart}T00:00:00.000Z`)) : mondayOf(brazilToday());
     const weekEndDate = addDays(weekStartDate, 4);
     const data = await this.collectData(sellerId, weekStartDate, addDays(weekEndDate, 1));
     const lastRelevant = this.latestUpdate(data);
@@ -104,11 +110,12 @@ export class PlanningIntelligenceService {
     return seller.id;
   }
 
+  // Clientes arquivados ficam fora das oportunidades, atividades e candidatos a reativação.
   private async collectData(sellerId: string, from: Date, to: Date) {
-    const [events, opportunities, activities, inactiveClients] = await Promise.all([
+    const [events, opportunities, activities, portfolioClients] = await Promise.all([
       prisma.agendaEvent.findMany({ where: { sellerId, startDateTime: { lt: to }, endDateTime: { gte: from } }, select: { id: true, title: true, type: true, startDateTime: true, endDateTime: true, status: true, city: true, clientId: true, opportunityId: true, updatedAt: true, stops: { select: { clientId: true, city: true }, orderBy: { order: "asc" } } }, orderBy: { startDateTime: "asc" } }),
       prisma.opportunity.findMany({
-        where: { ownerSellerId: sellerId, stage: { notIn: [...CLOSED_STAGES] } },
+        where: { ownerSellerId: sellerId, stage: { notIn: [...CLOSED_STAGES] }, client: { isArchived: false } },
         select: {
           id: true,
           title: true,
@@ -127,19 +134,35 @@ export class PlanningIntelligenceService {
         take: 80
       }),
       prisma.activity.findMany({
-        where: { ownerSellerId: sellerId, done: false },
+        where: { ownerSellerId: sellerId, done: false, OR: [{ clientId: null }, { client: { isArchived: false } }] },
         select: { id: true, type: true, dueDate: true, date: true, city: true, clientId: true, opportunityId: true, description: true, notes: true, createdAt: true, client: { select: { name: true, city: true } } },
         orderBy: { dueDate: "asc" },
         take: 60
       }),
       prisma.client.findMany({
-        where: { ownerSellerId: sellerId, isArchived: false, lastPurchaseDate: { lt: addDays(from, -90) } },
-        select: { id: true, name: true, city: true, state: true, lastPurchaseDate: true, lastPurchaseValue: true, ownerSellerId: true, financialProfile: true, openTitlesTotal: true, overdueTitlesTotal: true, createdAt: true },
-        orderBy: { lastPurchaseDate: "asc" },
-        take: 40
+        where: { ownerSellerId: sellerId, isArchived: false },
+        select: { id: true, name: true, city: true, state: true, lastPurchaseDate: true, lastPurchaseValue: true, ownerSellerId: true, financialProfile: true, openTitlesTotal: true, overdueTitlesTotal: true, createdAt: true }
       })
     ]);
-    return { events, opportunities, activities, inactiveClients };
+    const lastSentCrmOrderByClient = await loadLastSentCrmOrderByClient({ isArchived: false, OR: [{ ownerSellerId: sellerId }, { id: { in: opportunities.map((opportunity) => opportunity.clientId) } }] });
+    const withLastSentCrmOrder = <T extends { id: string }>(client: T) => ({ ...client, lastSentCrmOrderDate: lastSentCrmOrderByClient.get(client.id) ?? null });
+    return {
+      events,
+      opportunities: opportunities.map((opportunity) => ({ ...opportunity, client: withLastSentCrmOrder(opportunity.client) })),
+      activities,
+      inactiveClients: this.selectReactivationClients(portfolioClients, lastSentCrmOrderByClient, new Date()).map(withLastSentCrmOrder)
+    };
+  }
+
+  // "Reativar cliente" pela regra oficial da carteira: inativos recentes, depois ativos esfriando e no máximo 5
+  // ex-clientes por semana. Inativos e ex-clientes da compra mais recente para a mais antiga; esfriando da mais
+  // antiga (mais perto de inativar) para a mais recente. Prospects (nunca compraram) ficam fora.
+  private selectReactivationClients<T extends { id: string; lastPurchaseDate: Date | null; financialProfile: Prisma.JsonValue | null }>(clients: T[], lastSentCrmOrderByClient: Map<string, Date>, now: Date) {
+    const rows = clients.map((client) => ({ client, status: portfolioStatusOf(client, lastSentCrmOrderByClient, now), cooling: isClientCoolingActive(client, lastSentCrmOrderByClient, now), time: resolveLastPurchase(client, lastSentCrmOrderByClient)?.date.getTime() ?? 0 }));
+    const inactiveRecent = rows.filter((row) => row.status === "inativoRecente").sort((a, b) => b.time - a.time);
+    const cooling = rows.filter((row) => row.cooling).sort((a, b) => a.time - b.time);
+    const exClients = rows.filter((row) => row.status === "exCliente").sort((a, b) => b.time - a.time).slice(0, COMMERCIAL_PLANNING_DEFAULTS.maxExClientsPerWeek);
+    return [...inactiveRecent, ...cooling, ...exClients].slice(0, COMMERCIAL_PLANNING_DEFAULTS.maxReactivationCandidates).map((row) => row.client);
   }
 
   private buildCandidates(data: Awaited<ReturnType<PlanningIntelligenceService["collectData"]>>, weekStart: Date): Candidate[] {

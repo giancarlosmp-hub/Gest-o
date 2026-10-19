@@ -5593,7 +5593,8 @@ router.get("/ai/today-priorities", async (req, res) => {
   const openOpportunities = await prisma.opportunity.findMany({
     where: {
       ownerSellerId: req.user.id,
-      stage: { notIn: [...CLOSED_STAGE_VALUES] }
+      stage: { notIn: [...CLOSED_STAGE_VALUES] },
+      client: { isArchived: false }
     },
     select: {
       id: true,
@@ -5639,7 +5640,14 @@ router.get("/ai/today-priorities", async (req, res) => {
     }
   });
 
-  const priorities = calculateTodayPriorities(openOpportunities, todayStart);
+  // Última compra efetiva também considera o pedido sent do CRM, como a situação da carteira.
+  const lastSentCrmOrderByClient = openOpportunities.length
+    ? await loadLastSentCrmOrderByClient({ id: { in: [...new Set(openOpportunities.map((opportunity) => opportunity.clientId))] } })
+    : new Map<string, Date>();
+  const priorities = calculateTodayPriorities(
+    openOpportunities.map((opportunity) => ({ ...opportunity, client: { ...opportunity.client, lastSentCrmOrderDate: lastSentCrmOrderByClient.get(opportunity.clientId) ?? null } })),
+    todayStart
+  );
 
   return res.json(priorities);
 });

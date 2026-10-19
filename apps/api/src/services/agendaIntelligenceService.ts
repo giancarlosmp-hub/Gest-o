@@ -4,6 +4,7 @@ import { logApiEvent } from "../utils/logger.js";
 import { parseAiJsonObject } from "./ai/aiResponseParser.js";
 import { aiService } from "./ai/aiService.js";
 import { calculateCommercialPriority } from "./commercialPriorityService.js";
+import { loadLastSentCrmOrderByClient } from "./clientPortfolioStatus.js";
 import { planningIntelligenceService } from "./planningIntelligenceService.js";
 import {
   calculateHaversineLineDistanceKm,
@@ -312,7 +313,21 @@ export class AgendaIntelligenceService {
         select: { city: true, state: true, updatedAt: true },
       }),
     ]);
-    return { events, territories };
+    // Score pela última compra efetiva: o pedido sent do CRM conta como na situação da carteira.
+    const clientIds = [...new Set(events.flatMap((event) => [event.client?.id, ...event.stops.map((stop) => stop.client?.id)]).filter((id): id is string => Boolean(id)))];
+    const lastSentCrmOrderByClient = clientIds.length
+      ? await loadLastSentCrmOrderByClient({ id: { in: clientIds } })
+      : new Map<string, Date>();
+    const withLastSentCrmOrder = <T extends { id: string }>(client: T | null) =>
+      client ? { ...client, lastSentCrmOrderDate: lastSentCrmOrderByClient.get(client.id) ?? null } : null;
+    return {
+      events: events.map((event) => ({
+        ...event,
+        client: withLastSentCrmOrder(event.client),
+        stops: event.stops.map((stop) => ({ ...stop, client: withLastSentCrmOrder(stop.client) })),
+      })),
+      territories,
+    };
   }
   private async buildDeterministic(
     date: string,
