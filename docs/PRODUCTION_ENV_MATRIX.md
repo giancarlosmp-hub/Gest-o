@@ -30,7 +30,7 @@
 | `AI_CHAT_ENABLED` | gate da IA | Opcional, segura desligada | default `false` |
 | `AI_BASE_URL` | endpoint IA configurável | Condicional ao gate/provedor | repassada; serviço acusa configuração ausente |
 | `AI_API_KEY` | credencial IA | Condicional ao gate/provedor | repassada somente por env seguro |
-| `AI_MODEL` | modelo IA | Condicional ao gate/provedor | repassada |
+| `AI_MODEL` | modelo IA | Condicional ao gate/provedor | repassada; troca em [`operations/ia-modelo-e-limites.md`](operations/ia-modelo-e-limites.md) |
 | `AI_TIMEOUT_MS` | timeout IA | Opcional | default `30000` |
 | `AI_MAX_OUTPUT_TOKENS` | limite de saída IA | Opcional | default `512` |
 | `AI_TEMPERATURE` | temperatura IA | Opcional | default `0.4` |
