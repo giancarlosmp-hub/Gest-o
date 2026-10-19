@@ -278,13 +278,19 @@ export const weeklyVisitMinimumSchema = z.object({
 });
 
 
+// Etapas abertas do funil em que a automação pode criar a oportunidade de reativação.
+export const INACTIVE_CLIENT_WORKFLOW_STAGES = ["prospeccao", "negociacao", "proposta"] as const;
+
 export const inactiveClientWorkflowConfigSchema = z.object({
   enabled: z.boolean(),
   daysWithoutPurchase: z.number().int().positive(),
   allowedOptions: z.array(z.number().int().positive()).min(1),
   customDaysEnabled: z.boolean(),
-  returnDeadlineBusinessDays: z.number().int().min(1).max(365),
-  initialOpportunityStage: z.string().trim().min(1).max(80),
+  returnDeadlineBusinessDays: z.number().int().min(1, "Prazo de retorno deve ser de 1 ou 2 dias úteis.").max(2, "Prazo de retorno deve ser de 1 ou 2 dias úteis."),
+  initialOpportunityStage: z.enum(INACTIVE_CLIENT_WORKFLOW_STAGES, {
+    errorMap: () => ({ message: "Etapa inicial inválida. Use prospeccao, negociacao ou proposta." })
+  }),
+  dailyLimitPerSeller: z.number().int().min(1, "Teto diário deve ser de 1 a 50 por vendedor.").max(50, "Teto diário deve ser de 1 a 50 por vendedor.").default(5),
   createOpportunity: z.boolean(),
   createActivity: z.boolean(),
   createTimelineEvent: z.boolean()
@@ -413,6 +419,19 @@ export type UserUpdateInput = z.infer<typeof userUpdateSchema>;
 export type UserResetPasswordInput = z.infer<typeof userResetPasswordSchema>;
 export type WeeklyVisitMinimumInput = z.infer<typeof weeklyVisitMinimumSchema>;
 export type CommercialAutomationsConfig = z.infer<typeof commercialAutomationsConfigSchema>;
+// Motivos pelos quais um inativo recente fica fora da automação no dia.
+export type InactiveClientWorkflowSkips = { inactiveSeller: number; openOpportunity: number; recentAutomation: number; dailyLimit: number };
+// Simulação somente leitura: o que a automação criaria hoje (dia de Brasília) com a configuração salva.
+export type CommercialAutomationsSimulation = {
+  enabled: boolean;
+  configIssues: string[];
+  dayKey: string;
+  dailyLimitPerSeller: number;
+  inactiveRecentClients: number;
+  eligibleClients: number;
+  wouldCreate: number;
+  skipped: InactiveClientWorkflowSkips;
+};
 export type TimelineEventInput = z.infer<typeof timelineEventSchema>;
 export type EventInput = z.infer<typeof eventSchema>;
 export type CultureCatalogInput = z.infer<typeof cultureCatalogSchema>;

@@ -99,7 +99,7 @@ import { getErpAutomaticSyncRuntimeStatus, refreshErpAutomaticSyncConfig, runAut
 import { investigateErpPartnerReadOnly } from "../services/erpPartnerInvestigationService.js";
 import { MANUAL_RESOLUTION_CONFIRMATION_PHRASE, resolveAmbiguousErpOrderManually } from "../services/erpOrderManualResolutionService.js";
 import { buildErpHealthcheckResponse } from "../services/erpOrderOperationalSummary.js";
-import { COMMERCIAL_AUTOMATIONS_CONFIG_KEY, DEFAULT_COMMERCIAL_AUTOMATIONS_CONFIG, getCommercialAutomationsStatus, parseCommercialAutomationsConfig, runCommercialAutomations } from "../services/commercialAutomationsService.js";
+import { COMMERCIAL_AUTOMATIONS_CONFIG_KEY, DEFAULT_COMMERCIAL_AUTOMATIONS_CONFIG, getCommercialAutomationsStatus, loadCommercialAutomationsHistory, parseCommercialAutomationsConfig, runCommercialAutomations, simulateCommercialAutomations } from "../services/commercialAutomationsService.js";
 import { recordClientCodeChange } from "../services/clientCodeAuditService.js";
 import { buildClientCreditAlert, projectClientForResponse } from "../services/clientErpProjection.js";
 import { ensureInitialKnowledgeDocuments, getKnowledgeContextForAi, searchKnowledgeDocuments } from "../services/knowledgeBaseService.js";
@@ -9712,7 +9712,12 @@ router.post("/commercial-automations/run", authorize("diretor", "gerente"), asyn
 });
 
 router.get("/commercial-automations/history", authorize("diretor", "gerente"), async (_req, res) => {
-  return res.json(getCommercialAutomationsStatus());
+  return res.json({ ...getCommercialAutomationsStatus(), history: await loadCommercialAutomationsHistory() });
+});
+
+// Somente leitura: quantas oportunidades a automação criaria hoje com a configuração salva.
+router.get("/commercial-automations/simulation", authorize("diretor", "gerente"), async (_req, res) => {
+  return res.json(await simulateCommercialAutomations());
 });
 
 router.get("/settings/commercial-automations", authorize("diretor", "gerente"), async (_req, res) => {
