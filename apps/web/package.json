@@ -14,6 +14,7 @@
     "test:client-code-erp-only": "npx tsx tests/clientCodeErpOnly.test.ts",
     "test:client-archive-status": "npx tsx tests/clientArchiveStatus.test.ts",
     "test:client-address-label": "npx tsx tests/clientAddressLabel.test.ts",
+    "test:client-list-filters": "npx tsx tests/clientListFilters.test.ts",
     "test:brazil-date": "npx tsx tests/brazilDate.test.ts",
     "test:erp-payment-method-eligibility": "npx tsx tests/erpPaymentMethodEligibility.test.ts",
     "test:whatsapp-link": "npx tsx tests/whatsappLink.test.ts",
