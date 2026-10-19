@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { classifyPortfolioStatus, isVisibleInRanking, rankingSellerName } from "@salesforce-pro/shared";
+import { classifyPortfolioStatus, isCoolingActive, isVisibleInRanking, rankingSellerName } from "@salesforce-pro/shared";
 import { prisma } from "../config/prisma.js";
-import { loadLastSentCrmOrderByClient, portfolioStatusOf } from "./clientPortfolioStatus.js";
+import { isClientCoolingActive, loadLastSentCrmOrderByClient, portfolioStatusOf, resolveLastPurchase } from "./clientPortfolioStatus.js";
 
 // Dados fictícios. "Agora" = 18/10/2026 09:00 em Brasília (12:00 UTC).
 const now = new Date("2026-10-18T12:00:00.000Z");
@@ -73,6 +73,48 @@ assert.equal(portfolioStatusOf({ id: "cliente-um-cancelado", lastPurchaseDate: e
 assert.equal(portfolioStatusOf({ id: "cliente-perfil", lastPurchaseDate: null, financialProfile: { DATA_ULTFATURA: "2025-06-01T03:00:00.000Z" } }, lastSent, now), "inativoRecente");
 assert.equal(portfolioStatusOf({ id: "cliente-perfil", lastPurchaseDate: null, financialProfile: {} }, lastSent, now), "prospect");
 
+// Última compra efetiva: data do ERP, fallback DATA_ULTFATURA ou pedido sent não cancelado mais recente.
+assert.deepEqual(resolveLastPurchase({ id: "cliente-sem-pedido", lastPurchaseDate: new Date("2026-05-01T15:00:00.000Z"), financialProfile: null }, lastSent), { date: new Date("2026-05-01T15:00:00.000Z"), source: "erp" });
+assert.deepEqual(
+  resolveLastPurchase({ id: "cliente-sem-pedido", lastPurchaseDate: null, financialProfile: { DATA_ULTFATURA: "2025-06-01T03:00:00.000Z" } }, lastSent),
+  { date: new Date("2025-06-01T03:00:00.000Z"), source: "erp" },
+  "fallback DATA_ULTFATURA"
+);
+assert.deepEqual(
+  resolveLastPurchase({ id: "cliente-pedido-enviado", lastPurchaseDate: erpExCliente, financialProfile: null }, lastSent),
+  { date: new Date("2026-10-10T15:00:00.000Z"), source: "pedidoCrm" },
+  "pedido sent mais recente que o ERP"
+);
+assert.deepEqual(
+  resolveLastPurchase({ id: "cliente-pedido-enviado", lastPurchaseDate: new Date("2026-10-15T15:00:00.000Z"), financialProfile: null }, lastSent),
+  { date: new Date("2026-10-15T15:00:00.000Z"), source: "erp" },
+  "ERP mais recente que o pedido"
+);
+assert.deepEqual(
+  resolveLastPurchase({ id: "cliente-um-cancelado", lastPurchaseDate: erpExCliente, financialProfile: null }, lastSent),
+  { date: new Date("2025-03-01T15:00:00.000Z"), source: "pedidoCrm" },
+  "sent cancelado ignorado; vale o sent anterior"
+);
+assert.deepEqual(
+  resolveLastPurchase({ id: "cliente-cancelado-operacional", lastPurchaseDate: erpExCliente, financialProfile: null }, lastSent),
+  { date: erpExCliente, source: "erp" },
+  "só sent cancelado: fica a data do ERP"
+);
+assert.equal(resolveLastPurchase({ id: "cliente-cancelado-entrega", lastPurchaseDate: null, financialProfile: null }, lastSent), null, "sem compra: prospect");
+
+// Esfriando: ativo com a última compra há mais de 9 meses, no dia de Brasília ("agora" = 18/10/2026).
+assert.equal(isCoolingActive(new Date("2026-01-18T03:00:00.000Z"), null, now), false, "exatamente 9 meses ainda não esfria");
+assert.equal(isCoolingActive(new Date("2026-01-18T02:59:00.000Z"), null, now), true, "9 meses e 1 dia em Brasília");
+assert.equal(isCoolingActive(new Date("2025-10-18T03:00:00.000Z"), null, now), true, "exatamente 12 meses: ainda ativo, esfriando");
+assert.equal(isCoolingActive(new Date("2025-10-18T02:59:00.000Z"), null, now), false, "12 meses e 1 dia: inativo recente, não é esfriando");
+assert.equal(isCoolingActive(new Date("2026-09-01T15:00:00.000Z"), null, now), false, "ativo recente");
+assert.equal(isCoolingActive(null, null, now), false, "prospect não esfria");
+assert.equal(isCoolingActive(new Date("2023-01-10T15:00:00.000Z"), null, now), false, "ex-cliente não esfria");
+assert.equal(isCoolingActive(new Date("2023-01-10T15:00:00.000Z"), new Date("2025-12-01T15:00:00.000Z"), now), true, "pedido sent de 10 meses atrás esfria");
+assert.equal(isCoolingActive(new Date("2025-12-01T15:00:00.000Z"), new Date("2026-08-01T15:00:00.000Z"), now), false, "pedido sent recente tira do esfriando");
+assert.equal(isClientCoolingActive({ id: "cliente-perfil", lastPurchaseDate: null, financialProfile: { DATA_ULTFATURA: "2025-12-01T15:00:00.000Z" } }, lastSent, now), true, "fallback DATA_ULTFATURA");
+assert.equal(isClientCoolingActive({ id: "cliente-pedido-enviado", lastPurchaseDate: new Date("2025-12-01T15:00:00.000Z"), financialProfile: null }, lastSent, now), false, "pedido sent do CRM recente");
+
 // Rankings.
 assert.equal(isVisibleInRanking(true, 0), true);
 assert.equal(isVisibleInRanking(false, 0), false);
@@ -82,4 +124,4 @@ assert.equal(rankingSellerName("Vendedora Ficticia", true), "Vendedora Ficticia"
 assert.equal(rankingSellerName("Vendedora Ficticia", false), "Vendedora Ficticia (desligado)");
 
 await (prisma as any).$disconnect?.();
-console.log("CLIENT_PORTFOLIO_STATUS=PASS bands=PASS borders_brasilia=PASS sent_order=PASS pending_error_ignored=PASS cancelled_ignored=PASS ranking_helpers=PASS");
+console.log("CLIENT_PORTFOLIO_STATUS=PASS bands=PASS borders_brasilia=PASS sent_order=PASS pending_error_ignored=PASS cancelled_ignored=PASS ranking_helpers=PASS last_purchase=PASS cooling_borders=PASS");

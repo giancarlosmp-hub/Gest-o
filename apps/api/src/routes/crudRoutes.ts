@@ -28,6 +28,7 @@ import {
   erpOrderGenerationSchema,
   knowledgeDocumentCreateSchema,
   knowledgeDocumentUpdateSchema,
+  COOLING_ACTIVE_MONTHS,
   isPortfolioStatus,
   isVisibleInRanking,
   rankingSellerName
@@ -48,7 +49,7 @@ import { hashPassword } from "../utils/password.js";
 import { calculateOpportunityRisk } from "../services/opportunityInsight.js";
 import { generateSalesMessage } from "../services/opportunitySalesMessage.js";
 import { buildClientAiContext } from "../services/clientAiContext.js";
-import { loadLastSentCrmOrderByClient, portfolioStatusOf } from "../services/clientPortfolioStatus.js";
+import { listPortfolioSegment, loadLastSentCrmOrderByClient, portfolioStatusOf } from "../services/clientPortfolioStatus.js";
 import { generateClientSuggestion } from "../services/clientSuggestion.js";
 import { buildAssistantWhatsappContext, generateAssistantWhatsappMessage } from "../services/assistantWhatsapp.js";
 import { aiService } from "../services/ai/aiService.js";
@@ -3994,25 +3995,23 @@ router.get("/reports/consistency", async (req, res) => {
 });
 
 
+// Clientes esfriando: ativos com a última compra efetiva há mais de 9 meses (mesma regra do Assistente Comercial).
 router.get("/clients/alerts/cooling", async (req, res) => {
-  const days = Math.min(parsePositiveInt(req.query.days, 45), 365);
   const limit = Math.min(parsePositiveInt(req.query.limit, 20), 100);
-  const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-  const where: Prisma.ClientWhereInput = {
-    ...sellerWhere(req),
-    isArchived: false,
-    OR: [{ lastPurchaseDate: { lt: cutoff } }, { lastPurchaseDate: null }],
-  };
-  const [count, clients] = await Promise.all([
-    prisma.client.count({ where }),
-    prisma.client.findMany({
-      where,
-      orderBy: [{ lastPurchaseDate: "asc" }, { name: "asc" }],
-      take: limit,
-      select: { id: true, name: true, fantasyName: true, city: true, state: true, lastPurchaseDate: true, ownerSellerId: true },
-    }),
-  ]);
-  return res.json({ count, clients, items: clients, days, generatedAt: new Date().toISOString() });
+  const segment = await listPortfolioSegment("esfriando", sellerWhere(req), new Date());
+  const pageIds = segment.slice(0, limit).map((entry) => entry.id);
+  const rows = pageIds.length
+    ? await prisma.client.findMany({
+        where: { id: { in: pageIds }, isArchived: false },
+        select: { id: true, name: true, fantasyName: true, city: true, state: true, lastPurchaseDate: true, ownerSellerId: true },
+      })
+    : [];
+  const rowsById = new Map(rows.map((row) => [row.id, row]));
+  const clients = segment.slice(0, limit).flatMap((entry) => {
+    const row = rowsById.get(entry.id);
+    return row ? [{ ...row, lastPurchaseAt: entry.lastPurchase?.date ?? null, lastPurchaseSource: entry.lastPurchase?.source ?? null }] : [];
+  });
+  return res.json({ count: segment.length, clients, items: clients, months: COOLING_ACTIVE_MONTHS, generatedAt: new Date().toISOString() });
 });
 
 // Valores distintos sem vazios; maiúsculas/minúsculas iguais viram uma opção só (o filtro da lista é insensível).

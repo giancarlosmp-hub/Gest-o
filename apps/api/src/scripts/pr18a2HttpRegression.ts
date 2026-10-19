@@ -23,6 +23,7 @@ setModel("sellerTerritoryCity", { findMany: async () => [] });
 setModel("opportunity", { findMany: async () => [], count: async () => 0 });
 setModel("activity", { aggregate: async () => ({ _max: { date: null } }), count: async () => 0 });
 setModel("erpSyncRun", { findFirst: async () => null });
+setModel("erpOrderSync", { findMany: async () => [] });
 let appConfigReads = 0;
 setModel("appConfig", { findUnique: async () => { appConfigReads += 1; return new Promise(() => {}); }, upsert: async () => ({}) });
 
