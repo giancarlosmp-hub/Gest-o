@@ -49,7 +49,8 @@ import { hashPassword } from "../utils/password.js";
 import { calculateOpportunityRisk } from "../services/opportunityInsight.js";
 import { generateSalesMessage } from "../services/opportunitySalesMessage.js";
 import { buildClientAiContext } from "../services/clientAiContext.js";
-import { listPortfolioSegment, loadLastSentCrmOrderByClient, portfolioStatusOf } from "../services/clientPortfolioStatus.js";
+import { isClientCoolingActive, listPortfolioSegment, loadLastSentCrmOrderByClient, portfolioStatusOf, resolveLastPurchase } from "../services/clientPortfolioStatus.js";
+import { aiUsageConfigSchema, saveAiUsageConfig } from "../services/ai/aiUsageLimiter.js";
 import { generateClientSuggestion } from "../services/clientSuggestion.js";
 import { buildAssistantWhatsappContext, generateAssistantWhatsappMessage } from "../services/assistantWhatsapp.js";
 import { aiService } from "../services/ai/aiService.js";
@@ -652,6 +653,7 @@ type OpportunityFilterParams = {
   season?: string;
   period?: { from?: string; to?: string };
   overdueOnly: boolean;
+  excludeArchivedClients: boolean;
 };
 
 const parseOpportunityFilterParams = (req: Request) => {
@@ -679,7 +681,9 @@ const parseOpportunityFilterParams = (req: Request) => {
       crop: req.query.crop as string | undefined,
       season: req.query.season as string | undefined,
       period: dateFrom || dateTo ? { from: dateFrom, to: dateTo } : undefined,
-      overdueOnly: req.query.overdue === "true" || req.query.overdueOnly === "true" || req.query.somenteAtrasadas === "true"
+      overdueOnly: req.query.overdue === "true" || req.query.overdueOnly === "true" || req.query.somenteAtrasadas === "true",
+      // Central do Dia (follow-ups, alertas e "Oportunidades críticas"): sem oportunidades de cliente arquivado.
+      excludeArchivedClients: req.query.excludeArchivedClients === "true"
     } satisfies OpportunityFilterParams
   } as const;
 };
@@ -694,6 +698,7 @@ const buildOpportunityWhere = (req: Request, params: OpportunityFilterParams, to
   if (params.clientId) whereFilters.push({ clientId: params.clientId });
   if (params.crop) whereFilters.push({ crop: params.crop });
   if (params.season) whereFilters.push({ season: params.season });
+  if (params.excludeArchivedClients) whereFilters.push({ client: { isArchived: false } });
   if (params.period) whereFilters.push(opportunityPeriodWhere(params.status, params.period.from, params.period.to));
   if (params.overdueOnly) {
     whereFilters.push({
@@ -1178,6 +1183,9 @@ const paginateArray = <T>(items: T[], page: number, pageSize: number) => {
 // ==============================
 
 const DUPLICATE_CLIENT_MESSAGE = "Cliente já cadastrado no sistema.";
+// 409 de oportunidade (nova, insight ou mensagem) de cliente arquivado.
+const archivedClientOpportunityMessage = (archiveReason: string | null) =>
+  isPortfolioCleanupArchiveReason(archiveReason) ? PORTFOLIO_CLEANUP_ARCHIVED_OPPORTUNITY_MESSAGE : "Cliente arquivado. Peça ao gerente para reativar o cadastro.";
 
 const isDatabaseUniqueViolation = (error: unknown) => {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
@@ -4297,8 +4305,18 @@ router.get("/ai/timeline-intelligence/opportunity/:opportunityId", async (req, r
   return res.json(result);
 });
 
-router.get("/ai/status", (_req, res) => {
-  return res.json(aiService.getStatus());
+// Provedor, modelo e último erro da IA: só gestão.
+router.get("/ai/status", authorize("diretor", "gerente"), async (_req, res) => {
+  return res.json({ ...aiService.getStatus(), dailyCallLimitPerUser: await aiService.usageLimiter.getDailyLimit() });
+});
+
+// Teto diário de chamadas de IA por usuário (padrão 50). Acima dele, cada fluxo usa o fallback determinístico.
+router.put("/ai/usage-config", authorize("diretor"), async (req, res) => {
+  const parsed = aiUsageConfigSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: "Configuração inválida", errors: parsed.error.issues });
+  const config = await saveAiUsageConfig(parsed.data);
+  aiService.usageLimiter.invalidateDailyLimit();
+  return res.json(config);
 });
 
 router.get("/ai/knowledge-preview", authorize("diretor", "gerente"), async (req, res) => {
@@ -4325,16 +4343,17 @@ router.post("/ai/client-suggestion", async (req, res) => {
     return res.status(400).json({ message: "Payload inválido", errors: parsed.error.issues });
   }
 
+  // Cliente arquivado fica fora da IA: 404, como /ai/client-summary.
   const context = await buildClientAiContext({
     clientId: parsed.data.clientId,
-    scope: sellerWhere(req)
+    scope: { ...sellerWhere(req), isArchived: false }
   });
 
   if (!context) {
     return res.status(404).json({ message: "Cliente não encontrado" });
   }
 
-  const suggestion = await generateClientSuggestion(context);
+  const suggestion = await generateClientSuggestion(context, { userId: req.user!.id });
   return res.json(suggestion);
 });
 
@@ -4350,7 +4369,7 @@ router.post("/ai/assistant-whatsapp-message", async (req, res) => {
 
   const context = await buildClientAiContext({
     clientId: parsed.data.clientId,
-    scope: sellerWhere(req)
+    scope: { ...sellerWhere(req), isArchived: false }
   });
 
   if (!context) {
@@ -4358,7 +4377,7 @@ router.post("/ai/assistant-whatsapp-message", async (req, res) => {
   }
 
   const sanitizedContext = buildAssistantWhatsappContext(context);
-  const result = await generateAssistantWhatsappMessage(sanitizedContext);
+  const result = await generateAssistantWhatsappMessage(sanitizedContext, aiService, req.user!.id);
 
   return res.json(result);
 });
@@ -5267,7 +5286,9 @@ router.post("/ai/opportunity-insight", async (req, res) => {
       client: {
         select: {
           id: true,
-          name: true
+          name: true,
+          isArchived: true,
+          archiveReason: true
         }
       },
       timelineEvents: {
@@ -5298,6 +5319,7 @@ router.post("/ai/opportunity-insight", async (req, res) => {
   if (!opportunity) {
     return res.status(404).json({ message: "Oportunidade não encontrada" });
   }
+  if (opportunity.client.isArchived) return res.status(409).json({ message: archivedClientOpportunityMessage(opportunity.client.archiveReason) });
 
   const recentTimelineObservation = opportunity.timelineEvents
     .find((event) => event.description?.trim())
@@ -5486,11 +5508,17 @@ router.get("/ai/opportunity-message", async (req, res) => {
       followUpDate: true,
       lastContactAt: true,
       createdAt: true,
+      clientId: true,
       client: {
         select: {
+          id: true,
           name: true,
           city: true,
-          state: true
+          state: true,
+          isArchived: true,
+          archiveReason: true,
+          lastPurchaseDate: true,
+          financialProfile: true
         }
       },
       ownerSeller: {
@@ -5524,7 +5552,11 @@ router.get("/ai/opportunity-message", async (req, res) => {
   if (!opportunity) {
     return res.status(404).json({ message: "Oportunidade não encontrada" });
   }
+  if (opportunity.client.isArchived) return res.status(409).json({ message: archivedClientOpportunityMessage(opportunity.client.archiveReason) });
 
+  // Situação oficial da carteira do cliente (ERP ou pedido sent do CRM), para a abordagem da mensagem.
+  const now = new Date();
+  const lastSentCrmOrderByClient = await loadLastSentCrmOrderByClient({ id: opportunity.clientId });
   const message = await generateSalesMessage({
     clientName: opportunity.client?.name || null,
     title: opportunity.title,
@@ -5541,8 +5573,13 @@ router.get("/ai/opportunity-message", async (req, res) => {
     lastContactAt: opportunity.lastContactAt,
     createdAt: opportunity.createdAt,
     timelineEvents: opportunity.timelineEvents,
-    activities: opportunity.activities
-  });
+    activities: opportunity.activities,
+    portfolio: {
+      status: portfolioStatusOf(opportunity.client, lastSentCrmOrderByClient, now),
+      cooling: isClientCoolingActive(opportunity.client, lastSentCrmOrderByClient, now),
+      lastPurchase: resolveLastPurchase(opportunity.client, lastSentCrmOrderByClient)
+    }
+  }, aiService, req.user!.id);
 
   return res.json({ message });
 });
@@ -7989,7 +8026,7 @@ router.post("/opportunities", validateBody(opportunitySchema), async (req, res) 
   // Cliente arquivado não recebe oportunidade nova: o gerente reativa o cadastro antes.
   const client = await prisma.client.findUnique({ where: { id: req.body.clientId }, select: { isArchived: true, archiveReason: true } });
   if (client?.isArchived) {
-    return res.status(409).json({ message: isPortfolioCleanupArchiveReason(client.archiveReason) ? PORTFOLIO_CLEANUP_ARCHIVED_OPPORTUNITY_MESSAGE : "Cliente arquivado. Peça ao gerente para reativar o cadastro." });
+    return res.status(409).json({ message: archivedClientOpportunityMessage(client.archiveReason) });
   }
 
   const ownerSellerId = resolveOwnerId(req, req.body.ownerSellerId);

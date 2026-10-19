@@ -1,4 +1,4 @@
-import type { ClientAiContextPayload } from "./clientAiContext.js";
+import { buildClientAiPromptContext, portfolioSituationLabel, type ClientAiContextPayload, type PortfolioApproach } from "./clientAiContext.js";
 import { aiService } from "./ai/aiService.js";
 import { getDemetraMasterPrompt } from "./ai/demetraMasterPrompt.js";
 import { logApiEvent } from "../utils/logger.js";
@@ -24,18 +24,19 @@ const getDaysSince = (value: Date | null) => {
   return Math.floor((Date.now() - value.getTime()) / DAY_IN_MS);
 };
 
-const formatDatePtBr = (value: Date | null) => {
+const formatDatePtBr = (value: Date | null | undefined) => {
   if (!value) return "não registrada";
-  return new Intl.DateTimeFormat("pt-BR", { timeZone: "UTC" }).format(value);
+  return new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo" }).format(value);
 };
 
 const buildSummary = (clientContext: ClientAiContextPayload) => {
-  const { client, commercialSummary, latestObservation } = clientContext;
+  const { client, commercialSummary, latestObservation, portfolio } = clientContext;
   const parts = [
     `Cliente: ${client.name}.`,
+    `Situação da carteira: ${portfolioSituationLabel(portfolio)}.`,
     `Oportunidades abertas: ${commercialSummary.openOpportunitiesCount}.`,
     `Última atividade: ${formatDatePtBr(commercialSummary.lastActivityAt)}.`,
-    `Última compra: ${formatDatePtBr(commercialSummary.lastPurchaseDate)}.`
+    `Última compra: ${formatDatePtBr(portfolio.lastPurchase?.date)}.`
   ];
 
   if (latestObservation?.trim()) {
@@ -45,10 +46,37 @@ const buildSummary = (clientContext: ClientAiContextPayload) => {
   return parts.join(" ");
 };
 
+// Sem negociação aberta, a sugestão segue a situação oficial da carteira (não mais limites de 60/90 dias).
+const SUGGESTION_BY_APPROACH: Record<PortfolioApproach, Omit<ClientSuggestionPayload, "source" | "summary">> = {
+  reativacao: {
+    status: "parado",
+    recommendation: "Reativar o cliente: ele parou de comprar",
+    nextAction: "Ligar ou visitar para entender por que parou de comprar e apresentar uma condição de retorno",
+    riskLevel: "alto"
+  },
+  primeiraVenda: {
+    status: "acompanhamento",
+    recommendation: "Buscar a primeira venda: o cliente ainda não comprou",
+    nextAction: "Agendar uma visita de apresentação e levantar a necessidade da próxima safra",
+    riskLevel: "medio"
+  },
+  recompra: {
+    status: "ativo",
+    recommendation: "Manutenção e recompra: o cliente está esfriando, sem comprar há mais de 9 meses",
+    nextAction: "Contatar para planejar a reposição antes que o cliente fique inativo",
+    riskLevel: "medio"
+  },
+  manutencao: {
+    status: "ativo",
+    recommendation: "Manter acompanhamento próximo",
+    nextAction: "Reforçar presença e identificar nova demanda",
+    riskLevel: "baixo"
+  }
+};
+
 export const buildClientSuggestion = (clientContext: ClientAiContextPayload): ClientSuggestionPayload => {
-  const { commercialSummary } = clientContext;
+  const { commercialSummary, portfolio } = clientContext;
   const daysSinceLastActivity = getDaysSince(commercialSummary.lastActivityAt);
-  const daysSinceLastPurchase = getDaysSince(commercialSummary.lastPurchaseDate);
 
   if (commercialSummary.openOpportunitiesCount > 0) {
     return {
@@ -61,36 +89,7 @@ export const buildClientSuggestion = (clientContext: ClientAiContextPayload): Cl
     };
   }
 
-  if (daysSinceLastPurchase != null && daysSinceLastPurchase < 60) {
-    return {
-      source: "deterministic",
-      status: "ativo",
-      summary: buildSummary(clientContext),
-      recommendation: "Manter acompanhamento próximo",
-      nextAction: "Reforçar presença e identificar nova demanda",
-      riskLevel: "baixo"
-    };
-  }
-
-  if (commercialSummary.openOpportunitiesCount === 0 && daysSinceLastActivity != null && daysSinceLastActivity > 30) {
-    return {
-      source: "deterministic",
-      status: "parado",
-      summary: buildSummary(clientContext),
-      recommendation: "Retomar contato comercial",
-      nextAction: "Agendar contato ou visita",
-      riskLevel: "alto"
-    };
-  }
-
-  return {
-    source: "deterministic",
-    status: "acompanhamento",
-    summary: buildSummary(clientContext),
-    recommendation: "Manter acompanhamento comercial",
-    nextAction: "Registrar próximo passo do cliente",
-    riskLevel: "medio"
-  };
+  return { source: "deterministic", summary: buildSummary(clientContext), ...SUGGESTION_BY_APPROACH[portfolio.approach] };
 };
 
 const ALLOWED_STATUS: ClientSuggestionStatus[] = ["negociacao", "ativo", "parado", "acompanhamento"];
@@ -133,12 +132,13 @@ const buildSuggestionPrompt = (clientContext: ClientAiContextPayload, knowledgeC
     "- recommendation: estratégia comercial clara, sem repetir o summary.",
     "- nextAction: ação objetiva, executável e iniciada com verbo de ação.",
     "- riskLevel: coerente com os dados disponíveis.",
+    "- A abordagem segue carteira.abordagem: reativação para inativo recente e ex-cliente, primeira venda para prospect, manutenção/recompra para ativo esfriando.",
     "Retorne APENAS JSON válido, sem markdown, sem explicações, sem texto extra.",
     "Use exatamente a estrutura abaixo (sem adicionar ou remover campos):",
     '{"status":"negociacao|ativo|parado|acompanhamento","summary":"...","recommendation":"...","nextAction":"...","riskLevel":"baixo|medio|alto"}',
     knowledgeContext ? knowledgeContext : null,
     "Contexto do cliente:",
-    JSON.stringify(clientContext),
+    JSON.stringify(buildClientAiPromptContext(clientContext)),
     "Base determinística esperada (pode refinar texto, mas mantenha estrutura e valores válidos):",
     JSON.stringify(deterministicSuggestion)
   ].join("\n");
@@ -152,7 +152,7 @@ const parseSuggestionPayload = (rawText: string): { parsed: unknown; parseMode: 
   return { parsed: result.parsed, parseMode: result.mode };
 };
 
-export const generateClientSuggestion = async (clientContext: ClientAiContextPayload): Promise<ClientSuggestionPayload> => {
+export const generateClientSuggestion = async (clientContext: ClientAiContextPayload, options: { userId?: string | null } = {}): Promise<ClientSuggestionPayload> => {
   const serviceStartedAt = Date.now();
   const fallbackSuggestion = {
     ...buildClientSuggestion(clientContext),
@@ -194,7 +194,7 @@ export const generateClientSuggestion = async (clientContext: ClientAiContextPay
     system: getDemetraMasterPrompt(),
     messages: [{ role: "user", content: prompt }],
     temperature: 0.2
-  });
+  }, { userId: options.userId });
   attemptedAi = result != null;
 
   if (!result) {

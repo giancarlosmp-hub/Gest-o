@@ -180,7 +180,7 @@ export class AgendaIntelligenceService {
     let aiUsed = false;
     let fallbackUsed = true;
     try {
-      const ai = await this.enrichWithAi(base);
+      const ai = await this.enrichWithAi(base, input.viewerUserId);
       if (ai) {
         result = this.applyAi(base, ai);
         aiUsed = true;
@@ -559,7 +559,7 @@ export class AgendaIntelligenceService {
         suggestedPeriod: a.suggestedPeriod || "afternoon",
       }));
   }
-  private async enrichWithAi(base: AgendaOptimization) {
+  private async enrichWithAi(base: AgendaOptimization, userId: string) {
     const dto = {
       date: base.date,
       metrics: base.metrics,
@@ -580,7 +580,7 @@ export class AgendaIntelligenceService {
       messages: [{ role: "user", content: JSON.stringify(dto) }],
       temperature: 0.2,
       maxTokens: 700,
-    });
+    }, { userId });
     const parsed = response?.content
       ? parseAiJsonObject(response.content)
       : null;
