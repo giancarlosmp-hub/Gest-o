@@ -53,7 +53,7 @@ const SETTINGS_SECTIONS: Array<{ id: SettingsSection; label: string; description
   {
     id: "commercial-automations",
     label: "Automações Comerciais",
-    description: "Salve parâmetros para fluxos comerciais futuros, sem executar criação automática.",
+    description: "Reativação de inativos recentes, com teto diário e simulação antes de ligar.",
     icon: Bot
   },
   {

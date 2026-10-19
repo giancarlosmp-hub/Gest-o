@@ -9,17 +9,18 @@ const scheduler = readFileSync(resolve(repoRoot, "api/src/jobs/commercialAutomat
 const server = readFileSync(resolve(repoRoot, "api/src/server.ts"), "utf8");
 
 assert.match(service, /WORKFLOW_INACTIVE_CLIENT_ORIGIN = "workflow_cliente_sem_compra"/, "Origem do workflow deve ser registrada");
-assert.match(service, /lastPurchaseDate[\s\S]*financialProfile[\s\S]*DATA_ULTFATURA/, "Deve usar Client.lastPurchaseDate com fallback DATA_ULTFATURA");
-assert.match(service, /if \(client\.isArchived\)/, "Cliente arquivado deve ser ignorado");
-assert.match(service, /if \(!client\.ownerSellerId\)/, "Cliente sem vendedor deve ser ignorado");
-assert.match(service, /findFirst\([\s\S]*stage: \{ in: \[\.\.\.OPEN_OPPORTUNITY_STAGES\] \}[\s\S]*contains: WORKFLOW_INACTIVE_CLIENT_ORIGIN/, "Não deve duplicar oportunidade aberta do workflow");
-assert.match(service, /Reativação comercial — cliente sem compra há \$\{workflow\.daysWithoutPurchase\} dias/, "Título deve conter dias configurados");
-assert.match(service, /resolveOpportunityValue\(client\)/, "Valor inicial deve vir de última compra/ticket médio ou 0");
+assert.match(service, /listPortfolioSegment\("semComprar"[\s\S]*entry\.status === "inativoRecente"/, "Elegibilidade deve ser inativo recente pela regra oficial da carteira");
+assert.match(service, /ownerSeller\?\.isActive/, "Vendedor inativo deve ficar fora");
+assert.match(service, /stage: \{ in: \[\.\.\.OPEN_OPPORTUNITY_STAGES\] \}/, "Cliente com oportunidade aberta deve ficar fora");
+assert.match(service, /RECENT_AUTOMATION_DAYS = 90/, "Não deve recriar oportunidade da automação em 90 dias");
+assert.match(service, /used >= dailyLimitPerSeller/, "Teto diário por vendedor deve ser respeitado");
+assert.match(service, /title: `Reativação – \$\{client\.name\}`/, "Título deve ser Reativação – <cliente>");
+assert.match(service, /value: 0,/, "Valor inicial deve ser 0");
 assert.match(service, /workflow\.createActivity[\s\S]*tx\.activity\.create/, "Activity deve ser criada quando habilitada");
 assert.match(service, /workflow\.createTimelineEvent[\s\S]*tx\.timelineEvent\.create/, "TimelineEvent deve ser criado quando habilitado");
-assert.match(service, /daysWithoutPurchase < workflow\.daysWithoutPurchase/, "Configuração 30/60/90 deve alterar elegibilidade");
 assert.match(routes, /post\("\/commercial-automations\/run"[\s\S]*runCommercialAutomations\("manual"\)/, "Rota manual POST deve executar workflow");
-assert.match(routes, /get\("\/commercial-automations\/history"[\s\S]*getCommercialAutomationsStatus/, "Rota de histórico/status deve existir");
+assert.match(routes, /get\("\/commercial-automations\/history"[\s\S]*loadCommercialAutomationsHistory/, "Rota de histórico persistente deve existir");
+assert.match(routes, /get\("\/commercial-automations\/simulation"[\s\S]*simulateCommercialAutomations/, "Rota de simulação deve existir");
 assert.match(scheduler, /commercial automations scheduler/, "Scheduler comercial separado deve existir");
 assert.match(server, /startCommercialAutomationsScheduler/, "Servidor deve iniciar scheduler comercial separado");
 
