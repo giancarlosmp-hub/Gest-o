@@ -18,7 +18,7 @@ const users: Row[] = [
   { id: "seller-b", role: "vendedor" },
 ];
 const client = (id: string, ownerSellerId: string, state: string, region: string, clientType: "PF" | "PJ", lastPurchaseDate: Date | null, extra: Row = {}): Row => ({
-  id, name: `Cliente Ficticio ${id}`, ownerSellerId, state, region, clientType, isArchived: false, lastPurchaseDate, financialProfile: null, ...extra,
+  id, name: `Cliente Ficticio ${id}`, code: `COD-${id}`, city: `Cidade Ficticia ${state}`, ownerSellerId, state, region, clientType, isArchived: false, lastPurchaseDate, financialProfile: null, ...extra,
 });
 const clients: Row[] = [
   client("a-pr-norte-pj-ativo", "seller-a", "PR", "Regiao Norte Ficticia", "PJ", daysAgo(30)),
@@ -107,6 +107,16 @@ try {
   assert.deepEqual(ids(await list("uf=PR&status=prospect&tipo=PF&ownerSellerId=seller-a")), ["a-pr-norte-pf-prospect"]);
   assert.deepEqual(ids(await list("uf=SC&status=prospect")), []);
   assert.deepEqual(ids(await list("q=sc-sul&tipo=PJ")), ["a-sc-sul-pj-ativo"]);
+
+  // Busca do seletor de cliente (ClientSelect): q por nome, código e cidade, resposta paginada com 20 por página.
+  const byName = await get("/clients?q=Cliente%20Ficticio%20a-sc&page=1&pageSize=20");
+  assert.deepEqual({ ids: ids(byName.json), total: byName.json.total, page: byName.json.page, pageSize: byName.json.pageSize }, { ids: ["a-sc-sul-pj-ativo"], total: 1, page: 1, pageSize: 20 });
+  assert.deepEqual(ids((await get("/clients?q=cod-b-rs&page=1&pageSize=20")).json), ["b-rs-sul-pf-prospect"]);
+  assert.deepEqual(ids((await get("/clients?q=Cidade%20Ficticia%20SC&page=1&pageSize=20")).json), ["a-sc-sul-pj-ativo"]);
+  const onlyQ = await get("/clients?q=Cliente");
+  assert(!Array.isArray(onlyQ.json) && onlyQ.json.pageSize === 20 && onlyQ.json.total === 6, "só com q a resposta já vem paginada (pageSize padrão 20)");
+  const ignoredSearch = await get("/clients?search=a-sc");
+  assert(Array.isArray(ignoredSearch.json) && ignoredSearch.json.length === 6, "?search= não é lido pela API");
 
   // Paginação com filtro, com e sem situação.
   const ufPage1 = await get("/clients?page=1&pageSize=2&uf=PR");
