@@ -42,11 +42,27 @@ const brazilDayNumberMonthsBefore = (now: Date, months: number) => {
   return year * 10000 + (month + 1) * 100 + Math.min(shifted.getUTCDate(), lastDay);
 };
 
-export const classifyPortfolioStatus = (lastErpPurchase: DateInput, lastSentCrmOrder: DateInput, now: Date): PortfolioStatus => {
+// Dia de Brasília da compra mais recente entre as duas fontes; null quando nenhuma é válida.
+const lastPurchaseDayNumber = (lastErpPurchase: DateInput, lastSentCrmOrder: DateInput) => {
   const candidates = [toValidDate(lastErpPurchase), toValidDate(lastSentCrmOrder)].filter((date): date is Date => date !== null);
-  if (candidates.length === 0) return "prospect";
-  const lastPurchaseDay = brazilDayNumber(new Date(Math.max(...candidates.map((date) => date.getTime()))));
+  if (candidates.length === 0) return null;
+  return brazilDayNumber(new Date(Math.max(...candidates.map((date) => date.getTime()))));
+};
+
+export const classifyPortfolioStatus = (lastErpPurchase: DateInput, lastSentCrmOrder: DateInput, now: Date): PortfolioStatus => {
+  const lastPurchaseDay = lastPurchaseDayNumber(lastErpPurchase, lastSentCrmOrder);
+  if (lastPurchaseDay === null) return "prospect";
   if (lastPurchaseDay >= brazilDayNumberMonthsBefore(now, 12)) return "ativo";
   if (lastPurchaseDay >= brazilDayNumberMonthsBefore(now, 24)) return "inativoRecente";
   return "exCliente";
+};
+
+export const COOLING_ACTIVE_MONTHS = 9;
+
+// "Esfriando": alerta preventivo, não é uma 5ª situação. Cliente ativo cuja última compra foi há mais de
+// 9 meses. Bordas no dia de Brasília: exatamente 9 meses ainda não esfria; 12 meses ainda é ativo e esfria.
+export const isCoolingActive = (lastErpPurchase: DateInput, lastSentCrmOrder: DateInput, now: Date): boolean => {
+  if (classifyPortfolioStatus(lastErpPurchase, lastSentCrmOrder, now) !== "ativo") return false;
+  const lastPurchaseDay = lastPurchaseDayNumber(lastErpPurchase, lastSentCrmOrder)!;
+  return lastPurchaseDay < brazilDayNumberMonthsBefore(now, COOLING_ACTIVE_MONTHS);
 };
