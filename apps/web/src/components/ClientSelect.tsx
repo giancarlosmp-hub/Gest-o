@@ -1,12 +1,8 @@
 import { useEffect, useState } from "react";
 import api from "../lib/apiClient";
+import { clientSearchParams, readClientSearchItems, withSelectedClient, type ClientSelectOption } from "../lib/clientSelectSearch";
 
-type Client = {
-  id: string;
-  name: string;
-  city?: string;
-  state?: string;
-};
+type Client = ClientSelectOption;
 
 type Props = {
   value?: string;
@@ -16,29 +12,50 @@ type Props = {
 export default function ClientSelect({ value, onChange }: Props) {
   const [query, setQuery] = useState("");
   const [options, setOptions] = useState<Client[]>([]);
+  const [selected, setSelected] = useState<Client | null>(null);
 
   useEffect(() => {
-    if (!query) return;
+    const params = clientSearchParams(query);
+    // Sem texto, ou com o nome do cliente já escolhido no campo, não abre a lista.
+    if (!params || (selected && query === selected.name)) {
+      setOptions([]);
+      return;
+    }
 
+    let active = true;
     const timeout = setTimeout(async () => {
       try {
-        const res = await api.get(`/clients?search=${query}`);
-        setOptions(res.data || []);
+        const res = await api.get("/clients", { params });
+        if (active) setOptions(withSelectedClient(readClientSearchItems(res.data), selected, query));
       } catch (e) {
         console.error(e);
       }
     }, 300);
 
-    return () => clearTimeout(timeout);
-  }, [query]);
+    return () => {
+      active = false;
+      clearTimeout(timeout);
+    };
+  }, [query, selected]);
 
   useEffect(() => {
-    if (!value) return;
+    if (!value) {
+      // Filtro limpo por fora (ex.: "Limpar filtros"): tira o nome que ficou no campo.
+      if (selected && query === selected.name) {
+        setSelected(null);
+        setQuery("");
+      }
+      return;
+    }
+    if (selected?.id === value) return;
 
     const timeout = setTimeout(async () => {
       try {
         const res = await api.get(`/clients/${value}`);
-        if (res.data?.name) setQuery(String(res.data.name));
+        if (res.data?.name) {
+          setSelected(res.data);
+          setQuery(String(res.data.name));
+        }
       } catch (e) {
         console.error(e);
       }
@@ -48,6 +65,7 @@ export default function ClientSelect({ value, onChange }: Props) {
   }, [value]);
 
   function handleSelect(client: Client) {
+    setSelected(client);
     setQuery(client.name);
     setOptions([]);
     onChange(client);
