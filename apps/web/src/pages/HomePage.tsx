@@ -9,6 +9,7 @@ import { normalizeActivityType } from "../constants/activityTypes";
 import { getApiErrorMessage } from "../lib/apiError";
 import { DASHBOARD_REFRESH_EVENT } from "../lib/dashboardRefresh";
 import { brazilMonthKey, brazilTodayKey } from "../lib/brazilDate";
+import { portfolioStatusClientsPath } from "../lib/clientListFilters";
 
 type Activity = {
   id: string;
@@ -652,9 +653,9 @@ export default function HomePage() {
         label: "Clientes esfriando",
         helper: coolingClients.unavailable
           ? "Alerta indisponível no momento."
-          : "Clientes A/B sem atividade relevante há 21+ dias.",
+          : "Clientes ativos há mais de 9 meses sem comprar.",
         count: coolingClients.count,
-        to: "/clientes?classe=A",
+        to: portfolioStatusClientsPath("ativo"),
         unavailable: coolingClients.unavailable
       }
     ];
