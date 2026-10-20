@@ -21,8 +21,8 @@ Os secrets do GitHub do workflow **Deploy Production** são só de acesso SSH. `
 Feito pelo responsável pela produção, com a aprovação de sempre:
 
 1. No OpenRouter, escolher o modelo e copiar o **identificador exato** da página dele (ex.: `fornecedor/modelo:free`).
-2. Conferir a política de dados do modelo **e** da conta antes de usar (ver abaixo). Sem zero retenção confirmada,
-   não trocar.
+2. Conferir a política de dados do modelo **e** da conta antes de usar (ver abaixo). Modelos grátis podem registrar
+   os prompts.
 3. Na VPS, editar só a linha `AI_MODEL=` em `/root/demetra-env/.env`, mantendo dono `root:root` e modo `600` (o
    resolvedor recusa o arquivo se mudarem). Não imprimir o arquivo em logs nem copiar valores para o repositório.
    `AI_PROVIDER=openrouter`, `AI_BASE_URL` e `AI_API_KEY` continuam como estão. Para desligar a IA: `AI_CHAT_ENABLED=false`.
@@ -40,6 +40,9 @@ A página do modelo grátis da NVIDIA no OpenRouter (`nvidia/nemotron-3-super-12
 conferir nas configurações de privacidade da conta do OpenRouter a opção de usar só endpoints com zero retenção
 (ZDR) e se o modelo escolhido tem um endpoint desse tipo. Se a conta só permitir ZDR e o modelo não tiver um, a
 chamada falha e o CRM cai no fallback determinístico.
+
+Decisão do diretor em 20/10/2026: aceitar o modelo grátis sem zero retenção, porque o filtro central garante que só
+saem nome, cidade/UF, situação da carteira, data da última compra e textos operacionais curtos.
 
 ## O que vai para o provedor de IA
 
