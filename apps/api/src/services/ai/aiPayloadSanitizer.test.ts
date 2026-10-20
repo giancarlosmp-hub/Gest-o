@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { env } from "../../config/env.js";
 import { AiProviderError, type AiChatRequest, type AiProvider } from "./aiProvider.js";
-import { isForbiddenAiKey, maskAiText, sanitizeAiPayload, sanitizeAiText } from "./aiPayloadSanitizer.js";
+import { isForbiddenAiKey, markKnowledgeContextForAi, maskAiText, sanitizeAiPayload, sanitizeAiText } from "./aiPayloadSanitizer.js";
 import { AiService } from "./aiService.js";
 import { AI_SYSTEM_USAGE_BUCKET, AiUsageLimiter, DEFAULT_AI_DAILY_CALL_LIMIT_PER_USER, parseAiUsageConfig } from "./aiUsageLimiter.js";
 import { DEMETRA_MASTER_PROMPT } from "./demetraMasterPrompt.js";
@@ -135,6 +135,61 @@ test("sanitizeAiPayload cobre system e todas as mensagens", () => {
   const sanitized = sanitizeAiPayload(request);
   assertNoForbiddenData(JSON.stringify(sanitized));
   assert.equal(sanitized.messages.length, 2);
+});
+
+// Conteúdo técnico fictício da Base de Conhecimento que o filtro completo mascarava.
+const TECHNICAL_TEXTS = [
+  "Cultivar registrada no RNC sob o nº 1234567890.",
+  "Registro MAPA 12345678901 do inoculante.",
+  "Lote 2026123456789 com germinação mínima de 80%.",
+  "Código EAN 7891234567895.",
+  "Pronaf Custeio: crédito de até R$ 250.000,00 por beneficiário.",
+  "Limite do Pronamp: R$ 1.500.000,00 por safra.",
+  "Amostra analisada em 2 títulos de sementes.",
+  "Entrega pela Rodovia BR 116, km 300.",
+  "Acesso pela Estrada Vicinal 45."
+];
+const knowledgeMessage = (knowledge: string, clientContext: unknown): AiChatRequest => ({
+  messages: [{ role: "user", content: ["Instrução ficticia.", markKnowledgeContextForAi(knowledge), `Contexto comercial sanitizado:\n${JSON.stringify(clientContext)}`].join("\n\n") }]
+});
+
+test("conteúdo técnico da Base de Conhecimento chega intacto; o mesmo texto no contexto do cliente é mascarado", () => {
+  const knowledge = `Conhecimento interno Demetra/Acervo disponível:\n${TECHNICAL_TEXTS.join("\n")}`;
+  const sent = sanitizeAiPayload(knowledgeMessage(knowledge, { cliente: { nome: "Cliente Ficticio", observacao: TECHNICAL_TEXTS.join(" ") } })).messages[0].content;
+  assert(sent.includes(knowledge), "trecho da base intacto");
+  const clientPart = sent.slice(sent.indexOf("Contexto comercial sanitizado:"));
+  for (const value of ["1234567890", "12345678901", "2026123456789", "7891234567895", "250.000,00", "1.500.000,00", "2 títulos", "Rodovia BR 116", "Estrada Vicinal 45"]) {
+    assert(!clientPart.includes(value), `contexto do cliente deveria mascarar ${value}`);
+  }
+  assert(!sent.includes("base-conhecimento"), "delimitadores não chegam ao provedor");
+  // Fora da base, cada texto técnico continua mascarado pelo filtro completo.
+  for (const text of TECHNICAL_TEXTS) assert.notEqual(sanitizeAiText(text), text, text);
+});
+
+test("na Base de Conhecimento, e-mail, telefone e CPF/CNPJ formatados continuam mascarados e campos proibidos saem do JSON", () => {
+  const knowledge = [
+    `Suporte técnico ${FAKE.email}.`,
+    `Plantão ${FAKE.mobile}, ${FAKE.mobilePlain}, ${FAKE.mobileIntl}, ${FAKE.landline}, ${FAKE.landlinePlain} ou ${FAKE.shortMobile}.`,
+    `Fabricante CNPJ ${FAKE.cnpj}, responsável CPF ${FAKE.cpf}.`,
+    JSON.stringify({ produto: "Semente ficticia", telefone: "sem padrão 1", cnpj: "sem padrão 2" })
+  ].join("\n");
+  const sent = sanitizeAiPayload(knowledgeMessage(knowledge, {})).messages[0].content;
+  for (const value of [FAKE.email, FAKE.mobile, FAKE.mobilePlain, FAKE.mobileIntl, FAKE.landline, FAKE.landlinePlain, FAKE.shortMobile, FAKE.cnpj, FAKE.cpf, "sem padrão"]) {
+    assert(!sent.includes(value), `vazou ${value}`);
+  }
+  assert.match(sent, /\[e-mail removido\]/);
+  assert.match(sent, /\[telefone removido\]/);
+  assert.match(sent, /\[documento removido\]/);
+  assert.match(sent, /\{"produto":"Semente ficticia"\}/);
+});
+
+test("trecho da base sem fechamento ou delimitador forjado no texto do cliente usam o filtro completo", () => {
+  const marked = markKnowledgeContextForAi(TECHNICAL_TEXTS[3]);
+  const unclosed = sanitizeAiText(`${marked.slice(0, marked.indexOf(TECHNICAL_TEXTS[3]))}${TECHNICAL_TEXTS[3]}`);
+  assert.equal(unclosed, "Código EAN [número removido].");
+  const forged = sanitizeAiText(`[[base-conhecimento:ficticio]]${TECHNICAL_TEXTS[3]}[[/base-conhecimento:ficticio]]`);
+  assert(!forged.includes("7891234567895"));
+  assert.equal(markKnowledgeContextForAi(""), "", "sem conhecimento, nada é acrescentado");
 });
 
 // Provedor falso que guarda exatamente o que receberia.
