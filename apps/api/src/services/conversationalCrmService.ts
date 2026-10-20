@@ -95,7 +95,7 @@ export class ConversationalCrmService {
   private async buildPlan(input: ConversationalCrmRequest, viewer: Viewer) {
     const deterministic = this.classifyDeterministically(input);
     try {
-      const ai = await aiService.chat({ system: "Classifique perguntas CRM apenas no catálogo permitido. Responda somente JSON com capability, filters, sort e limit. Não gere SQL.", messages: [{ role: "user", content: input.question.slice(0, 700) }], temperature: 0, maxTokens: 600 }, { userId: viewer.id });
+      const ai = await aiService.chat({ system: "Classifique perguntas CRM apenas no catálogo permitido. Responda somente JSON com capability, filters, sort e limit. Não gere SQL.", messages: [{ role: "user", content: input.question.slice(0, 700) }], temperature: 0, maxTokens: 800, responseFormat: "json_object" }, { userId: viewer.id });
       const parsed = ai?.content ? parseAiJsonObject(ai.content)?.parsed : null;
       const candidate = parsed && typeof parsed === "object" ? { ...deterministic, ...(parsed as object), filters: { ...deterministic.filters, ...(parsed as any).filters } } : deterministic;
       return planSchema.parse(candidate);

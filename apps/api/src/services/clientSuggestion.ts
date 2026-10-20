@@ -193,7 +193,9 @@ export const generateClientSuggestion = async (clientContext: ClientAiContextPay
   const result = await aiService.chat({
     system: getDemetraMasterPrompt(),
     messages: [{ role: "user", content: prompt }],
-    temperature: 0.2
+    temperature: 0.2,
+    maxTokens: 1200,
+    responseFormat: "json_object"
   }, { userId: options.userId });
   attemptedAi = result != null;
 

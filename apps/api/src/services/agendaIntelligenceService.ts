@@ -579,7 +579,8 @@ export class AgendaIntelligenceService {
         "Melhore o resumo da Agenda Inteligente. Não invente clientes, cidades, horários, quilômetros ou scores. Haversine é linha reta, não rota rodoviária. Responda JSON.",
       messages: [{ role: "user", content: JSON.stringify(dto) }],
       temperature: 0.2,
-      maxTokens: 700,
+      maxTokens: 1500,
+      responseFormat: "json_object",
     }, { userId });
     const parsed = response?.content
       ? parseAiJsonObject(response.content)
