@@ -158,7 +158,9 @@ setModel("erpOrderSync", {
       .map((order) => ({ sentAt: order.sentAt, createdAt: order.createdAt, orderStatus: null, operationalOrderStatus: "UNKNOWN", opportunity: { clientId: order.clientId } })),
   findFirst: async ({ where }: any) => erpOrders.find((order) => order.opportunityId === where?.opportunityId) ?? null
 });
-setModel("knowledgeDocument", { findMany: async () => [], findFirst: async () => null });
+// Base de Conhecimento: vazia, salvo no passo que exercita o filtro leve.
+let knowledgeDocs: Row[] = [];
+setModel("knowledgeDocument", { findMany: async () => knowledgeDocs, findFirst: async () => null });
 setModel("appConfig", {
   findUnique: async ({ where }: any) => (appConfig.has(where.key) ? { value: appConfig.get(where.key) } : null),
   upsert: async ({ where, update, create }: any) => {
@@ -282,6 +284,21 @@ try {
   assertNothingSensitive(sent);
   results.push("provider_payload_filtered=PASS");
 
+  // 3b. Base de Conhecimento: conteúdo técnico intacto, só e-mail/telefone/CPF/CNPJ formatados mascarados.
+  const technical = "Registro MAPA 12345678901, lote 2026123456789, EAN 7891234567895, Pronaf crédito de até R$ 250.000,00, 2 títulos de sementes, Rodovia BR 116, km 300.";
+  knowledgeDocs = [{
+    id: "kb-ficticio", title: "Ficha técnica ficticia", category: "tecnico", sourceType: "interno", sourceName: "teste", summary: null, tags: ["soja"],
+    content: `${technical} Dúvidas: suporte.kb@exemplo.test ou (21) 97654-3210.`
+  }];
+  await suggestion("recente");
+  sent = lastSent();
+  assert(sent.includes(technical), "conteúdo técnico da base chega intacto");
+  assert(!sent.includes("suporte.kb@exemplo.test") && !sent.includes("(21) 97654-3210"), "e-mail e telefone da base mascarados");
+  assert(!sent.includes("base-conhecimento"), "delimitadores não chegam ao provedor");
+  assertNothingSensitive(sent);
+  knowledgeDocs = [];
+  results.push("knowledge_base_light_filter=PASS");
+
   // 4. Arquivado fora de cada ponto de IA.
   assert.equal((await suggestion("arquivado")).status, 404);
   assert.equal((await whatsapp("arquivado")).status, 404);
@@ -330,6 +347,7 @@ try {
   assert.equal((await call("PUT", "/ai/usage-config", "seller-a", { dailyCallLimitPerUser: 1 })).status, 403);
   assert.equal((await call("PUT", "/ai/usage-config", "manager-a", { dailyCallLimitPerUser: 1 })).status, 403);
   assert.equal((await call("PUT", "/ai/usage-config", "director-a", { dailyCallLimitPerUser: 0 })).status, 400);
+  assert.equal((await call("PUT", "/ai/usage-config", "director-a", { dailyCallLimitPerUser: 1001 })).status, 400);
   assert.equal((await call("PUT", "/ai/usage-config", "director-a", { dailyCallLimitPerUser: 1 })).status, 200);
   assert.equal((await call("GET", "/ai/status", "director-a")).json.dailyCallLimitPerUser, 1);
   results.push("ai_status_management_only=PASS");
