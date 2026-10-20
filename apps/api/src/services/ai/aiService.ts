@@ -4,6 +4,8 @@ import { AiProviderError, estimateAiUsage, type AiChatRequest, type AiChatRespon
 import { OllamaProvider } from "./ollamaProvider.js";
 import { OpenAICompatibleProvider } from "./openAiCompatibleProvider.js";
 import { getDemetraMasterPrompt } from "./demetraMasterPrompt.js";
+import { sanitizeAiPayload } from "./aiPayloadSanitizer.js";
+import { AiUsageLimiter } from "./aiUsageLimiter.js";
 
 export type AiServiceStatus = {
   enabled: boolean;
@@ -15,6 +17,9 @@ export type AiServiceStatus = {
   timeoutMs: number;
   mode: string;
 };
+
+// Quem pediu a chamada, para o teto diário por usuário. Não vai para o provedor.
+export type AiChatOptions = { userId?: string | null };
 
 export type AiServiceChatResult = AiChatResponse & { provider: string };
 
@@ -34,7 +39,10 @@ export class AiService {
   private lastError: string | null = null;
   private fallback = false;
 
-  constructor(private readonly providerFactory?: AiProviderFactory) {}
+  constructor(
+    private readonly providerFactory?: AiProviderFactory,
+    readonly usageLimiter: AiUsageLimiter = new AiUsageLimiter()
+  ) {}
 
   private createProvider() {
     if (this.providerFactory) return this.providerFactory();
@@ -80,13 +88,14 @@ export class AiService {
     };
   }
 
-  async chat(request: AiChatRequest): Promise<AiServiceChatResult | null> {
+  async chat(request: AiChatRequest, options: AiChatOptions = {}): Promise<AiServiceChatResult | null> {
     const provider = this.getProvider();
     const status = provider.getStatus();
-    const chatRequest = {
+    // Todo pedido passa pelo filtro central antes de qualquer estimativa, log ou envio ao provedor.
+    const chatRequest = sanitizeAiPayload({
       ...request,
       system: request.system ?? getDemetraMasterPrompt()
-    };
+    });
     const requestUsageEstimate = estimateAiUsage(chatRequest.system ?? "") + chatRequest.messages.reduce((sum, message) => sum + estimateAiUsage(message.content), 0);
 
     if (!env.aiChatEnabled || !status.configured) {
@@ -102,18 +111,42 @@ export class AiService {
       return null;
     }
 
+    // Teto diário por usuário: acima dele, null sem erro (o fluxo usa o fallback determinístico). As duas
+    // tentativas abaixo contam como uma chamada.
+    const reservation = await this.usageLimiter.reserve(options.userId);
+    if (!reservation.allowed) {
+      logApiEvent("INFO", "[AI] daily-limit-reached", {
+        provider: status.provider,
+        model: status.model,
+        fallback: true,
+        userId: options.userId ?? null,
+        dayKey: reservation.dayKey,
+        callsToday: reservation.callsToday,
+        dailyLimit: reservation.limit
+      });
+      return null;
+    }
+
     for (let attempt = 1; attempt <= 2; attempt += 1) {
       try {
         const result = await provider.chat(chatRequest);
         this.lastError = null;
         this.fallback = false;
+        const usage = result.usage?.totalTokens ?? requestUsageEstimate;
+        const today = this.usageLimiter.recordUsage(options.userId, usage);
+        // Só números: nunca o conteúdo enviado ou recebido.
         logApiEvent("INFO", "[AI] chat-success", {
           provider: provider.name,
           model: provider.model,
           elapsedMs: result.elapsedMs,
-          usage: result.usage?.totalTokens ?? requestUsageEstimate,
+          usage,
           fallback: false,
-          attempt
+          attempt,
+          userId: options.userId ?? null,
+          dayKey: reservation.dayKey,
+          callsToday: today.callsToday,
+          usageToday: today.usageToday,
+          dailyLimit: reservation.limit
         });
         return { ...result, provider: provider.name };
       } catch (error) {
@@ -127,7 +160,11 @@ export class AiService {
           usage: requestUsageEstimate,
           fallback: true,
           error: summarizedError,
-          attempt
+          attempt,
+          userId: options.userId ?? null,
+          dayKey: reservation.dayKey,
+          callsToday: reservation.callsToday,
+          dailyLimit: reservation.limit
         });
         if (error instanceof AiProviderError && (error.isTimeout || [401, 404, 429].includes(error.status ?? 0))) break;
       }

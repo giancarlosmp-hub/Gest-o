@@ -1,33 +1,29 @@
 import type { OpportunityStage } from "@prisma/client";
 import { aiService, type AiService } from "./ai/aiService.js";
 import { DEMETRA_MASTER_PROMPT } from "./ai/demetraMasterPrompt.js";
-import type { ClientAiContextPayload } from "./clientAiContext.js";
+import { PORTFOLIO_APPROACH_LABELS, portfolioSituationLabel, type ClientAiContextPayload, type PortfolioApproach } from "./clientAiContext.js";
 import { logApiEvent } from "../utils/logger.js";
 import { resolveKnowledgeContextForAi } from "./knowledgeBaseService.js";
 import { parseAiTextResponse } from "./ai/aiResponseParser.js";
-
-const DAY_IN_MS = 24 * 60 * 60 * 1000;
 
 const compactText = (value?: string | null, maxLength = 220) => {
   const normalized = String(value || "").replace(/\s+/g, " ").trim();
   return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 1)}…` : normalized;
 };
 
-const daysSince = (value: Date | null | undefined, now: Date) => {
-  if (!value) return null;
-  const diff = Math.floor((now.getTime() - value.getTime()) / DAY_IN_MS);
-  return Number.isFinite(diff) && diff >= 0 ? diff : null;
-};
-
-const formatDate = (value: Date | null | undefined) => value ? new Intl.DateTimeFormat("pt-BR", { timeZone: "UTC" }).format(value) : null;
+const formatDate = (value: Date | null | undefined) => value ? new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo" }).format(value) : null;
 
 export type AssistantWhatsappContext = {
   nome: string;
   cidade: string | null;
   estado: string | null;
   vendedor: string | null;
+  // Situação oficial da carteira e a abordagem que ela pede (no lugar dos antigos 90 dias sem compra).
+  situacaoCarteira: string;
+  esfriando: boolean;
+  abordagem: PortfolioApproach;
+  objetivo: string;
   ultimaCompra: string | null;
-  diasSemCompra: number | null;
   ultimaAtividade: string | null;
   ultimaOportunidade: string | null;
   etapa: OpportunityStage | null;
@@ -39,8 +35,7 @@ export type AssistantWhatsappContext = {
 
 export const buildAssistantWhatsappContext = (
   clientContext: ClientAiContextPayload,
-  sellerName: string | null = null,
-  now: Date = new Date()
+  sellerName: string | null = null
 ): AssistantWhatsappContext => {
   const latestOpportunity = clientContext.recentOpportunities[0] || null;
   const latestActivity = clientContext.recentActivities[0] || null;
@@ -58,8 +53,11 @@ export const buildAssistantWhatsappContext = (
     cidade: compactText(clientContext.client.city, 80) || null,
     estado: compactText(clientContext.client.state, 20) || null,
     vendedor: compactText(sellerName, 80) || null,
-    ultimaCompra: formatDate(clientContext.commercialSummary.lastPurchaseDate),
-    diasSemCompra: daysSince(clientContext.commercialSummary.lastPurchaseDate, now),
+    situacaoCarteira: portfolioSituationLabel(clientContext.portfolio),
+    esfriando: clientContext.portfolio.cooling,
+    abordagem: clientContext.portfolio.approach,
+    objetivo: PORTFOLIO_APPROACH_LABELS[clientContext.portfolio.approach],
+    ultimaCompra: formatDate(clientContext.portfolio.lastPurchase?.date),
     ultimaAtividade: latestActivity
       ? compactText(latestActivity.description || latestActivity.notes || latestActivity.result, 180) || latestActivity.type
       : null,
@@ -78,11 +76,17 @@ export const buildAssistantWhatsappContext = (
   };
 };
 
+const DETERMINISTIC_OPENING_BY_APPROACH: Record<PortfolioApproach, string> = {
+  reativacao: "Faz um tempo que não movimentamos pedidos e lembrei de você por aqui na Demetra.",
+  primeiraVenda: "Queria me apresentar melhor e conhecer a sua operação aqui pela Demetra.",
+  recompra: "Está chegando a hora de pensar na reposição e lembrei de você por aqui na Demetra.",
+  manutencao: "Queria retomar nosso contato e lembrei de você por aqui na Demetra."
+};
+
 export const generateDeterministicAssistantWhatsappMessage = (context: AssistantWhatsappContext) => {
   const firstName = context.nome.split(/\s+/)[0] || context.nome;
   const topic = context.ultimaOportunidade || context.produtos[0] || "seu planejamento";
-  const inactivity = context.diasSemCompra != null && context.diasSemCompra > 90 ? "Faz um tempo que não movimentamos pedidos" : "Queria retomar nosso contato";
-  return `Oi ${firstName}, tudo bem? ${inactivity} e lembrei de você por aqui na Demetra. Podemos conversar rapidinho sobre ${topic} e ver se faz sentido para o momento da sua operação?`;
+  return `Oi ${firstName}, tudo bem? ${DETERMINISTIC_OPENING_BY_APPROACH[context.abordagem]} Podemos conversar rapidinho sobre ${topic} e ver se faz sentido para o momento da sua operação?`;
 };
 
 const buildKnowledgeQuery = (context: AssistantWhatsappContext) =>
@@ -93,7 +97,7 @@ const buildKnowledgeQuery = (context: AssistantWhatsappContext) =>
 const WHATSAPP_MESSAGE_INSTRUCTION = `Gere uma mensagem curta para WhatsApp.
 
 Objetivo:
-reativar relacionamento;
+seguir o campo "objetivo" do contexto (reativação, primeira venda, manutenção/recompra ou manutenção);
 estimular conversa;
 não parecer IA;
 máximo 100 palavras;
@@ -107,7 +111,7 @@ Retorne somente JSON válido no formato {"message":"..."}.`;
 
 const parseMessage = (content: string) => parseAiTextResponse(content, "message")?.text || null;
 
-export const generateAssistantWhatsappMessage = async (context: AssistantWhatsappContext, service: AiService = aiService) => {
+export const generateAssistantWhatsappMessage = async (context: AssistantWhatsappContext, service: AiService = aiService, userId: string | null = null) => {
   const startedAt = Date.now();
   const fallbackMessage = generateDeterministicAssistantWhatsappMessage(context);
   const knowledgeContext = await resolveKnowledgeContextForAi(buildKnowledgeQuery(context));
@@ -117,7 +121,7 @@ export const generateAssistantWhatsappMessage = async (context: AssistantWhatsap
     messages: [{ role: "user", content: [WHATSAPP_MESSAGE_INSTRUCTION, knowledgeContext.context, `Contexto comercial sanitizado:\n${JSON.stringify(context)}`].filter(Boolean).join("\n\n") }],
     temperature: 0.35,
     maxTokens: 180
-  });
+  }, { userId });
 
   if (!result) {
     const status = service.getStatus();

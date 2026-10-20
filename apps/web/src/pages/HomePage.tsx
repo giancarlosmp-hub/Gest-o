@@ -294,7 +294,7 @@ export default function HomePage() {
         const today = brazilTodayKey();
         const [activitiesResponse, opportunitiesResponse, activityKpisResponse, agendaResponse, prioritiesResponse] = await Promise.all([
           api.get("/activities", { signal }),
-          api.get("/opportunities?status=open", { signal }),
+          api.get("/opportunities?status=open&excludeArchivedClients=true", { signal }),
           api.get(`/activity-kpis?month=${dashboardQueryKey}`, { signal }),
           api.get(`/agenda/events?from=${today}&to=${today}`, { signal }),
           api.get("/ai/today-priorities", { signal })

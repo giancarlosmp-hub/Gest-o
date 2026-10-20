@@ -5,6 +5,8 @@ import { parseAiJsonObject } from "./ai/aiResponseParser.js";
 import { aiService } from "./ai/aiService.js";
 import { calculateCommercialPriority } from "./commercialPriorityService.js";
 import type { Prisma } from "@prisma/client";
+import { PORTFOLIO_APPROACH_LABELS, portfolioApproachOf, portfolioSituationLabel } from "./clientAiContext.js";
+import { isClientCoolingActive, loadLastSentCrmOrderByClient, portfolioStatusOf, resolveLastPurchase } from "./clientPortfolioStatus.js";
 
 export type TimelineIntelligenceInput = {
   clientId?: string;
@@ -74,7 +76,7 @@ export class TimelineIntelligenceService {
     let aiUsed = false;
     let fallbackUsed = true;
     try {
-      const ai = await this.enrichWithAi(context, signals, fallback);
+      const ai = await this.enrichWithAi(context, signals, fallback, input);
       if (ai) {
         result = { ...fallback, ...ai, priority: fallback.priority, generatedAt: new Date().toISOString(), source: "ai" };
         aiUsed = true;
@@ -98,13 +100,19 @@ export class TimelineIntelligenceService {
     const client = clientId ? await prisma.client.findFirst({ where: { id: clientId, isArchived: false, ...(input.opportunityId ? {} : baseWhere as Prisma.ClientWhereInput) }, select: { id: true, lastPurchaseDate: true, lastPurchaseValue: true, ownerSellerId: true, financialProfile: true, openTitlesTotal: true, overdueTitlesTotal: true } }) : null;
     if (!client) return null;
     const where = input.opportunityId ? { opportunityId: input.opportunityId } : { clientId: client.id };
-    const [eventsDesc, activitiesDesc, changeLogs, latestErpOrder] = await Promise.all([
+    const [eventsDesc, activitiesDesc, changeLogs, latestErpOrder, lastSentCrmOrderByClient] = await Promise.all([
       prisma.timelineEvent.findMany({ where: { ...where, createdAt: { gte: since } }, orderBy: { createdAt: "desc" }, take: MAX_EVENTS, select: { type: true, description: true, createdAt: true, clientId: true, opportunityId: true, ownerSellerId: true } }),
       prisma.activity.findMany({ where: { ...where, createdAt: { gte: since } }, orderBy: [{ date: "desc" }, { dueDate: "desc" }, { createdAt: "desc" }], take: MAX_ACTIVITIES, select: { type: true, notes: true, description: true, result: true, dueDate: true, date: true, done: true, createdAt: true, opportunityId: true, clientId: true, ownerSellerId: true } }),
       input.opportunityId ? prisma.opportunityChangeLog.findMany({ where: { opportunityId: input.opportunityId, createdAt: { gte: since } }, orderBy: { createdAt: "desc" }, take: 10, select: { field: true, oldValue: true, newValue: true, createdAt: true } }) : Promise.resolve([]),
-      input.opportunityId ? prisma.erpOrderSync.findFirst({ where: { opportunityId: input.opportunityId }, orderBy: { createdAt: "desc" }, select: { status: true, createdAt: true } }) : Promise.resolve(null)
+      input.opportunityId ? prisma.erpOrderSync.findFirst({ where: { opportunityId: input.opportunityId }, orderBy: { createdAt: "desc" }, select: { status: true, createdAt: true } }) : Promise.resolve(null),
+      // Última compra efetiva também considera o pedido sent do CRM (mesma fonte das prioridades do dia).
+      loadLastSentCrmOrderByClient({ id: client.id })
     ]);
-    return { entityType, client, opportunity, events: eventsDesc.reverse().map((e) => ({ ...e, description: sanitizeText(e.description) })), activities: activitiesDesc.reverse().map((a) => ({ ...a, notes: sanitizeText(a.notes), description: sanitizeText(a.description), result: sanitizeText(a.result) })), changeLogs: changeLogs.reverse(), latestErpOrder };
+    const now = new Date();
+    const status = portfolioStatusOf(client, lastSentCrmOrderByClient, now);
+    const cooling = isClientCoolingActive(client, lastSentCrmOrderByClient, now);
+    const portfolio = { status, cooling, approach: portfolioApproachOf(status, cooling), lastPurchase: resolveLastPurchase(client, lastSentCrmOrderByClient) };
+    return { entityType, client: { ...client, lastSentCrmOrderDate: lastSentCrmOrderByClient.get(client.id) ?? null }, portfolio, opportunity, events: eventsDesc.reverse().map((e) => ({ ...e, description: sanitizeText(e.description) })), activities: activitiesDesc.reverse().map((a) => ({ ...a, notes: sanitizeText(a.notes), description: sanitizeText(a.description), result: sanitizeText(a.result) })), changeLogs: changeLogs.reverse(), latestErpOrder };
   }
 
   analyzeDeterministically(context: NonNullable<Context>) {
@@ -122,7 +130,7 @@ export class TimelineIntelligenceService {
   }
 
   buildDeterministicResult(context: NonNullable<Context>, signals: ReturnType<TimelineIntelligenceService["analyzeDeterministically"]>): TimelineIntelligenceResult {
-    const subject = context.opportunity ? `Oportunidade aberta há ${daysSince(context.opportunity.createdAt, signals.now)} dias` : "Cliente com histórico comercial registrado";
+    const subject = context.opportunity ? `Oportunidade aberta há ${daysSince(context.opportunity.createdAt, signals.now)} dias` : `Cliente ${portfolioSituationLabel(context.portfolio).toLowerCase()}`;
     const follow = signals.overdueFollowUp ? ", com follow-up vencido" : "";
     const contact = signals.noRecentContactDays === null ? ", sem contato registrado" : `, último contato há ${signals.noRecentContactDays} dias`;
     const summary = `${subject}${follow}${contact}. Prioridade ${signals.priority.level}. Próxima ação recomendada: ${signals.priority.nextAction}.`;
@@ -130,9 +138,9 @@ export class TimelineIntelligenceService {
     return { summary, status: signals.status, highlights, changes: signals.progressed ? [{ description: "Houve mudança recente na evolução comercial.", evidence: context.changeLogs.map((c) => `${c.field}: ${c.oldValue ?? "-"} → ${c.newValue ?? "-"}`).slice(0, 2) }] : [], risks: signals.risks, positiveSignals: signals.progressed ? ["Progressão de etapa identificada"] : [], recommendedNextAction: signals.priority.nextAction, priority: { score: signals.priority.score, level: signals.priority.level, reasons: signals.priority.reasons }, generatedAt: new Date().toISOString(), source: "deterministic" };
   }
 
-  async enrichWithAi(context: NonNullable<Context>, signals: ReturnType<TimelineIntelligenceService["analyzeDeterministically"]>, fallback: TimelineIntelligenceResult) {
-    const dto = { entityType: context.entityType, timelineEvents: context.events.map((e) => ({ type: e.type, description: e.description, occurredAt: e.createdAt.toISOString() })), activities: context.activities.map((a) => ({ type: a.type, done: a.done, dueDate: a.dueDate.toISOString(), occurredAt: (a.date ?? a.createdAt).toISOString(), note: a.description || a.notes || a.result })), opportunity: context.opportunity ? { stage: context.opportunity.stage, value: context.opportunity.value, followUpDate: context.opportunity.followUpDate.toISOString(), createdAt: context.opportunity.createdAt.toISOString(), closedAt: context.opportunity.closedAt?.toISOString() ?? null } : null, lastPurchase: context.client.lastPurchaseDate ? { date: context.client.lastPurchaseDate.toISOString(), value: context.client.lastPurchaseValue } : null, signals: { overdueFollowUp: signals.overdueFollowUp, daysSinceLastContact: signals.noRecentContactDays, progressed: signals.progressed, officialPriority: fallback.priority, status: fallback.status } };
-    const response = await aiService.chat({ temperature: 0.2, maxTokens: 700, messages: [{ role: "user", content: `Resuma a timeline comercial em JSON controlado. Use somente os dados recebidos, não invente eventos, valores, causas ou intenções, indique incerteza quando necessário, limite summary a ~500 caracteres e listas a 3 itens. Dados sanitizados: ${JSON.stringify(dto)}` }] });
+  async enrichWithAi(context: NonNullable<Context>, signals: ReturnType<TimelineIntelligenceService["analyzeDeterministically"]>, fallback: TimelineIntelligenceResult, input: Pick<TimelineIntelligenceInput, "viewerUserId">) {
+    const dto = { entityType: context.entityType, timelineEvents: context.events.map((e) => ({ type: e.type, description: e.description, occurredAt: e.createdAt.toISOString() })), activities: context.activities.map((a) => ({ type: a.type, done: a.done, dueDate: a.dueDate.toISOString(), occurredAt: (a.date ?? a.createdAt).toISOString(), note: a.description || a.notes || a.result })), opportunity: context.opportunity ? { stage: context.opportunity.stage, followUpDate: context.opportunity.followUpDate.toISOString(), createdAt: context.opportunity.createdAt.toISOString(), closedAt: context.opportunity.closedAt?.toISOString() ?? null } : null, carteira: { situacao: portfolioSituationLabel(context.portfolio), esfriando: context.portfolio.cooling, abordagem: PORTFOLIO_APPROACH_LABELS[context.portfolio.approach], ultimaCompra: context.portfolio.lastPurchase?.date.toISOString() ?? null }, signals: { overdueFollowUp: signals.overdueFollowUp, daysSinceLastContact: signals.noRecentContactDays, progressed: signals.progressed, officialPriority: fallback.priority, status: fallback.status } };
+    const response = await aiService.chat({ temperature: 0.2, maxTokens: 700, messages: [{ role: "user", content: `Resuma a timeline comercial em JSON controlado. Use somente os dados recebidos, não invente eventos, valores, causas ou intenções, indique incerteza quando necessário, limite summary a ~500 caracteres e listas a 3 itens. Dados sanitizados: ${JSON.stringify(dto)}` }] }, { userId: input.viewerUserId });
     if (!response?.content) return null;
     const parsed = parseAiJsonObject(response.content);
     if (!parsed) return null;

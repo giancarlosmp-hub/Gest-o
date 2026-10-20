@@ -93,6 +93,7 @@ const clientContext: ClientAiContextPayload = {
     lastPurchaseDate: null,
     lastPurchaseValue: null
   },
+  portfolio: { status: "prospect", cooling: false, approach: "primeiraVenda", lastPurchase: null },
   recentActivities: [],
   recentOpportunities: [],
   latestObservation: null

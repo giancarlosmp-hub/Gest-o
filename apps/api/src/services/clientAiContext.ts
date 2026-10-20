@@ -1,9 +1,35 @@
 import { OpportunityStage, Prisma } from "@prisma/client";
+import { PORTFOLIO_STATUS_LABELS, type PortfolioStatus } from "@salesforce-pro/shared";
 import { prisma } from "../config/prisma.js";
+import { isClientCoolingActive, loadLastSentCrmOrderByClient, portfolioStatusOf, resolveLastPurchase, type LastPurchase } from "./clientPortfolioStatus.js";
 
 const OPEN_STAGES = [OpportunityStage.prospeccao, OpportunityStage.negociacao, OpportunityStage.proposta] as const;
 
 type ClientScope = Prisma.ClientWhereInput;
+
+// Abordagem comercial pela situação oficial da carteira: reativação para inativo recente e ex-cliente,
+// primeira venda para prospect, manutenção/recompra para ativo esfriando e manutenção para os demais ativos.
+export type PortfolioApproach = "reativacao" | "primeiraVenda" | "recompra" | "manutencao";
+
+export const PORTFOLIO_APPROACH_LABELS: Record<PortfolioApproach, string> = {
+  reativacao: "Reativação: retomar a compra de quem parou de comprar",
+  primeiraVenda: "Primeira venda: apresentar a empresa e entender a operação do cliente",
+  recompra: "Manutenção e recompra: antecipar a reposição antes que o cliente fique inativo",
+  manutencao: "Manutenção: manter o relacionamento e identificar nova demanda"
+};
+
+export const portfolioApproachOf = (status: PortfolioStatus, cooling: boolean): PortfolioApproach => {
+  if (status === "inativoRecente" || status === "exCliente") return "reativacao";
+  if (status === "prospect") return "primeiraVenda";
+  return cooling ? "recompra" : "manutencao";
+};
+
+export type ClientAiPortfolio = {
+  status: PortfolioStatus;
+  cooling: boolean;
+  approach: PortfolioApproach;
+  lastPurchase: LastPurchase | null;
+};
 
 export type ClientAiContextPayload = {
   client: {
@@ -24,6 +50,8 @@ export type ClientAiContextPayload = {
     lastPurchaseDate: Date | null;
     lastPurchaseValue: number | null;
   };
+  // Situação oficial da carteira (data do ERP ou pedido sent do CRM, o mais recente).
+  portfolio: ClientAiPortfolio;
   recentActivities: Array<{
     id: string;
     type: string;
@@ -63,10 +91,12 @@ const getTextFromActivity = (activity: { notes: string; description: string | nu
 
 export const buildClientAiContext = async ({
   clientId,
-  scope = {}
+  scope = {},
+  now = new Date()
 }: {
   clientId: string;
   scope?: ClientScope;
+  now?: Date;
 }): Promise<ClientAiContextPayload | null> => {
   const client = await prisma.client.findFirst({
     where: {
@@ -84,13 +114,15 @@ export const buildClientAiContext = async ({
       isArchived: true,
       archiveReason: true,
       lastPurchaseDate: true,
-      lastPurchaseValue: true
+      lastPurchaseValue: true,
+      financialProfile: true
     }
   });
 
   if (!client) return null;
 
-  const [openOpportunitiesCount, totalCompletedActivities, lastActivityAggregate, recentActivities, recentOpportunities, latestTimelineEvent] = await Promise.all([
+  const [lastSentCrmOrderByClient, openOpportunitiesCount, totalCompletedActivities, lastActivityAggregate, recentActivities, recentOpportunities, latestTimelineEvent] = await Promise.all([
+    loadLastSentCrmOrderByClient({ id: client.id }),
     prisma.opportunity.count({
       where: {
         clientId: client.id,
@@ -182,6 +214,8 @@ export const buildClientAiContext = async ({
   const latestActivityObservation = latestActivityWithText ? getTextFromActivity(latestActivityWithText) : null;
   const latestActivityTimestamp = latestActivityWithText ? getActivityEventDate(latestActivityWithText).getTime() : 0;
   const latestTimelineTimestamp = latestTimelineEvent?.createdAt.getTime() ?? 0;
+  const portfolioStatus = portfolioStatusOf(client, lastSentCrmOrderByClient, now);
+  const cooling = isClientCoolingActive(client, lastSentCrmOrderByClient, now);
 
   return {
     client: {
@@ -202,6 +236,12 @@ export const buildClientAiContext = async ({
       lastPurchaseDate: client.lastPurchaseDate,
       lastPurchaseValue: client.lastPurchaseValue
     },
+    portfolio: {
+      status: portfolioStatus,
+      cooling,
+      approach: portfolioApproachOf(portfolioStatus, cooling),
+      lastPurchase: resolveLastPurchase(client, lastSentCrmOrderByClient)
+    },
     recentActivities: recentActivities.map((activity) => ({
       id: activity.id,
       type: activity.type,
@@ -221,3 +261,47 @@ export const buildClientAiContext = async ({
         : (latestTimelineEvent?.description?.trim() || latestActivityObservation)
   };
 };
+
+const compactText = (value: string | null | undefined, maxLength: number) => {
+  const normalized = String(value || "").replace(/\s+/g, " ").trim();
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 1)}…` : normalized;
+};
+
+const formatBrazilDate = (value: Date | null | undefined) =>
+  value ? new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo" }).format(value) : null;
+
+export const portfolioSituationLabel = (portfolio: Pick<ClientAiPortfolio, "status" | "cooling">) =>
+  `${PORTFOLIO_STATUS_LABELS[portfolio.status]}${portfolio.cooling ? " (esfriando)" : ""}`;
+
+// O que vai para a IA externa sobre o cliente: nome, cidade/UF, situação da carteira, data da última compra e
+// textos operacionais curtos. Sem ids, valores, potencial ou motivo de arquivamento. O AiService ainda passa tudo
+// pelo filtro central (sanitizeAiPayload).
+export const buildClientAiPromptContext = (context: ClientAiContextPayload) => ({
+  cliente: {
+    nome: compactText(context.client.name, 100),
+    cidade: compactText(context.client.city, 80) || null,
+    uf: compactText(context.client.state, 20) || null
+  },
+  carteira: {
+    situacao: portfolioSituationLabel(context.portfolio),
+    esfriando: context.portfolio.cooling,
+    ultimaCompra: formatBrazilDate(context.portfolio.lastPurchase?.date),
+    abordagem: PORTFOLIO_APPROACH_LABELS[context.portfolio.approach]
+  },
+  resumo: {
+    oportunidadesAbertas: context.commercialSummary.openOpportunitiesCount,
+    atividadesConcluidas: context.commercialSummary.totalCompletedActivities,
+    ultimaAtividade: formatBrazilDate(context.commercialSummary.lastActivityAt)
+  },
+  oportunidadesAbertas: context.recentOpportunities.slice(0, 5).map((opportunity) => ({
+    titulo: compactText(opportunity.title, 120),
+    etapa: opportunity.stage,
+    retorno: formatBrazilDate(opportunity.followUpDate)
+  })),
+  historicoRecente: context.recentActivities.slice(0, 5).map((activity) => ({
+    tipo: activity.type,
+    data: formatBrazilDate(getActivityEventDate(activity)),
+    texto: compactText(getTextFromActivity(activity), 160) || null
+  })),
+  observacaoRecente: compactText(context.latestObservation, 220) || null
+});

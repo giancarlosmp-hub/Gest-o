@@ -92,7 +92,7 @@ export class PlanningIntelligenceService {
     let aiUsed = false;
     let fallbackUsed = true;
     try {
-      const ai = await this.enrichWithAi(base);
+      const ai = await this.enrichWithAi(base, input.viewerUserId);
       if (ai) { result = { ...base, ...ai, source: "ai", generatedAt: new Date().toISOString() }; aiUsed = true; fallbackUsed = false; }
     } catch {
       logApiEvent("WARN", "[commercial-planning] fallback", { sellerId, candidateCount: candidates.length, fallbackUsed: true });
@@ -219,9 +219,9 @@ export class PlanningIntelligenceService {
     return pool.find((day) => { const s = state.get(day.date)!; return s.actions < COMMERCIAL_PLANNING_DEFAULTS.maxActionsPerDay && (candidate.type !== "visit" || s.visits < COMMERCIAL_PLANNING_DEFAULTS.maxVisitsPerDay); }) || null;
   }
 
-  private async enrichWithAi(base: WeeklyCommercialPlan) {
+  private async enrichWithAi(base: WeeklyCommercialPlan, userId: string) {
     const dto = { weekStart: base.weekStart, weekEnd: base.weekEnd, workload: base.workload, days: base.days.map((d) => ({ date: d.date, existingAppointments: d.existingAppointments.length, suggestedActions: d.suggestedActions.map((a) => ({ type: a.type, score: a.score, priorityLevel: a.priorityLevel, reason: a.reason, source: a.source })) })) };
-    const response = await aiService.chat({ system: "Você melhora o resumo de um planejamento comercial semanal para um CRM brasileiro. Responda sempre em português do Brasil. Não invente clientes, cidades, compromissos, scores ou datas. Responda JSON com summary e warnings também em português.", messages: [{ role: "user", content: JSON.stringify(dto) }], temperature: 0.2, maxTokens: 600 });
+    const response = await aiService.chat({ system: "Você melhora o resumo de um planejamento comercial semanal para um CRM brasileiro. Responda sempre em português do Brasil. Não invente clientes, cidades, compromissos, scores ou datas. Responda JSON com summary e warnings também em português.", messages: [{ role: "user", content: JSON.stringify(dto) }], temperature: 0.2, maxTokens: 600 }, { userId });
     const parsed = response?.content ? parseAiJsonObject(response.content) : null;
     if (!parsed) return null;
     const valid = aiSchema.safeParse(parsed.parsed);

@@ -4,6 +4,7 @@ import { DEMETRA_MASTER_PROMPT } from "./ai/demetraMasterPrompt.js";
 import { logApiEvent } from "../utils/logger.js";
 import { resolveKnowledgeContextForAi } from "./knowledgeBaseService.js";
 import { parseAiTextResponse } from "./ai/aiResponseParser.js";
+import { PORTFOLIO_APPROACH_LABELS, portfolioApproachOf, portfolioSituationLabel, type ClientAiPortfolio } from "./clientAiContext.js";
 
 type OpportunityHistoryItem = {
   description: string;
@@ -26,6 +27,8 @@ export type SalesMessageOpportunityInput = {
   lastContactAt?: Date | null;
   createdAt?: Date;
   timelineEvents?: OpportunityHistoryItem[];
+  // Situação oficial da carteira do cliente da oportunidade (vai para a IA no lugar de valor e probabilidade).
+  portfolio?: Pick<ClientAiPortfolio, "status" | "cooling" | "lastPurchase"> | null;
   activities?: { createdAt: Date; date?: Date | null; notes?: string | null; description?: string | null; result?: string | null; product?: string | null }[];
 };
 
@@ -222,8 +225,9 @@ const buildAiSalesMessageContext = (opportunity: SalesMessageOpportunityInput, n
     cidade: compactText(opportunity.city, 80) || null,
     estado: compactText(opportunity.state, 20) || null,
     etapaDaOportunidade: opportunity.stage,
-    valor: typeof opportunity.value === "number" && Number.isFinite(opportunity.value) ? opportunity.value : null,
-    probabilidade: typeof opportunity.probability === "number" && Number.isFinite(opportunity.probability) ? opportunity.probability : null,
+    situacaoCarteira: opportunity.portfolio ? portfolioSituationLabel(opportunity.portfolio) : null,
+    ultimaCompra: opportunity.portfolio?.lastPurchase ? new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo" }).format(opportunity.portfolio.lastPurchase.date) : null,
+    abordagem: opportunity.portfolio ? PORTFOLIO_APPROACH_LABELS[portfolioApproachOf(opportunity.portfolio.status, opportunity.portfolio.cooling)] : null,
     diasSemContato: getDaysWithoutInteraction(opportunity, now),
     diasParaRetorno: daysBetween(opportunity.followUpDate, now),
     ultimaAtividade: activityTexts[0] || null,
@@ -260,7 +264,7 @@ const INVALID_SALES_MESSAGE = "Não foi possível gerar a mensagem comercial.";
 
 const parseAiSalesMessage = (content: string) => parseAiTextResponse(content, "message")?.text || null;
 
-export const generateSalesMessage = async (opportunity: SalesMessageOpportunityInput, service: AiService = aiService) => {
+export const generateSalesMessage = async (opportunity: SalesMessageOpportunityInput, service: AiService = aiService, userId: string | null = null) => {
   const startedAt = Date.now();
   const fallbackMessage = generateDeterministicSalesMessage(opportunity);
   const now = new Date();
@@ -277,7 +281,7 @@ export const generateSalesMessage = async (opportunity: SalesMessageOpportunityI
     ],
     temperature: 0.35,
     maxTokens: 220
-  });
+  }, { userId });
 
   if (!result) {
     const status = service.getStatus();
