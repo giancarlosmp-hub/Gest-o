@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { AiChatRequest } from "./aiProvider.js";
 
 // Filtro central do que vai para o provedor de IA externo (decisão de 18/10/2026): do cliente, só nome e
@@ -5,6 +6,8 @@ import type { AiChatRequest } from "./aiProvider.js";
 // IE, RG), telefone, celular, e-mail, endereço nem valores de títulos e crédito.
 // Roda em toda chamada do AiService sobre o texto final: objetos JSON embutidos perdem os campos de nome
 // proibido e os padrões são mascarados em qualquer texto livre. Um campo novo no contexto passa pelo mesmo filtro.
+// Exceção (decisão de 20/10/2026): o trecho da Base de Conhecimento traz conteúdo técnico (registro MAPA/RNC, lote,
+// EAN, linhas de crédito rural, rodovias) e passa só pelo filtro leve: CPF/CNPJ formatados, e-mail e telefone.
 
 const normalizeKey = (key: string) => key.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
 
@@ -57,16 +60,31 @@ const TEXT_RULES: Array<[RegExp, string]> = [
   [/\b\d[\d.,]*(\s+t[ií]tulos?\b)/gi, `${VALUE_MASK}$1`]
 ];
 
-export const maskAiText = (text: string) => TEXT_RULES.reduce((current, [pattern, replacement]) => current.replace(pattern, replacement), text);
+// Filtro leve da Base de Conhecimento: só formatos inequívocos. Números longos, R$, rodovias e "títulos" ficam.
+const KNOWLEDGE_TEXT_RULES: Array<[RegExp, string]> = [
+  [/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, EMAIL_MASK],
+  [/\b\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}\b/g, DOCUMENT_MASK],
+  [/\b\d{3}\.\d{3}\.\d{3}-\d{2}\b/g, DOCUMENT_MASK],
+  [/\+55\s?\(?\d{2}\)?\s?9?\d{4}[-\s]?\d{4}\b/g, PHONE_MASK],
+  [/\(\d{2}\)\s?9?\d{4}[-\s]?\d{4}\b/g, PHONE_MASK],
+  [/\b\d{2}[\s.-](?:9\d{4}|[2-5]\d{3})[\s-]\d{4}\b/g, PHONE_MASK],
+  [/\b9\d{4}-\d{4}\b/g, PHONE_MASK]
+];
 
-export const sanitizeAiValue = (value: unknown): unknown => {
-  if (typeof value === "string") return maskAiText(value);
-  if (Array.isArray(value)) return value.map((item) => sanitizeAiValue(item));
+type TextMask = (text: string) => string;
+const applyRules = (rules: Array<[RegExp, string]>, text: string) => rules.reduce((current, [pattern, replacement]) => current.replace(pattern, replacement), text);
+
+export const maskAiText: TextMask = (text) => applyRules(TEXT_RULES, text);
+export const maskKnowledgeText: TextMask = (text) => applyRules(KNOWLEDGE_TEXT_RULES, text);
+
+export const sanitizeAiValue = (value: unknown, mask: TextMask = maskAiText): unknown => {
+  if (typeof value === "string") return mask(value);
+  if (Array.isArray(value)) return value.map((item) => sanitizeAiValue(item, mask));
   if (value && typeof value === "object") {
     return Object.fromEntries(
       Object.entries(value as Record<string, unknown>)
         .filter(([key]) => !isForbiddenAiKey(key))
-        .map(([key, nested]) => [key, sanitizeAiValue(nested)])
+        .map(([key, nested]) => [key, sanitizeAiValue(nested, mask)])
     );
   }
   return value;
@@ -93,7 +111,7 @@ const findJsonEnd = (text: string, start: number) => {
   return -1;
 };
 
-const sanitizeEmbeddedJson = (text: string) => {
+const sanitizeEmbeddedJson = (text: string, mask: TextMask) => {
   let output = "";
   let cursor = 0;
   for (let index = 0; index < text.length; index += 1) {
@@ -108,7 +126,7 @@ const sanitizeEmbeddedJson = (text: string) => {
       continue;
     }
     if (!parsed || typeof parsed !== "object") continue;
-    output += text.slice(cursor, index) + JSON.stringify(sanitizeAiValue(parsed));
+    output += text.slice(cursor, index) + JSON.stringify(sanitizeAiValue(parsed, mask));
     cursor = end + 1;
     index = end;
   }
@@ -120,7 +138,31 @@ const JSON_PAIR_PATTERN = /"((?:[^"\\]|\\.){1,80})"(\s*:\s*)("(?:[^"\\]|\\.)*"|-
 const maskForbiddenJsonPairs = (text: string) =>
   text.replace(JSON_PAIR_PATTERN, (match, key: string, separator: string) => (isForbiddenAiKey(key) ? `"${key}"${separator}"[removido]"` : match));
 
-export const sanitizeAiText = (text: string) => maskAiText(maskForbiddenJsonPairs(sanitizeEmbeddedJson(text)));
+const sanitizeSegment = (text: string, mask: TextMask) => mask(maskForbiddenJsonPairs(sanitizeEmbeddedJson(text, mask)));
+
+// Marcação estrutural do trecho da Base de Conhecimento, feita por resolveKnowledgeContextForAi antes de o trecho
+// entrar na mensagem. O token é aleatório por processo e os delimitadores nunca chegam ao provedor, então um texto
+// de cliente não consegue abrir nem fechar o trecho. Trecho sem fechamento (cortado) volta ao filtro completo.
+const KNOWLEDGE_TOKEN = randomUUID();
+const KNOWLEDGE_START = `[[base-conhecimento:${KNOWLEDGE_TOKEN}]]`;
+const KNOWLEDGE_END = `[[/base-conhecimento:${KNOWLEDGE_TOKEN}]]`;
+const stripKnowledgeMarkers = (text: string) => text.split(KNOWLEDGE_START).join("").split(KNOWLEDGE_END).join("");
+
+export const markKnowledgeContextForAi = (text: string) => (text ? `${KNOWLEDGE_START}${text}${KNOWLEDGE_END}` : text);
+
+export const sanitizeAiText = (text: string) => {
+  let output = "";
+  let cursor = 0;
+  for (;;) {
+    const start = text.indexOf(KNOWLEDGE_START, cursor);
+    const end = start === -1 ? -1 : text.indexOf(KNOWLEDGE_END, start + KNOWLEDGE_START.length);
+    if (end === -1) break;
+    output += sanitizeSegment(stripKnowledgeMarkers(text.slice(cursor, start)), maskAiText);
+    output += sanitizeSegment(stripKnowledgeMarkers(text.slice(start + KNOWLEDGE_START.length, end)), maskKnowledgeText);
+    cursor = end + KNOWLEDGE_END.length;
+  }
+  return output + sanitizeSegment(stripKnowledgeMarkers(text.slice(cursor)), maskAiText);
+};
 
 export const sanitizeAiPayload = <T extends AiChatRequest>(request: T): T => ({
   ...request,
