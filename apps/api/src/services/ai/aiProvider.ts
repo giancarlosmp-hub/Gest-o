@@ -8,16 +8,21 @@ export interface AiChatRequest {
   }[];
   temperature?: number;
   maxTokens?: number;
+  // O fluxo espera JSON. O provedor decide se consegue pedir o modo JSON nativo.
+  responseFormat?: "json_object";
 }
 
 export interface AiChatResponse {
   content: string;
   model: string;
   elapsedMs: number;
+  // "length" quer dizer resposta cortada pelo max_tokens.
+  finishReason?: string;
   usage?: {
     promptTokens?: number;
     completionTokens?: number;
     totalTokens?: number;
+    reasoningTokens?: number;
   };
 }
 

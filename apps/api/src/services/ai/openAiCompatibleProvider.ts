@@ -14,6 +14,16 @@ const normalizeBaseUrl = (value: string) => value.trim().replace(/\/+$/, "");
 
 const readNumber = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : undefined);
 
+const readObject = (value: unknown) => (value && typeof value === "object" ? value as Record<string, unknown> : null);
+
+// Parâmetros só do OpenRouter (https://openrouter.ai/docs/use-cases/reasoning-tokens): raciocínio com esforço
+// baixo e fora da resposta, para não gastar o max_tokens. Provedores que não suportam um parâmetro o ignoram
+// (https://openrouter.ai/docs/guides/routing/provider-selection). "none" não vai porque modelos com raciocínio
+// obrigatório o recusam.
+export const OPENROUTER_REASONING = { effort: "low", exclude: true } as const;
+
+const isOpenRouter = (providerName: string) => providerName.trim().toLowerCase() === "openrouter";
+
 export class OpenAICompatibleProvider implements AiProvider {
   readonly name: string;
   readonly mode: string = "openai-compatible-chat-completions";
@@ -62,7 +72,13 @@ export class OpenAICompatibleProvider implements AiProvider {
           model: this.model,
           messages,
           temperature: request.temperature ?? this.defaultTemperature,
-          max_tokens: request.maxTokens ?? this.defaultMaxTokens
+          max_tokens: request.maxTokens ?? this.defaultMaxTokens,
+          ...(isOpenRouter(this.name)
+            ? {
+                reasoning: OPENROUTER_REASONING,
+                ...(request.responseFormat === "json_object" ? { response_format: { type: "json_object" } } : {})
+              }
+            : {})
         })
       });
       const elapsedMs = Date.now() - startedAt;
@@ -79,18 +95,23 @@ export class OpenAICompatibleProvider implements AiProvider {
       const choices = Array.isArray(body.choices) ? body.choices : [];
       const firstChoice = choices[0] as Record<string, unknown> | undefined;
       const message = firstChoice?.message as Record<string, unknown> | undefined;
+      // Só o content: o raciocínio (message.reasoning, reasoning_details) nunca é lido.
       const content = typeof message?.content === "string" ? message.content : "";
-      const usage = body.usage && typeof body.usage === "object" ? body.usage as Record<string, unknown> : null;
+      const finishReason = typeof firstChoice?.finish_reason === "string" ? firstChoice.finish_reason : undefined;
+      const usage = readObject(body.usage);
+      const completionDetails = readObject(usage?.completion_tokens_details);
 
       return {
         content,
         model: this.model,
         elapsedMs,
+        finishReason,
         usage: usage
           ? {
               promptTokens: readNumber(usage.prompt_tokens),
               completionTokens: readNumber(usage.completion_tokens),
-              totalTokens: readNumber(usage.total_tokens)
+              totalTokens: readNumber(usage.total_tokens),
+              reasoningTokens: readNumber(completionDetails?.reasoning_tokens)
             }
           : undefined
       };

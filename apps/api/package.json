@@ -55,6 +55,7 @@
     "test:client-list-filters": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/routes/clientListFilters.http.test.ts",
     "test:portfolio-without-purchase-cooling": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/routes/portfolioWithoutPurchaseCooling.http.test.ts",
     "test:portfolio-priority-planning": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/services/commercialPriorityService.test.ts && tsx src/services/ai/calculateTodayPriorities.test.ts && tsx src/services/commercialInsightsService.test.ts && tsx src/services/planningIntelligenceService.test.ts && tsx src/services/agendaIntelligenceService.test.ts && tsx src/routes/portfolioPriorityPlanning.http.test.ts",
+    "test:ai-reasoning-compat": "tsx src/services/ai/aiReasoningCompat.test.ts",
     "test:ai-context-official-rule": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/services/ai/aiPayloadSanitizer.test.ts && tsx src/routes/aiContextOfficialRule.http.test.ts",
     "test:erp-order-open-errors": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/services/erpOrderOpenErrors.test.ts",
     "smoke:ultrafv3-order-number-parser": "tsx src/scripts/ultraFv3OrderNumberParserSmoke.ts",
