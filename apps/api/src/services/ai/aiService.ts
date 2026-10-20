@@ -130,8 +130,10 @@ export class AiService {
     for (let attempt = 1; attempt <= 2; attempt += 1) {
       try {
         const result = await provider.chat(chatRequest);
-        this.lastError = null;
-        this.fallback = false;
+        // Resposta cortada pelo max_tokens não é aproveitada: o fluxo usa o fallback. Não repete a chamada.
+        const truncated = result.finishReason === "length";
+        this.lastError = truncated ? "ai_truncated" : null;
+        this.fallback = truncated;
         const usage = result.usage?.totalTokens ?? requestUsageEstimate;
         const today = this.usageLimiter.recordUsage(options.userId, usage);
         // Só números: nunca o conteúdo enviado ou recebido.
@@ -140,7 +142,12 @@ export class AiService {
           model: provider.model,
           elapsedMs: result.elapsedMs,
           usage,
-          fallback: false,
+          finishReason: result.finishReason ?? null,
+          // Sem "token" no nome: o logger mascara essas chaves.
+          completionUsage: result.usage?.completionTokens ?? null,
+          reasoningUsage: result.usage?.reasoningTokens ?? null,
+          fallback: truncated,
+          ...(truncated ? { error: "ai_truncated" } : {}),
           attempt,
           userId: options.userId ?? null,
           dayKey: reservation.dayKey,
@@ -148,6 +155,7 @@ export class AiService {
           usageToday: today.usageToday,
           dailyLimit: reservation.limit
         });
+        if (truncated) return null;
         return { ...result, provider: provider.name };
       } catch (error) {
         const summarizedError = summarizeError(error);
