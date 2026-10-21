@@ -2,6 +2,7 @@ import { OpportunityStage } from "@prisma/client";
 import { prisma } from "../config/prisma.js";
 import { logApiEvent } from "../utils/logger.js";
 import { aiService, type AiService } from "./ai/aiService.js";
+import { timeAiStage } from "./ai/aiTimeBudget.js";
 import { DEMETRA_MASTER_PROMPT } from "./ai/demetraMasterPrompt.js";
 import { resolveKnowledgeContextForAi } from "./knowledgeBaseService.js";
 import { parseAiJsonObject } from "./ai/aiResponseParser.js";
@@ -160,7 +161,7 @@ const collectDeterministicContext = async () => {
 
 const buildFreshInsights = async (service: AiService = aiService): Promise<CacheEntry> => {
   const startedAt = Date.now();
-  const context = await collectDeterministicContext();
+  const context = await timeAiStage("context", () => collectDeterministicContext());
   const knowledge = await resolveKnowledgeContextForAi(context.query);
   const fallbackPayload = deterministicSummary(context.priorities, context.stats);
   let payload = fallbackPayload;

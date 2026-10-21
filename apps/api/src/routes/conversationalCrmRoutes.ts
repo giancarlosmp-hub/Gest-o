@@ -3,6 +3,7 @@ import { z } from "zod";
 import { authMiddleware } from "../middlewares/auth.js";
 import { appUsageRateLimit } from "../middlewares/rateLimit.js";
 import { conversationalCrmService } from "../services/conversationalCrmService.js";
+import { runAiFlow } from "../services/ai/aiTimeBudget.js";
 import { logApiEvent } from "../utils/logger.js";
 
 const router = Router();
@@ -11,7 +12,7 @@ router.use(appUsageRateLimit);
 
 router.post("/crm-assistant/query", async (req, res) => {
   try {
-    const response = await conversationalCrmService.query(req.body, req.user!);
+    const response = await runAiFlow("crm-assistant", () => conversationalCrmService.query(req.body, req.user!), (value) => value.source);
     return res.status(200).json(response);
   } catch (error) {
     const status = typeof (error as any)?.statusCode === "number" ? (error as any).statusCode : error instanceof z.ZodError ? 400 : 500;

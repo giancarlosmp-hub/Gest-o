@@ -47,13 +47,14 @@ import { ActivityType, ClientType, ErpOrderSyncStatus, ErpSyncTrigger, Opportuni
 import { z } from "zod";
 import { hashPassword } from "../utils/password.js";
 import { calculateOpportunityRisk } from "../services/opportunityInsight.js";
-import { generateSalesMessage } from "../services/opportunitySalesMessage.js";
+import { generateSalesMessageResult } from "../services/opportunitySalesMessage.js";
 import { buildClientAiContext } from "../services/clientAiContext.js";
 import { isClientCoolingActive, listPortfolioSegment, loadLastSentCrmOrderByClient, portfolioStatusOf, resolveLastPurchase } from "../services/clientPortfolioStatus.js";
 import { aiUsageConfigSchema, saveAiUsageConfig } from "../services/ai/aiUsageLimiter.js";
 import { generateClientSuggestion } from "../services/clientSuggestion.js";
 import { buildAssistantWhatsappContext, generateAssistantWhatsappMessage } from "../services/assistantWhatsapp.js";
 import { aiService } from "../services/ai/aiService.js";
+import { runAiFlow, timeAiStage } from "../services/ai/aiTimeBudget.js";
 import {
   calculateTodayPriorities,
   generateClientSummary,
@@ -4275,13 +4276,13 @@ router.get("/ai/timeline-intelligence/client/:clientId", async (req, res) => {
     return res.status(400).json({ message: "Parâmetros inválidos", errors: parsed.success ? [] : parsed.error.issues });
   }
 
-  const result = await timelineIntelligenceService.generateTimelineIntelligence({
+  const result = await runAiFlow("timeline-intelligence", () => timelineIntelligenceService.generateTimelineIntelligence({
     clientId: parsed.data.clientId,
     viewerUserId: req.user!.id,
     viewerRole: req.user!.role,
     scope: sellerWhere(req),
     refresh: req.query.refresh === "true"
-  });
+  }), (value) => value?.source ?? null);
 
   if (!result) return res.status(404).json({ message: "Cliente não encontrado" });
   return res.json(result);
@@ -4293,13 +4294,13 @@ router.get("/ai/timeline-intelligence/opportunity/:opportunityId", async (req, r
     return res.status(400).json({ message: "Parâmetros inválidos", errors: parsed.success ? [] : parsed.error.issues });
   }
 
-  const result = await timelineIntelligenceService.generateTimelineIntelligence({
+  const result = await runAiFlow("timeline-intelligence", () => timelineIntelligenceService.generateTimelineIntelligence({
     opportunityId: parsed.data.opportunityId,
     viewerUserId: req.user!.id,
     viewerRole: req.user!.role,
     scope: sellerWhere(req),
     refresh: req.query.refresh === "true"
-  });
+  }), (value) => value?.source ?? null);
 
   if (!result) return res.status(404).json({ message: "Oportunidade não encontrada" });
   return res.json(result);
@@ -4344,16 +4345,18 @@ router.post("/ai/client-suggestion", async (req, res) => {
   }
 
   // Cliente arquivado fica fora da IA: 404, como /ai/client-summary.
-  const context = await buildClientAiContext({
-    clientId: parsed.data.clientId,
-    scope: { ...sellerWhere(req), isArchived: false }
-  });
+  const suggestion = await runAiFlow("client-suggestion", async () => {
+    const context = await timeAiStage("context", () => buildClientAiContext({
+      clientId: parsed.data.clientId,
+      scope: { ...sellerWhere(req), isArchived: false }
+    }));
+    return context ? generateClientSuggestion(context, { userId: req.user!.id }) : null;
+  }, (value) => value?.source ?? null);
 
-  if (!context) {
+  if (!suggestion) {
     return res.status(404).json({ message: "Cliente não encontrado" });
   }
 
-  const suggestion = await generateClientSuggestion(context, { userId: req.user!.id });
   return res.json(suggestion);
 });
 
@@ -4367,17 +4370,17 @@ router.post("/ai/assistant-whatsapp-message", async (req, res) => {
     return res.status(400).json({ message: "Payload inválido", errors: parsed.error.issues });
   }
 
-  const context = await buildClientAiContext({
-    clientId: parsed.data.clientId,
-    scope: { ...sellerWhere(req), isArchived: false }
-  });
+  const result = await runAiFlow("assistant-whatsapp", async () => {
+    const context = await timeAiStage("context", () => buildClientAiContext({
+      clientId: parsed.data.clientId,
+      scope: { ...sellerWhere(req), isArchived: false }
+    }));
+    return context ? generateAssistantWhatsappMessage(buildAssistantWhatsappContext(context), aiService, req.user!.id) : null;
+  }, (value) => value?.source ?? null);
 
-  if (!context) {
+  if (!result) {
     return res.status(404).json({ message: "Cliente não encontrado" });
   }
-
-  const sanitizedContext = buildAssistantWhatsappContext(context);
-  const result = await generateAssistantWhatsappMessage(sanitizedContext, aiService, req.user!.id);
 
   return res.json(result);
 });
@@ -5556,32 +5559,35 @@ router.get("/ai/opportunity-message", async (req, res) => {
 
   // Situação oficial da carteira do cliente (ERP ou pedido sent do CRM), para a abordagem da mensagem.
   const now = new Date();
-  const lastSentCrmOrderByClient = await loadLastSentCrmOrderByClient({ id: opportunity.clientId });
-  const message = await generateSalesMessage({
-    clientName: opportunity.client?.name || null,
-    title: opportunity.title,
-    crop: opportunity.crop,
-    productOffered: opportunity.productOffered,
-    stage: opportunity.stage,
-    city: opportunity.client?.city || null,
-    state: opportunity.client?.state || null,
-    sellerName: opportunity.ownerSeller?.name || null,
-    value: opportunity.value,
-    probability: opportunity.probability,
-    notes: opportunity.notes,
-    followUpDate: opportunity.followUpDate,
-    lastContactAt: opportunity.lastContactAt,
-    createdAt: opportunity.createdAt,
-    timelineEvents: opportunity.timelineEvents,
-    activities: opportunity.activities,
-    portfolio: {
-      status: portfolioStatusOf(opportunity.client, lastSentCrmOrderByClient, now),
-      cooling: isClientCoolingActive(opportunity.client, lastSentCrmOrderByClient, now),
-      lastPurchase: resolveLastPurchase(opportunity.client, lastSentCrmOrderByClient)
-    }
-  }, aiService, req.user!.id);
+  const { message, source } = await runAiFlow("opportunity-message", async () => {
+    const lastSentCrmOrderByClient = await timeAiStage("context", () => loadLastSentCrmOrderByClient({ id: opportunity.clientId }));
+    return generateSalesMessageResult({
+      clientName: opportunity.client?.name || null,
+      title: opportunity.title,
+      crop: opportunity.crop,
+      productOffered: opportunity.productOffered,
+      stage: opportunity.stage,
+      city: opportunity.client?.city || null,
+      state: opportunity.client?.state || null,
+      sellerName: opportunity.ownerSeller?.name || null,
+      value: opportunity.value,
+      probability: opportunity.probability,
+      notes: opportunity.notes,
+      followUpDate: opportunity.followUpDate,
+      lastContactAt: opportunity.lastContactAt,
+      createdAt: opportunity.createdAt,
+      timelineEvents: opportunity.timelineEvents,
+      activities: opportunity.activities,
+      portfolio: {
+        status: portfolioStatusOf(opportunity.client, lastSentCrmOrderByClient, now),
+        cooling: isClientCoolingActive(opportunity.client, lastSentCrmOrderByClient, now),
+        lastPurchase: resolveLastPurchase(opportunity.client, lastSentCrmOrderByClient)
+      }
+    }, aiService, req.user!.id);
+  }, (value) => value.source);
 
-  return res.json({ message });
+  // source: "ai" quando o texto veio da IA; "deterministic" para o texto do sistema.
+  return res.json({ message, source });
 });
 
 
@@ -5590,13 +5596,13 @@ router.get("/ai/agenda-intelligence/day", async (req, res) => {
   const date = req.query.date as string | undefined;
   if (!date) return res.status(400).json({ message: "Informe date=YYYY-MM-DD." });
   try {
-    const result = await agendaIntelligenceService.generateAgendaOptimization({
+    const result = await runAiFlow("agenda-intelligence", () => agendaIntelligenceService.generateAgendaOptimization({
       date,
       sellerId: req.query.sellerId as string | undefined,
       viewerUserId: req.user!.id,
       viewerRole: req.user!.role,
       refresh: req.query.refresh === "true"
-    });
+    }), (value) => value.source);
     return res.json(result);
   } catch (error: any) {
     return res.status(error?.statusCode || 500).json({ message: error?.message || "Não foi possível gerar a inteligência da agenda." });
@@ -5607,13 +5613,14 @@ router.get("/ai/commercial-planning/week", async (req, res) => {
   if (!req.user?.id) return res.status(401).json({ message: "Não autenticado" });
 
   try {
-    const plan = await planningIntelligenceService.generateWeeklyCommercialPlan({
-      viewerUserId: req.user.id,
-      viewerRole: req.user.role,
+    const viewer = req.user;
+    const plan = await runAiFlow("commercial-planning", () => planningIntelligenceService.generateWeeklyCommercialPlan({
+      viewerUserId: viewer.id,
+      viewerRole: viewer.role,
       sellerId: typeof req.query.sellerId === "string" ? req.query.sellerId : undefined,
       weekStart: typeof req.query.weekStart === "string" ? req.query.weekStart : undefined,
       refresh: req.query.refresh === "true"
-    });
+    }), (value) => value.source);
     return res.json(plan);
   } catch (error: any) {
     if (error?.statusCode === 403) return res.status(403).json({ message: error.message });
@@ -9739,7 +9746,7 @@ router.put(
 router.get("/ai/commercial-insights", authorize("diretor", "gerente"), async (req, res) => {
   const refresh = req.query.refresh === "true" || req.query.refresh === "1";
   if (refresh) invalidateCommercialInsightsCache();
-  const insights = await getCommercialInsights({ refresh });
+  const insights = await runAiFlow("commercial-insights", () => getCommercialInsights({ refresh }), (value) => value.source);
   return res.json(insights);
 });
 

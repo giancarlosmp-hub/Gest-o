@@ -264,7 +264,11 @@ const INVALID_SALES_MESSAGE = "Não foi possível gerar a mensagem comercial.";
 
 const parseAiSalesMessage = (content: string) => parseAiTextResponse(content, "message")?.text || null;
 
-export const generateSalesMessage = async (opportunity: SalesMessageOpportunityInput, service: AiService = aiService, userId: string | null = null) => {
+export type SalesMessageResult = { message: string; source: "ai" | "deterministic" };
+
+// Mensagem e a fonte dela, para a tela mostrar "Fonte: IA" ou "Fonte: sistema" como na Sugestão inteligente.
+// Resposta da IA inválida devolve o aviso do sistema (INVALID_SALES_MESSAGE), com source deterministic.
+export const generateSalesMessageResult = async (opportunity: SalesMessageOpportunityInput, service: AiService = aiService, userId: string | null = null): Promise<SalesMessageResult> => {
   const startedAt = Date.now();
   const fallbackMessage = generateDeterministicSalesMessage(opportunity);
   const now = new Date();
@@ -280,7 +284,8 @@ export const generateSalesMessage = async (opportunity: SalesMessageOpportunityI
       }
     ],
     temperature: 0.35,
-    maxTokens: 220
+    // O raciocínio do modelo sai do mesmo max_tokens: com 220 a resposta vinha cortada (finish_reason length).
+    maxTokens: 1000
   }, { userId });
 
   if (!result) {
@@ -292,7 +297,7 @@ export const generateSalesMessage = async (opportunity: SalesMessageOpportunityI
       fallback: true,
       error: status.lastError || "ai_unavailable"
     });
-    return fallbackMessage;
+    return { message: fallbackMessage, source: "deterministic" };
   }
 
   const message = parseAiSalesMessage(result.content);
@@ -304,7 +309,7 @@ export const generateSalesMessage = async (opportunity: SalesMessageOpportunityI
       fallback: true,
       error: "ai_invalid_or_empty_response"
     });
-    return INVALID_SALES_MESSAGE;
+    return { message: INVALID_SALES_MESSAGE, source: "deterministic" };
   }
 
   logApiEvent("INFO", "[ai/opportunity-message] success", {
@@ -314,5 +319,8 @@ export const generateSalesMessage = async (opportunity: SalesMessageOpportunityI
     fallback: false,
     error: null
   });
-  return message;
+  return { message, source: "ai" };
 };
+
+export const generateSalesMessage = async (opportunity: SalesMessageOpportunityInput, service: AiService = aiService, userId: string | null = null) =>
+  (await generateSalesMessageResult(opportunity, service, userId)).message;

@@ -3,6 +3,7 @@ import { prisma } from "../config/prisma.js";
 import { logApiEvent } from "../utils/logger.js";
 import { parseAiJsonObject } from "./ai/aiResponseParser.js";
 import { aiService } from "./ai/aiService.js";
+import { timeAiStage } from "./ai/aiTimeBudget.js";
 import { calculateCommercialPriority } from "./commercialPriorityService.js";
 import { isClientCoolingActive, loadLastSentCrmOrderByClient, portfolioStatusOf, resolveLastPurchase } from "./clientPortfolioStatus.js";
 import type { Prisma, Role } from "@prisma/client";
@@ -75,7 +76,7 @@ export class PlanningIntelligenceService {
     const sellerId = await this.resolveSeller(input);
     const weekStartDate = input.weekStart ? startOfDay(new Date(`${input.weekStart}T00:00:00.000Z`)) : mondayOf(brazilToday());
     const weekEndDate = addDays(weekStartDate, 4);
-    const data = await this.collectData(sellerId, weekStartDate, addDays(weekEndDate, 1));
+    const data = await timeAiStage("context", () => this.collectData(sellerId, weekStartDate, addDays(weekEndDate, 1)));
     const lastRelevant = this.latestUpdate(data);
     const cacheKey = ["commercial-planning", sellerId, dateOnly(weekStartDate), lastRelevant.toISOString(), "company-scope:futura"].join(":");
     if (!input.refresh) {

@@ -3,6 +3,7 @@ import { prisma } from "../config/prisma.js";
 import { logApiEvent } from "../utils/logger.js";
 import { parseAiJsonObject } from "./ai/aiResponseParser.js";
 import { aiService } from "./ai/aiService.js";
+import { timeAiStage } from "./ai/aiTimeBudget.js";
 import { calculateCommercialPriority } from "./commercialPriorityService.js";
 import { loadLastSentCrmOrderByClient } from "./clientPortfolioStatus.js";
 import { planningIntelligenceService } from "./planningIntelligenceService.js";
@@ -155,7 +156,7 @@ export class AgendaIntelligenceService {
       );
     const scope = await this.resolveSellerScope(input);
     const sellerId = scope.cacheSellerId;
-    const data = await this.collectData(scope.sellerIds, range.from, range.to);
+    const data = await timeAiStage("context", () => this.collectData(scope.sellerIds, range.from, range.to));
     const lastRelevant = this.latestUpdate(data);
     const scopeKey = `${input.viewerRole}:${input.viewerUserId}:${sellerId}`;
     const cacheKey = [
@@ -175,7 +176,7 @@ export class AgendaIntelligenceService {
         return hit.value;
       }
     }
-    const base = await this.buildDeterministic(input.date, scope, data);
+    const base = await timeAiStage("deterministic", () => this.buildDeterministic(input.date, scope, data));
     let result = base;
     let aiUsed = false;
     let fallbackUsed = true;
