@@ -66,7 +66,7 @@ test("usa sinais existentes de financialProfile, timeline e origem da automaçã
   assert.equal(result.score, 45);
   assert.equal(result.level, "normal");
   assert.ok(result.reasons.includes("Esfriando: ativo sem comprar há mais de 9 meses (última compra em 15/09/2025)"));
-  assert.ok(result.reasons.includes("Cliente com 2 títulos vencidos"));
+  assert.ok(result.reasons.includes("R$ 2,00 em títulos vencidos"));
   assert.ok(result.reasons.includes("Oportunidade criada automaticamente"));
   assert.ok(!result.reasons.some((reason) => reason.includes("Sem contato")), "timeline recente evita duplicar alerta de contato parado");
 });
@@ -130,4 +130,21 @@ test("workflow de cliente sem compra só pontua quando o chamador informa que es
   assert.ok(!purchaseScore({ lastPurchaseDate: null }).reasons.includes("Workflow de cliente sem compra ativo"));
   const withWorkflow = calculateCommercialPriority({ now: portfolioNow, client: { ownerSellerId: "seller-1", lastPurchaseDate: new Date("2025-03-10T15:00:00.000Z") }, workflow: { inactiveClient: true } });
   assert.ok(withWorkflow.reasons.includes("Workflow de cliente sem compra ativo"));
+});
+
+test("títulos vencidos: motivo traz o total em R$, não uma quantidade; o peso não muda", () => {
+  const titlesScore = (client: Record<string, unknown>) =>
+    calculateCommercialPriority({ now: portfolioNow, client: { ownerSellerId: "seller-1", lastPurchaseDate: new Date("2026-06-01T15:00:00.000Z"), ...client } });
+
+  const overdue = titlesScore({ overdueTitlesTotal: 18000, openTitlesTotal: 25000 });
+  assert.deepEqual(overdue.reasons, ["R$ 18.000,00 em títulos vencidos"]);
+  assert.equal(overdue.score, COMMERCIAL_PRIORITY_WEIGHTS.overdueFinancialTitles);
+  assert.ok(!overdue.reasons.some((reason) => reason.includes("Cliente com 18000")));
+
+  const withoutTitles = titlesScore({ overdueTitlesTotal: 0, openTitlesTotal: 0 });
+  assert.deepEqual(withoutTitles.reasons, []);
+  assert.equal(withoutTitles.score, 0);
+
+  // Em aberto continua sem valor no texto.
+  assert.deepEqual(titlesScore({ overdueTitlesTotal: 0, openTitlesTotal: 25000 }).reasons, ["Cliente com títulos em aberto"]);
 });

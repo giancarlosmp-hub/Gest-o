@@ -60,7 +60,7 @@ test("usa CommercialPriorityService para follow-up vencido, alto valor, inativid
   assert.ok(item.priorityReasons.includes("Follow-up vencido"));
   assert.ok(item.priorityReasons.includes(`Oportunidade acima de R$ ${COMMERCIAL_PRIORITY_THRESHOLDS.highOpportunityValue.toLocaleString("pt-BR")}`));
   assert.ok(item.priorityReasons.includes("Inativo recente: sem comprar há mais de 12 meses (última compra em 01/06/2025)"));
-  assert.ok(item.priorityReasons.includes("Cliente com título vencido"));
+  assert.ok(item.priorityReasons.includes("R$ 1,00 em títulos vencidos"));
   assert.ok(item.priorityReasons.includes("Oportunidade criada automaticamente"));
   assert.ok(item.priorityScore >= 0 && item.priorityScore <= 100);
   assert.ok("priorityScore" in item && "risk" in item && "reason" in item && "suggestedAction" in item);
