@@ -120,7 +120,8 @@ export const generateAssistantWhatsappMessage = async (context: AssistantWhatsap
     system: DEMETRA_MASTER_PROMPT,
     messages: [{ role: "user", content: [WHATSAPP_MESSAGE_INSTRUCTION, knowledgeContext.context, `Contexto comercial sanitizado:\n${JSON.stringify(context)}`].filter(Boolean).join("\n\n") }],
     temperature: 0.35,
-    maxTokens: 180
+    // O raciocínio do modelo sai do mesmo max_tokens: 180 não sobra para a mensagem (como na mensagem da oportunidade).
+    maxTokens: 1000
   }, { userId });
 
   if (!result) {
