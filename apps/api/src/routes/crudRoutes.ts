@@ -55,6 +55,7 @@ import { generateClientSuggestion } from "../services/clientSuggestion.js";
 import { buildAssistantWhatsappContext, generateAssistantWhatsappMessage } from "../services/assistantWhatsapp.js";
 import { aiService } from "../services/ai/aiService.js";
 import { runAiFlow, timeAiStage } from "../services/ai/aiTimeBudget.js";
+import { TODAY_PRIORITIES_OPPORTUNITY_SELECT } from "../services/ai/calculateTodayPriorities.js";
 import {
   calculateTodayPriorities,
   generateClientSummary,
@@ -5621,48 +5622,7 @@ router.get("/ai/today-priorities", async (req, res) => {
       stage: { notIn: [...CLOSED_STAGE_VALUES] },
       client: { isArchived: false }
     },
-    select: {
-      id: true,
-      value: true,
-      followUpDate: true,
-      createdAt: true,
-      lastContactAt: true,
-      stage: true,
-      clientId: true,
-      ownerSellerId: true,
-      title: true,
-      notes: true,
-      client: {
-        select: {
-          id: true,
-          name: true,
-          lastPurchaseDate: true,
-          lastPurchaseValue: true,
-          ownerSellerId: true,
-          financialProfile: true,
-          openTitlesTotal: true,
-          overdueTitlesTotal: true
-        }
-      },
-      timelineEvents: {
-        select: { createdAt: true, description: true },
-        orderBy: { createdAt: "desc" },
-        take: 25
-      },
-      activities: {
-        select: {
-          createdAt: true,
-          date: true,
-          dueDate: true,
-          done: true,
-          notes: true,
-          description: true,
-          result: true
-        },
-        orderBy: { createdAt: "desc" },
-        take: 15
-      }
-    }
+    select: TODAY_PRIORITIES_OPPORTUNITY_SELECT
   });
 
   // Última compra efetiva também considera o pedido sent do CRM, como a situação da carteira.

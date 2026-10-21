@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { parseActivityObservation } from "../activityObservationParser.js";
 import type { OpportunityInsightInput } from "../opportunityInsight.js";
 import type { CommercialTemperature, TodayPriorityItem, TodayPriorityRisk } from "./types.js";
@@ -39,7 +40,51 @@ export type TodayPriorityInput = OpportunityInsightInput & {
   }>;
 };
 
-const mapPriorityLevelToLegacyRisk = (level: CommercialPriorityLevel): TodayPriorityRisk => {
+// Campos de cada oportunidade aberta que a Central do Dia carrega; o Assistente Comercial usa os mesmos.
+export const TODAY_PRIORITIES_OPPORTUNITY_SELECT = {
+  id: true,
+  value: true,
+  followUpDate: true,
+  createdAt: true,
+  lastContactAt: true,
+  stage: true,
+  clientId: true,
+  ownerSellerId: true,
+  title: true,
+  notes: true,
+  client: {
+    select: {
+      id: true,
+      name: true,
+      lastPurchaseDate: true,
+      lastPurchaseValue: true,
+      ownerSellerId: true,
+      financialProfile: true,
+      openTitlesTotal: true,
+      overdueTitlesTotal: true
+    }
+  },
+  timelineEvents: {
+    select: { createdAt: true, description: true },
+    orderBy: { createdAt: "desc" },
+    take: 25
+  },
+  activities: {
+    select: {
+      createdAt: true,
+      date: true,
+      dueDate: true,
+      done: true,
+      notes: true,
+      description: true,
+      result: true
+    },
+    orderBy: { createdAt: "desc" },
+    take: 15
+  }
+} satisfies Prisma.OpportunitySelect;
+
+const mapPriorityLevelToLegacyRisk =(level: CommercialPriorityLevel): TodayPriorityRisk => {
   // priorityLevel is the official calculated priority (baixa/normal/alta/urgente).
   // risk is a legacy visual compatibility field still consumed by HomePage badges.
   // commercialTemperature remains a separate behavioral indicator from observations.
