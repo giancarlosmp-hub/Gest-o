@@ -43,7 +43,8 @@ const clients: Row[] = [
   client("ativo", daysAgo(30)),
   client("esfriando", daysAgo(300)),
   client("recente", daysAgo(450)),
-  client("ex", daysAgo(900)),
+  // R$ 18.000,00 em títulos vencidos: o motivo do score traz o valor, que não pode chegar ao provedor.
+  client("ex", daysAgo(900), { overdueTitlesTotal: 18000 }),
   client("ex-pedido", daysAgo(900)),
   client("prospect", null),
   client("arquivado", daysAgo(450), { isArchived: true, archiveReason: "Arquivado manualmente" })
@@ -212,7 +213,7 @@ const lastSent = () => {
 };
 const assertNothingSensitive = (sent: string) => {
   for (const value of Object.values(SENSITIVE)) assert(!sent.includes(value), `vazou ${value}`);
-  for (const value of ["4321.98", "8765.43", "1111.11", "55555", "99999"]) assert(!sent.includes(value), `vazou valor ${value}`);
+  for (const value of ["4321.98", "8765.43", "1111.11", "55555", "99999", "18000", "18.000", "1.111,11"]) assert(!sent.includes(value), `vazou valor ${value}`);
   assert.doesNotMatch(sent, /"(id|clientId|opportunityId)":/, "ids internos ficam fora");
   for (const field of ["potentialHa", "archiveReason", "isArchived"]) assert(!sent.includes(field), `vazou ${field}`);
 };
@@ -282,6 +283,12 @@ try {
   sent = lastSent();
   assert.match(sent, /Inativo recente/);
   assertNothingSensitive(sent);
+  // Motivo "R$ 18.000,00 em títulos vencidos": o texto chega ao provedor sem o valor.
+  received.length = 0;
+  await call("GET", "/ai/timeline-intelligence/opportunity/opp-ex?refresh=true", "seller-a");
+  sent = lastSent();
+  assert.match(sent, /\[valor removido\] em títulos vencidos/);
+  assertNothingSensitive(sent);
   results.push("provider_payload_filtered=PASS");
 
   // 3b. Base de Conhecimento: conteúdo técnico intacto, só e-mail/telefone/CPF/CNPJ formatados mascarados.
@@ -324,6 +331,8 @@ try {
   assert.deepEqual([...overdueIds].sort(), ["opp-ex", "opp-ex-pedido"]);
   const reasonOf = (id: string) => overdue.json.results.find((row: Row) => row.entityId === id).reason as string;
   assert.match(reasonOf("opp-ex"), /Ex-cliente/);
+  assert(reasonOf("opp-ex").includes("R$ 18.000,00 em títulos vencidos"), "assistente mostra o total em R$ dos títulos vencidos");
+  assert(!reasonOf("opp-ex").includes("Cliente com 18000"));
   assert.doesNotMatch(reasonOf("opp-ex-pedido"), /Ex-cliente|Inativo recente/, "pedido sent do CRM torna o cliente ativo no score");
   queries.opportunityAggregate.length = 0; queries.opportunityCount.length = 0;
   const pipeline = await ask("pipeline por vendedor", "director-a");
