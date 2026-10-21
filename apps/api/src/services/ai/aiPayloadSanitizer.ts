@@ -56,7 +56,7 @@ const TEXT_RULES: Array<[RegExp, string]> = [
   [/\b(rua|r\.|avenida|av\.|travessa|tv\.|rodovia|rod\.|estrada|alameda|al\.|pra[cç]a)\s+[^,;\n"]{2,60}?(?:,\s*|\s+)(?:n[º°o]?\.?\s*)?\d{1,5}\b/gi, ADDRESS_MASK],
   [/\b(t[ií]tulos?|cr[eé]dito|limite|saldo|d[ií]vida|inadimpl\w*|em aberto|vencid[oa]s?)([^.\n"]{0,40}?)R\$\s?\d[\d.,]*/gi, `$1$2${VALUE_MASK}`],
   [/R\$\s?\d[\d.,]*(\s+(?:em|de)\s+(?:t[ií]tulos?|cr[eé]dito))/gi, `${VALUE_MASK}$1`],
-  // O motivo do score usa overdueTitlesTotal (soma em R$) como quantidade: "Cliente com 1111.11 títulos vencidos".
+  // Número sem R$ antes de "títulos" em texto livre. O motivo do score agora vem como "R$ 18.000,00 em títulos vencidos".
   [/\b\d[\d.,]*(\s+t[ií]tulos?\b)/gi, `${VALUE_MASK}$1`]
 ];
 

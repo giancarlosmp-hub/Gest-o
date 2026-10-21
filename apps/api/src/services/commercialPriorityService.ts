@@ -126,6 +126,7 @@ const countItems = (...values: Array<unknown[] | number | string | null | undefi
 const daysBetween = (olderDate: Date, now: Date) => Math.max(0, Math.floor((now.getTime() - olderDate.getTime()) / DAY_IN_MS));
 
 const formatCurrency = (value: number) => value.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
+const formatCurrencyWithCents = (value: number) => value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
 const readFinancialProfile = (value: FinancialProfileLike) => {
   if (!value) return {};
@@ -222,8 +223,11 @@ export class CommercialPriorityService {
 
     if (activityList.length >= COMMERCIAL_PRIORITY_THRESHOLDS.manyActivitiesCount) addReason(COMMERCIAL_PRIORITY_WEIGHTS.manyActivities, `${activityList.length} atividades registradas`);
 
-    const overdueTitlesCount = countItems(client?.overdueTitles, client?.overdueTitlesTotal, financialProfile.overdueTitlesTotal as number | string | null | undefined, financialProfile.overdueTitles as unknown[] | number | undefined);
-    if (overdueTitlesCount > 0) addReason(COMMERCIAL_PRIORITY_WEIGHTS.overdueFinancialTitles, overdueTitlesCount === 1 ? "Cliente com título vencido" : `Cliente com ${overdueTitlesCount} títulos vencidos`);
+    // overdueTitlesTotal é a soma em R$ dos títulos vencidos (ERP), não a quantidade; overdueTitles é lista ou quantidade.
+    const overdueTitlesAmount = [client?.overdueTitlesTotal, financialProfile.overdueTitlesTotal as number | string | null | undefined].map(toNumber).find((value) => value > 0) ?? 0;
+    const overdueTitlesCount = countItems(client?.overdueTitles, financialProfile.overdueTitles as unknown[] | number | undefined);
+    if (overdueTitlesAmount > 0) addReason(COMMERCIAL_PRIORITY_WEIGHTS.overdueFinancialTitles, `${formatCurrencyWithCents(overdueTitlesAmount)} em títulos vencidos`);
+    else if (overdueTitlesCount > 0) addReason(COMMERCIAL_PRIORITY_WEIGHTS.overdueFinancialTitles, overdueTitlesCount === 1 ? "Cliente com título vencido" : `Cliente com ${overdueTitlesCount} títulos vencidos`);
     else if (countItems(client?.openTitles, client?.openTitlesTotal, financialProfile.openTitlesTotal as number | string | null | undefined, financialProfile.openTitles as unknown[] | number | undefined) > 0) addReason(COMMERCIAL_PRIORITY_WEIGHTS.openFinancialTitles, "Cliente com títulos em aberto");
 
     if (client && !client.ownerSellerId) addReason(COMMERCIAL_PRIORITY_WEIGHTS.noOwnerSeller, "Cliente sem vendedor responsável");

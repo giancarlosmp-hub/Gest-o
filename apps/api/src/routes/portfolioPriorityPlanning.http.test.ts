@@ -29,6 +29,8 @@ const client = (id: string, lastPurchaseDate: Date | null, extra: Row = {}): Row
 const exClients = Array.from({ length: 8 }, (_, index) => client(`ex-${index + 1}`, daysAgo(800 + index * 10)));
 const clients: Row[] = [
   client("ativo", daysAgo(30)),
+  // Ativo com R$ 18.000,00 em títulos vencidos (overdueTitlesTotal é soma em R$, não quantidade).
+  client("ativo-titulos", daysAgo(30), { overdueTitlesTotal: 18000 }),
   client("esfriando-antigo", daysAgo(340)),
   client("esfriando", daysAgo(300)),
   client("recente-novo", daysAgo(400)),
@@ -57,6 +59,7 @@ const opportunities: Row[] = [
   opportunity("opp-ex-pedido", "ex-pedido"),
   opportunity("opp-ex-cancelado", "ex-cancelado"),
   opportunity("opp-ativo", "ativo"),
+  opportunity("opp-titulos", "ativo-titulos"),
   opportunity("opp-prospect", "prospect"),
   opportunity("opp-arquivado", "arquivado-recente", { followUpDate: daysAgo(2), value: 90000 }),
 ];
@@ -147,6 +150,7 @@ const get = async (path: string, userId: string) => {
   const response = await fetch(`${baseUrl}${path}`, { headers: { Authorization: `Bearer ${token}` } });
   return { status: response.status, json: (await response.json()) as any };
 };
+const OVERDUE_TITLES_REASON = "R$ 18.000,00 em títulos vencidos";
 const reasonsOf = (items: Row[], key: string, id: string) => items.find((item) => item[key] === id)?.priorityReasons as string[];
 
 try {
@@ -162,6 +166,8 @@ try {
   assert.match(reasonsOf(today.json, "opportunityId", "opp-ex-pedido")[0], /^Esfriando:/, "pedido sent mais recente que o ERP define a última compra");
   assert.match(reasonsOf(today.json, "opportunityId", "opp-ex-cancelado")[0], /^Ex-cliente:/, "pedido sent cancelado não conta");
   assert.deepEqual(reasonsOf(today.json, "opportunityId", "opp-ativo"), []);
+  assert.deepEqual(reasonsOf(today.json, "opportunityId", "opp-titulos"), [OVERDUE_TITLES_REASON], "total dos títulos vencidos em R$, não quantidade");
+  assert(today.json.every((item: Row) => item.opportunityId === "opp-titulos" || !item.priorityReasons.some((reason: string) => /títulos?/.test(reason))), "sem títulos vencidos, sem texto de títulos");
   assert.deepEqual(reasonsOf(today.json, "opportunityId", "opp-prospect"), []);
   assert(today.json.every((item: Row) => !item.priorityReasons.some((reason: string) => /Workflow/.test(reason))), "sem o falso workflow de cliente sem compra");
   const scoreOf = (id: string) => today.json.find((item: Row) => item.opportunityId === id).priorityScore;
@@ -181,6 +187,7 @@ try {
   assert.match(insightReason("opp-recente")!, /^Inativo recente/);
   assert.match(insightReason("recente-velho")!, /^Inativo recente/);
   assert.equal(insightReason("ativo"), undefined, "ativo sem sinal não entra no ranking");
+  assert.equal(insightReason("opp-titulos"), OVERDUE_TITLES_REASON);
 
   // Planejamento semanal: arquivados fora; reativação = inativos recentes, esfriando e no máximo 5 ex-clientes.
   queries.opportunity.length = 0; queries.activity.length = 0;
@@ -201,6 +208,8 @@ try {
   const firstIndexOf = (prefix: RegExp) => reactivation.findIndex((action) => prefix.test(action.reason));
   assert(firstIndexOf(/^Inativo recente/) < firstIndexOf(/^Esfriando/) && firstIndexOf(/^Esfriando/) < firstIndexOf(/^Ex-cliente/), "inativo recente, depois esfriando, depois ex-cliente");
   assert(reactivationIds.includes("ex-pedido") && reactivation.find((action) => action.clientId === "ex-pedido")!.reason.startsWith("Esfriando"));
+  assert.equal(actions.find((action) => action.opportunityId === "opp-titulos")?.reason, OVERDUE_TITLES_REASON, "motivo do planejamento");
+  assert(actions.every((action) => !/títulos?/.test(action.reason) || action.opportunityId === "opp-titulos"), "cliente sem títulos vencidos não traz texto de títulos");
 
   // Semana sem weekStart: domingo 22h em Brasília (já segunda em UTC) ainda pertence à semana iniciada na segunda anterior.
   const realNow = Date.now;
