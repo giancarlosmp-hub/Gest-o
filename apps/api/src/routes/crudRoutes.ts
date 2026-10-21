@@ -3055,16 +3055,8 @@ router.get("/reports/weekly-visits", async (req, res) => {
     return res.json(ranking);
   }
 
-  const top3 = ranking.slice(0, 3);
-  const own = ranking.find((item) => item.userId === req.user!.id);
-
-  if (!own) {
-    return res.json(top3);
-  }
-
-  const sellerView = new Map(top3.map((item) => [item.userId, item]));
-  sellerView.set(own.userId, own);
-  return res.json(Array.from(sellerView.values()));
+  // Vendedor vê só a própria linha: nada dos colegas.
+  return res.json(ranking.filter((item) => item.userId === req.user!.id));
 });
 
 router.get("/reports/weekly-missions", async (req, res) => {
@@ -3185,20 +3177,8 @@ router.get("/reports/weekly-missions", async (req, res) => {
     return res.json(ranking);
   }
 
-  const own = ranking.find((item) => item.userId === req.user!.id);
-  const top3MainMissionOnly = ranking.slice(0, 3).map((item) => ({
-    userId: item.userId,
-    name: item.name,
-    missions: [item.missions[0]]
-  }));
-
-  if (!own) {
-    return res.json(top3MainMissionOnly);
-  }
-
-  const sellerView = new Map(top3MainMissionOnly.map((item) => [item.userId, item]));
-  sellerView.set(own.userId, own);
-  return res.json(Array.from(sellerView.values()));
+  // Vendedor vê só a própria linha: nada dos colegas.
+  return res.json(ranking.filter((item) => item.userId === req.user!.id));
 });
 
 router.get("/reports/discipline-ranking", async (req, res) => {
@@ -3456,13 +3436,9 @@ router.get("/reports/score-monthly", async (req, res) => {
       rank: index + 1
     }));
 
+  // Vendedor vê só a própria linha: nada dos colegas. O score continua calculado sobre o time.
   if (role === "vendedor") {
-    const me = rankedItems.find((item) => item.userId === req.user!.id);
-    const topThree = rankedItems.slice(0, 3);
-
-    const items = me && !topThree.some((item) => item.userId === me.userId) ? [...topThree, me] : topThree;
-
-    return res.json({ month, items });
+    return res.json({ month, items: rankedItems.filter((item) => item.userId === req.user!.id) });
   }
 
   if (userIdFilter) {
@@ -3891,6 +3867,11 @@ router.get("/reports/commercial-score", async (req, res) => {
       medals
     };
   });
+
+  // Vendedor vê só a própria linha: nada dos colegas. O score continua calculado sobre o time.
+  if (req.user?.role === "vendedor") {
+    return res.json({ sellers: scoreRows.filter((row) => row.sellerId === req.user!.id) });
+  }
 
   return res.json({ sellers: scoreRows });
 });

@@ -108,17 +108,9 @@ export default function CommercialScorePage() {
     return () => controller.abort();
   }, [month]);
 
-  const visibleRows = useMemo(() => {
-    if (user?.role !== "vendedor") return rows;
-
-    const topThree = rows.slice(0, 3);
-    const ownRow = rows.find((row) => row.sellerId === user.id);
-
-    if (!ownRow) return topThree;
-    if (topThree.some((row) => row.sellerId === ownRow.sellerId)) return topThree;
-
-    return [...topThree, ownRow];
-  }, [rows, user]);
+  // Vendedor vê só a própria linha (a API já filtra), sem posição nem medalhas.
+  const isSeller = user?.role === "vendedor";
+  const visibleRows = useMemo(() => (isSeller ? rows.filter((row) => row.sellerId === user?.id) : rows), [rows, isSeller, user?.id]);
 
   const chartData = useMemo(
     () => ({
@@ -218,7 +210,7 @@ export default function CommercialScorePage() {
           </div>
 
           <div className={cardClass}>
-            <h3 className="text-base font-semibold text-slate-900">Ranking geral</h3>
+            <h3 className="text-base font-semibold text-slate-900">{isSeller ? "Seu score" : "Ranking geral"}</h3>
             {visibleRows.length === 0 ? (
               <p className="mt-3 text-sm text-slate-500">Sem dados para o mês selecionado.</p>
             ) : (
@@ -226,7 +218,7 @@ export default function CommercialScorePage() {
                 <table className="min-w-[600px] w-full text-sm">
                   <thead>
                     <tr className="border-b border-slate-200 text-left text-slate-500">
-                      <th className="pb-2 pr-3">Posição</th>
+                      {isSeller ? null : <th className="pb-2 pr-3">Posição</th>}
                       <th className="pb-2 pr-3">Vendedor</th>
                       <th className="pb-2 pr-3">Execução</th>
                       <th className="pb-2 pr-3">Pipeline</th>
@@ -239,11 +231,11 @@ export default function CommercialScorePage() {
                       const position = rows.findIndex((item) => item.sellerId === row.sellerId) + 1;
                       return (
                       <tr key={row.sellerId} className="border-b border-slate-100 text-slate-700">
-                        <td className="py-2.5 pr-3 font-semibold text-slate-900">#{position}</td>
+                        {isSeller ? null : <td className="py-2.5 pr-3 font-semibold text-slate-900">#{position}</td>}
                         <td className="py-2.5 pr-3">
                           <div className="flex flex-wrap items-center gap-1.5">
                             <span>{row.sellerName}</span>
-                            {row.medals.map((medal) => {
+                            {!isSeller && row.medals.map((medal) => {
                               const hasJustWon = (newMedalsBySeller[row.sellerId] || []).includes(medal);
                               return (
                                 <span
@@ -276,6 +268,7 @@ export default function CommercialScorePage() {
             )}
           </div>
 
+          {isSeller ? null : (
           <div className={cardClass}>
             <h3 className="text-base font-semibold text-slate-900">Hall da Performance</h3>
             <p className="mt-1 text-sm text-slate-500">Destaques de reconhecimento por nível e medalhas especiais.</p>
@@ -309,6 +302,7 @@ export default function CommercialScorePage() {
               </div>
             )}
           </div>
+          )}
         </>
       )}
     </div>

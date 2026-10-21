@@ -259,7 +259,7 @@ export default function CommercialExecutionReportPage() {
             <div key={seller.userId} className="rounded-lg border border-slate-200 px-4 py-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
-                  <p className="font-semibold text-slate-900">{index + 1}º · {seller.name}</p>
+                  <p className="font-semibold text-slate-900">{canFilterSeller ? `${index + 1}º · ` : ""}{seller.name}</p>
                   <p className="text-sm text-slate-700">
                     Visitas concluídas: {formatNumberBR(seller.visitsDone)} / Meta: {formatNumberBR(seller.goal)}
                   </p>
