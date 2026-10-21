@@ -12,7 +12,7 @@ test("CRM conversacional expõe endpoint autenticado e página dedicada", () => 
   assert.match(routeSource, /router\.use\(authMiddleware\)/);
   assert.match(routeSource, /router\.post\("\/crm-assistant\/query"/);
   assert.match(appSource, /app\.use\("\/ai", conversationalCrmRoutes\)/);
-  assert.match(webSource, /CRM Assistant/);
+  assert.doesNotMatch(webSource, /CRM Assistant|catálogo seguro/);
   assert.match(webSource, /Assistente Comercial/);
   assert.match(layoutSource, /Assistente Comercial/);
 });
@@ -35,7 +35,7 @@ test("permissões, cache por usuário e serviços reutilizados", () => {
   assert.match(source, /getCommercialInsights/);
   assert.match(source, /planningIntelligenceService/);
   assert.match(source, /agendaIntelligenceService/);
-  assert.match(source, /resolveKnowledgeContextForAi/);
+  assert.match(source, /calculateTodayPriorities/);
 });
 
 test("privacidade, observabilidade, fallback e resposta estruturada", () => {
