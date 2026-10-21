@@ -6,6 +6,7 @@ import { isForbiddenAiKey, markKnowledgeContextForAi, maskAiText, sanitizeAiPayl
 import { AiService } from "./aiService.js";
 import { AI_SYSTEM_USAGE_BUCKET, AiUsageLimiter, DEFAULT_AI_DAILY_CALL_LIMIT_PER_USER, parseAiUsageConfig } from "./aiUsageLimiter.js";
 import { DEMETRA_MASTER_PROMPT } from "./demetraMasterPrompt.js";
+import { calculateCommercialPriority } from "../commercialPriorityService.js";
 
 // Dados fictícios: documentos, telefones, e-mails e endereços inventados, só para exercitar os padrões.
 const FAKE = {
@@ -95,7 +96,7 @@ test("padrões de documento, telefone, e-mail, endereço e valores são mascarad
     `Mandar para ${FAKE.email}.`,
     `Entregar na ${FAKE.street}, CEP ${FAKE.cep}. Endereço: Sitio Ficticio km 4.`,
     "Cliente com títulos vencidos de R$ 12.345,67 e limite de crédito R$ 50.000,00.",
-    // Motivo do score com o total em R$ dos títulos vencidos no lugar da quantidade.
+    // Número sem R$ antes de "títulos".
     "Cliente com 1111.11 títulos vencidos."
   ].join(" ");
   const masked = maskAiText(text);
@@ -314,4 +315,11 @@ test("IA desligada não chama o provedor nem consome o teto", async () => {
   } finally {
     env.aiChatEnabled = previous;
   }
+});
+
+test("motivo do score \"R$ 18.000,00 em títulos vencidos\" chega à IA sem o valor", () => {
+  const reason = calculateCommercialPriority({ client: { ownerSellerId: "seller-1", lastPurchaseDate: new Date(), overdueTitlesTotal: 18000 } }).reasons[0];
+  assert.equal(reason, "R$ 18.000,00 em títulos vencidos");
+  assert.equal(maskAiText(reason), "[valor removido] em títulos vencidos");
+  assert.equal(maskAiText(`Ex-cliente: sem comprar há mais de 24 meses; ${reason}`), "Ex-cliente: sem comprar há mais de 24 meses; [valor removido] em títulos vencidos");
 });
