@@ -1204,6 +1204,8 @@ export default function HomePage() {
                 })}
               </div>
 
+              {/* Vendedor recebe só a própria linha da API: sem Top 3 dos colegas. */}
+              {user?.role === "vendedor" ? null : (
               <div className="mt-3 space-y-2">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Top 3 da semana</p>
                 {weeklyMissionSummary.top3.map((item, index) => (
@@ -1215,6 +1217,7 @@ export default function HomePage() {
                   </div>
                 ))}
               </div>
+              )}
             </>
           ) : (
             <p className="text-sm text-slate-500">Ainda não há visitas concluídas nesta semana. Bora começar com tudo!</p>

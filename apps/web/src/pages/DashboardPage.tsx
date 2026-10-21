@@ -944,22 +944,16 @@ export default function DashboardPage() {
   const monthlyScoreVisible = useMemo(() => {
     if (!monthlyScore) return [];
 
+    // Vendedor vê só a própria linha (a API já filtra), sem posição nem Top 3.
     if (user?.role === "vendedor") {
-      return monthlyScore.items;
+      return monthlyScore.items.filter((item) => item.userId === user.id);
     }
 
     const search = scoreSearch.trim().toLowerCase();
     if (!search) return monthlyScore.items;
 
     return monthlyScore.items.filter((item) => item.name.toLowerCase().includes(search));
-  }, [monthlyScore, scoreSearch, user?.role]);
-
-  const monthlyScoreTopThree = useMemo(() => monthlyScoreVisible.filter((item) => item.rank <= 3), [monthlyScoreVisible]);
-
-  const monthlyScoreMe = useMemo(() => {
-    if (user?.role !== "vendedor") return null;
-    return monthlyScoreVisible.find((item) => item.userId === user.id) || null;
-  }, [monthlyScoreVisible, user?.id, user?.role]);
+  }, [monthlyScore, scoreSearch, user?.id, user?.role]);
 
   const consistencyBadge = (level: ConsistencyLevel) => {
     if (level === "alta") return { label: "🟢 Alta", className: "bg-emerald-50 text-emerald-700 border-emerald-200" };
@@ -1400,7 +1394,7 @@ export default function DashboardPage() {
           <table className="min-w-[600px] w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200 text-left text-slate-500">
-                <th className="py-2.5 pr-3">Posição</th>
+                {user?.role === "vendedor" ? null : <th className="py-2.5 pr-3">Posição</th>}
                 <th className="py-2.5 pr-3">Vendedor</th>
                 <th className="py-2.5 pr-3">Faturado</th>
                 <th className="py-2.5 pr-3">Objetivo</th>
@@ -1414,7 +1408,7 @@ export default function DashboardPage() {
                 const medal = row.rank === 1 ? "🥇" : row.rank === 2 ? "🥈" : row.rank === 3 ? "🥉" : "";
                 return (
                   <tr key={`${row.userId}-${row.rank}`} className="border-b border-slate-100">
-                    <td className="py-2.5 pr-3">{medal || `#${row.rank}`}</td>
+                    {user?.role === "vendedor" ? null : <td className="py-2.5 pr-3">{medal || `#${row.rank}`}</td>}
                     <td className="py-2.5 pr-3 font-medium text-slate-800">{row.name}</td>
                     <td className="py-2.5 pr-3 text-slate-700">{formatCurrencyBRL(row.faturadoMes)}</td>
                     <td className="py-2.5 pr-3 text-slate-700">{row.objetivoMes > 0 ? formatCurrencyBRL(row.objetivoMes) : "—"}</td>
@@ -1426,22 +1420,12 @@ export default function DashboardPage() {
               })}
               {monthlyScoreVisible.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="py-4 text-center text-slate-500">Sem dados de score mensal no período.</td>
+                  <td colSpan={user?.role === "vendedor" ? 6 : 7} className="py-4 text-center text-slate-500">Sem dados de score mensal no período.</td>
                 </tr>
               )}
             </tbody>
           </table>
         </div>
-
-        {user?.role === "vendedor" ? (
-          <div className="mt-3 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-sm text-brand-900">
-            <p className="font-semibold">Seu destaque</p>
-            <p>
-              Top 3 do mês: {monthlyScoreTopThree.map((item) => `${item.rank}º ${item.name}`).join(" • ") || "sem dados"}.
-            </p>
-            {monthlyScoreMe ? <p>Sua posição: #{monthlyScoreMe.rank} com score {formatNumberBR(monthlyScoreMe.score)}.</p> : null}
-          </div>
-        ) : null}
       </div>
 
       <div className={cardClass}>
