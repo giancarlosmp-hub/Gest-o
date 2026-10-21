@@ -3,6 +3,7 @@ import type { Prisma, Role } from "@prisma/client";
 import { prisma } from "../config/prisma.js";
 import { logApiEvent } from "../utils/logger.js";
 import { aiService } from "./ai/aiService.js";
+import { timeAiStage } from "./ai/aiTimeBudget.js";
 import { parseAiJsonObject } from "./ai/aiResponseParser.js";
 import { calculateCommercialPriority } from "./commercialPriorityService.js";
 import { getCommercialInsights } from "./commercialInsightsService.js";
@@ -66,14 +67,14 @@ export class ConversationalCrmService {
     const input = requestSchema.parse(raw);
     logApiEvent("INFO", "[crm-assistant] query-started", { viewerRole: viewer.role });
     if (this.isMalicious(input.question)) return this.reject(viewer, "Não posso exibir credenciais, documentos completos, executar SQL ou ignorar permissões.");
-    const parsed = await this.buildPlan(input, viewer);
-    const plan = await this.validateScope(parsed, viewer, input.context?.sellerId ?? null);
+    const parsed = await timeAiStage("plan", () => this.buildPlan(input, viewer));
+    const plan = await timeAiStage("scope", () => this.validateScope(parsed, viewer, input.context?.sellerId ?? null));
     const ignoredFilterWarnings = this.dropPortfolioIgnoredFilters(plan);
     const key = await this.cacheKey(viewer, plan);
     if (!input.refresh) { const hit = cache.get(key); if (hit && hit.expiresAt > Date.now()) { logApiEvent("INFO", "[crm-assistant] query-completed", { capability: plan.capability, cacheHit: true, resultCount: hit.value.results.length, elapsedMs: Date.now() - startedAt, aiUsed: false, fallbackUsed: false, viewerRole: viewer.role, filterCount: Object.keys(plan.filters).length }); return this.withWarnings(hit.value, ignoredFilterWarnings); } }
     logApiEvent("INFO", "[crm-assistant] query-planned", { capability: plan.capability, viewerRole: viewer.role, filterCount: Object.keys(plan.filters).length });
-    const result = await this.execute(plan, viewer, input.refresh === true);
-    const response = await this.composeAnswer(plan, result, input.question, viewer);
+    const result = await timeAiStage("execute", () => this.execute(plan, viewer, input.refresh === true));
+    const response = await timeAiStage("compose", () => this.composeAnswer(plan, result, input.question, viewer));
     cache.set(key, { expiresAt: Date.now() + 5 * 60_000, value: response });
     logApiEvent("INFO", "[crm-assistant] query-completed", { capability: plan.capability, resultCount: response.results.length, elapsedMs: Date.now() - startedAt, aiUsed: response.source === "ai", fallbackUsed: response.source === "deterministic", cacheHit: false, viewerRole: viewer.role, filterCount: response.filtersApplied.length });
     return this.withWarnings(response, ignoredFilterWarnings);
@@ -92,8 +93,11 @@ export class ConversationalCrmService {
   }
   private isMalicious(q: string) { return /(senha|password|token|authorization|cnpj completo|cpf completo|telefone|e-mail|email|execute sql|select .* from|insert |update |delete |drop table|ignore permiss)/i.test(q); }
   private reject(viewer: Viewer, answer: string): ConversationalCrmResponse { logApiEvent("WARN", "[crm-assistant] rejected", { viewerRole: viewer.role }); return { answer, intent: "general", filtersApplied: [], summary: { totalResults: 0 }, results: [], warnings: ["Pergunta recusada por política de segurança e privacidade."], source: "deterministic", generatedAt: new Date().toISOString() }; }
+  // A classificação determinística vem primeiro; a IA só classifica a pergunta que ela não resolve. Assim a única
+  // chamada de IA da maioria das perguntas é a da resposta, dentro do orçamento do fluxo.
   private async buildPlan(input: ConversationalCrmRequest, viewer: Viewer) {
-    const deterministic = this.classifyDeterministically(input);
+    const { plan: deterministic, resolved } = this.classifyDeterministically(input);
+    if (resolved) { logApiEvent("INFO", "[crm-assistant] plan-deterministic", { capability: deterministic.capability, viewerRole: viewer.role }); return planSchema.parse(deterministic); }
     try {
       const ai = await aiService.chat({ system: "Classifique perguntas CRM apenas no catálogo permitido. Responda somente JSON com capability, filters, sort e limit. Não gere SQL.", messages: [{ role: "user", content: input.question.slice(0, 700) }], temperature: 0, maxTokens: 800, responseFormat: "json_object" }, { userId: viewer.id });
       const parsed = ai?.content ? parseAiJsonObject(ai.content)?.parsed : null;
@@ -101,14 +105,19 @@ export class ConversationalCrmService {
       return planSchema.parse(candidate);
     } catch { logApiEvent("WARN", "[crm-assistant] fallback", { viewerRole: viewer.role, fallbackUsed: true }); return planSchema.parse(deterministic); }
   }
-  private classifyDeterministically(input: ConversationalCrmRequest): CrmQueryPlan {
+  private classifyDeterministically(input: ConversationalCrmRequest): { plan: CrmQueryPlan; resolved: boolean } {
     const q = normalize(input.question); const num = Number(q.match(/(\d+)/)?.[1]); const money = Number(q.match(/(?:r\$\s*)?(\d+[\d.]*)\s*(?:mil|k)?/)?.[1]?.replace(/\./g, ""));
-    let capability: CrmCapability = "clients_without_purchase";
+    let capability: CrmCapability | null = null;
     if (/campanha|vender|audiencia|publico/.test(q)) capability = "campaign_audience"; else if (/planejamento|semana/.test(q)) capability = "weekly_planning_summary"; else if (/agenda|visitas|amanha|hoje/.test(q) && !/oportunidade/.test(q)) capability = "agenda_day_summary"; else if (/pipeline.*vendedor|valor.*vendedor/.test(q)) capability = "seller_pipeline_value"; else if (/vendedor.*follow|follow.*vendedor/.test(q)) capability = "seller_overdue_followups"; else if (/follow.*venc/.test(q)) capability = "overdue_followups"; else if (/prioridade|chance|atencao/.test(q) && /oportun/.test(q)) capability = "opportunities_by_priority"; else if (/aguardando decis|decisao/.test(q)) capability = "opportunities_awaiting_decision"; else if (/oportun/.test(q) && /(valor|acima|maior)/.test(q)) capability = "opportunities_by_value"; else if (/nunca compr|primeira venda|prospect/.test(q)) capability = "clients_first_sale"; else if (/esfriando/.test(q)) capability = "clients_cooling"; else if (/atividade recente|sem atividade/.test(q)) capability = "clients_without_recent_activity"; else if (/cidade|territorio|regiao/.test(q)) capability = "clients_by_city"; else if (/compraram|compra.*mais|acima/.test(q)) capability = "clients_by_purchase_value";
+    const matched = capability !== null;
+    capability ??= "clients_without_purchase";
     const filters: any = { ...(input.context?.dateRange ? { from: input.context.dateRange.from, to: input.context.dateRange.to } : {}) };
     if (num && /dias?/.test(q)) filters.days = num; if (money && /(mil|k)/.test(q)) filters.minimumValue = money * 1000; else if (money && /(r\$|valor|acima|mais)/.test(q)) filters.minimumValue = money; if (input.context?.sellerId) filters.sellerId = input.context.sellerId;
     const products = q.match(/compr[aou].*?([a-z0-9çãõéíóú -]+).*interesse em ([a-z0-9çãõéíóú -]+)/); if (products) { filters.productBought = products[1].trim().split(" ").slice(-1)[0]; filters.targetProduct = products[2].trim().split(" ")[0]; }
-    return { capability, filters, sort: { field: "priorityScore", direction: "desc" }, limit: DEFAULT_LIMIT };
+    // Resolvida = alguma regra casou e os filtros que a capacidade exige saíram da pergunta. Cidade/região e o
+    // produto da campanha não são extraídos aqui: essas perguntas continuam indo para a IA.
+    const missingFilter = (capability === "clients_by_city" && !filters.city && !filters.region) || (capability === "campaign_audience" && !filters.productBought);
+    return { plan: { capability, filters, sort: { field: "priorityScore", direction: "desc" }, limit: DEFAULT_LIMIT }, resolved: matched && !missingFilter };
   }
   private async validateScope(plan: CrmQueryPlan, viewer: Viewer, contextSellerId: string | null) {
     const merged = planSchema.parse({ ...plan, filters: { ...plan.filters, sellerId: contextSellerId ?? plan.filters.sellerId ?? undefined }, limit: Math.min(plan.limit ?? DEFAULT_LIMIT, MAX_LIMIT) });
@@ -156,7 +165,7 @@ export class ConversationalCrmService {
     return { results, totalValue: 0, total: entries.length, ordering, headline: entries.length > results.length ? `${headline} Mostrando os ${results.length} primeiros.` : headline, warnings, source: "deterministic" as const };
   }
   private async sellerAggregates(plan: CrmQueryPlan, viewer: Viewer) { const whereUser = viewer.role === "vendedor" ? { id: viewer.id } : plan.filters.sellerId ? { id: plan.filters.sellerId } : { role: "vendedor" as const, isActive: true }; const sellers = await prisma.user.findMany({ where: whereUser, take: plan.limit, select: { id:true,name:true, _count:{select:{opportunities:true,activities:true,clients:true}} } }); const rows = await Promise.all(sellers.map(async s => { const [pipeline, overdue] = await Promise.all([prisma.opportunity.aggregate({ where: { ownerSellerId:s.id, stage:{notIn:["ganho","perdido"]}, client: { isArchived: false } }, _sum:{value:true}, _count:true }), prisma.opportunity.count({ where:{ ownerSellerId:s.id, followUpDate:{lt:new Date()}, stage:{notIn:["ganho","perdido"]}, client: { isArchived: false } }})]); return { s, pipeline, overdue }; })); const results = rows.map(r => ({ entityType:"seller" as const, entityId:r.s.id, title:safe(r.s.name,80), subtitle:`Pipeline R$ ${(r.pipeline._sum.value||0).toLocaleString("pt-BR")} • ${r.overdue} follow-ups vencidos`, score:r.overdue, reason:`${r.pipeline._count} oportunidades abertas; ${r.s._count.activities} atividades registradas.` })); return { results, totalValue: rows.reduce((sum,r)=>sum+(r.pipeline._sum.value||0),0), warnings:["Gerentes usam o escopo existente por sellerId; hierarquia granular futura não foi inventada."], source:"deterministic" as const }; }
-  private async composeAnswer(plan: CrmQueryPlan, data: { results: CrmResult[]; totalValue: number; total?: number; headline?: string; ordering?: string; warnings: string[]; source: "ai" | "deterministic" }, question: string, viewer: Viewer): Promise<ConversationalCrmResponse> { const totalResults = data.total ?? data.results.length; const base = data.headline ?? `Encontrei ${data.results.length} resultado(s) para ${plan.capability}. Critérios: ${this.filters(plan).map(f=>`${f.field} ${f.operator} ${f.value}`).join(", ") || "escopo permitido do usuário"}. Ordenação: ${plan.sort.field} ${plan.sort.direction}.`; let answer = base; let source = data.source; try { const ai = await aiService.chat({ system: "Reescreva uma resposta comercial curta em português usando apenas o resumo e critérios recebidos. Não invente causas nem dados.", messages: [{ role:"user", content: JSON.stringify({ question: question.slice(0,200), base, totalResults }) }], temperature: 0.2, maxTokens: 220 }, { userId: viewer.id }); if (ai?.content) { answer = safe(ai.content, 700); source = "ai"; } } catch { /* fallback */ } return { answer, intent: this.intent(plan.capability), filtersApplied: this.filters(plan), summary: { totalResults, totalValue: data.totalValue, period: plan.filters.from && plan.filters.to ? { from: plan.filters.from, to: plan.filters.to } : undefined, ordering: data.ordering ?? `${plan.sort.field} ${plan.sort.direction}` }, results: data.results, warnings: data.warnings, source, generatedAt: new Date().toISOString() }; }
+  private async composeAnswer(plan: CrmQueryPlan, data: { results: CrmResult[]; totalValue: number; total?: number; headline?: string; ordering?: string; warnings: string[]; source: "ai" | "deterministic" }, question: string, viewer: Viewer): Promise<ConversationalCrmResponse> { const totalResults = data.total ?? data.results.length; const base = data.headline ?? `Encontrei ${data.results.length} resultado(s) para ${plan.capability}. Critérios: ${this.filters(plan).map(f=>`${f.field} ${f.operator} ${f.value}`).join(", ") || "escopo permitido do usuário"}. Ordenação: ${plan.sort.field} ${plan.sort.direction}.`; let answer = base; let source = data.source; try { const ai = await aiService.chat({ system: "Reescreva uma resposta comercial curta em português usando apenas o resumo e critérios recebidos. Não invente causas nem dados.", messages: [{ role:"user", content: JSON.stringify({ question: question.slice(0,200), base, totalResults }) }], temperature: 0.2, maxTokens: 1000 }, { userId: viewer.id }); if (ai?.content) { answer = safe(ai.content, 700); source = "ai"; } } catch { /* fallback */ } return { answer, intent: this.intent(plan.capability), filtersApplied: this.filters(plan), summary: { totalResults, totalValue: data.totalValue, period: plan.filters.from && plan.filters.to ? { from: plan.filters.from, to: plan.filters.to } : undefined, ordering: data.ordering ?? `${plan.sort.field} ${plan.sort.direction}` }, results: data.results, warnings: data.warnings, source, generatedAt: new Date().toISOString() }; }
 }
 export const conversationalCrmService = new ConversationalCrmService();
 export const __conversationalCrmInternals = { planSchema, requestSchema, CRM_QUERY_CAPABILITIES };
