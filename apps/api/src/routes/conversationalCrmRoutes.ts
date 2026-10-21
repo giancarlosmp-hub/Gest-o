@@ -23,8 +23,7 @@ router.post("/crm-assistant/query", async (req, res) => {
       error: error instanceof z.ZodError ? "validation" : error instanceof Error ? error.name : "unknown"
     });
     return res.status(status).json({
-      message: status === 500 ? "Não consegui responder agora. Tente novamente em instantes." : error instanceof Error ? error.message : "Pergunta inválida.",
-      warnings: status === 500 ? ["Falha controlada sem expor detalhes internos."] : undefined
+      message: status === 500 ? "Não foi possível responder agora. Tente de novo." : error instanceof Error ? error.message : "Pergunta inválida."
     });
   }
 });
