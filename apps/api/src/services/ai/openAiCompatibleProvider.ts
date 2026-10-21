@@ -22,6 +22,10 @@ const readObject = (value: unknown) => (value && typeof value === "object" ? val
 // obrigatório o recusam.
 export const OPENROUTER_REASONING = { effort: "low", exclude: true } as const;
 
+const isAbortError = (error: unknown) => error instanceof DOMException
+  ? error.name === "TimeoutError" || error.name === "AbortError"
+  : error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
+
 const isOpenRouter = (providerName: string) => providerName.trim().toLowerCase() === "openrouter";
 
 export class OpenAICompatibleProvider implements AiProvider {
@@ -60,9 +64,12 @@ export class OpenAICompatibleProvider implements AiProvider {
       ...request.messages
     ];
 
+    // O orçamento de tempo do fluxo pode encurtar a chamada; nunca alongar além do AI_TIMEOUT_MS.
+    const timeoutMs = Math.max(1, Math.min(this.timeoutMs, request.timeoutMs ?? this.timeoutMs));
+
     try {
       const response = await fetch(`${this.baseUrl}/chat/completions`, {
-        signal: AbortSignal.timeout(this.timeoutMs),
+        signal: AbortSignal.timeout(timeoutMs),
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -81,15 +88,33 @@ export class OpenAICompatibleProvider implements AiProvider {
             : {})
         })
       });
+      // Os cabeçalhos podem chegar bem antes do corpo (o OpenRouter responde cedo e completa depois). O tempo da
+      // chamada só fecha depois de ler o corpo; headersMs fica para o diagnóstico.
+      const headersMs = Date.now() - startedAt;
+      let body: Record<string, unknown> = {};
+      try {
+        body = (await response.json()) as Record<string, unknown>;
+      } catch (error) {
+        // Timeout no meio do corpo sobe como timeout; antes virava resposta vazia sem finish_reason.
+        if (isAbortError(error)) throw error;
+        if (response.ok) {
+          throw new AiProviderError("AI response body is not valid JSON", { elapsedMs: Date.now() - startedAt, code: "invalid_body" });
+        }
+      }
       const elapsedMs = Date.now() - startedAt;
-      const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
 
       if (!response.ok) {
         throw new AiProviderError(`AI request failed with status ${response.status}`, {
           status: response.status,
           elapsedMs,
-          code: `http_${response.status}`
+          code: `http_${response.status}`,
+          headersMs
         });
+      }
+
+      // Erro do provedor depois de começar a responder vem com status 200 e "error" no corpo, sem choices.
+      if (readObject(body.error)) {
+        throw new AiProviderError("AI provider returned an error in the body", { elapsedMs, code: "provider_body_error", headersMs });
       }
 
       const choices = Array.isArray(body.choices) ? body.choices : [];
@@ -105,6 +130,7 @@ export class OpenAICompatibleProvider implements AiProvider {
         content,
         model: this.model,
         elapsedMs,
+        headersMs,
         finishReason,
         usage: usage
           ? {
@@ -118,9 +144,7 @@ export class OpenAICompatibleProvider implements AiProvider {
     } catch (error) {
       if (error instanceof AiProviderError) throw error;
       const elapsedMs = Date.now() - startedAt;
-      const isTimeout = error instanceof DOMException
-        ? error.name === "TimeoutError" || error.name === "AbortError"
-        : error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
+      const isTimeout = isAbortError(error);
       throw new AiProviderError(isTimeout ? "AI request timeout" : "AI request failed", {
         elapsedMs,
         isTimeout,
