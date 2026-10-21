@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import api from "../lib/apiClient";
+import { AI_REQUEST_TIMEOUT_MS } from "../lib/aiRequest";
 import TimelineEventList, { TimelineEventItem } from "../components/TimelineEventList";
 import TimelineIntelligenceCard from "../components/TimelineIntelligenceCard";
 import ClientAutoSummaryCard from "../components/clients/ClientAutoSummaryCard";
@@ -202,7 +203,7 @@ export default function ClientDetailsPage() {
     setLoadingSuggestion(true);
 
     try {
-      const response = await api.post("/ai/client-suggestion", { clientId });
+      const response = await api.post("/ai/client-suggestion", { clientId }, { timeout: AI_REQUEST_TIMEOUT_MS });
       const payloadLayer = getSuggestionPayloadLayer(response?.data);
       const normalizedSuggestion = normalizeSuggestionResponse(response?.data);
       console.info("[ClientDetailsPage] Sugestão recebida", {

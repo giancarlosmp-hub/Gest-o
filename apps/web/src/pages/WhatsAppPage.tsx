@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Copy, ExternalLink, MessageCircle, Search, Sparkles, Check } from "lucide-react";
 import api from "../lib/apiClient";
+import { AI_REQUEST_TIMEOUT_MS } from "../lib/aiRequest";
 import { buildWhatsAppUrl } from "../lib/whatsappLink";
 
 type Client = {
@@ -82,7 +83,7 @@ export default function WhatsAppPage() {
     if (!selectedClient) return;
     setGenerating(true);
     try {
-      const response = await api.post<GeneratedMessage>("/ai/assistant-whatsapp-message", { clientId: selectedClient.id });
+      const response = await api.post<GeneratedMessage>("/ai/assistant-whatsapp-message", { clientId: selectedClient.id }, { timeout: AI_REQUEST_TIMEOUT_MS });
       setDraft(response.data.message);
       setLastGeneration(response.data);
       toast.success(response.data.fallback ? "Mensagem gerada com fallback." : "Mensagem gerada pela IA.");

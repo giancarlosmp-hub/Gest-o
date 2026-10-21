@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../config/prisma.js";
 import { logApiEvent } from "../utils/logger.js";
 import { markKnowledgeContextForAi } from "./ai/aiPayloadSanitizer.js";
+import { timeAiStage } from "./ai/aiTimeBudget.js";
 
 export const KNOWLEDGE_CONTEXT_MAX_CHARS = 2400;
 export const KNOWLEDGE_CONTEXT_MAX_DOCUMENTS = 4;
@@ -154,6 +155,6 @@ export async function getKnowledgeContextForAi(query: string, maxChars = KNOWLED
 // Para a mensagem enviada à IA: o trecho sai marcado para o filtro central aplicar só o filtro leve da Base de
 // Conhecimento. As rotas de preview usam getKnowledgeContextForAi, sem marcação.
 export const resolveKnowledgeContextForAi = async (query: string, maxChars = KNOWLEDGE_CONTEXT_MAX_CHARS): Promise<KnowledgeContextResult> => {
-  const result = await getKnowledgeContextForAi(query, maxChars);
+  const result = await timeAiStage("knowledge", () => getKnowledgeContextForAi(query, maxChars));
   return { ...result, context: markKnowledgeContextForAi(result.context) };
 };

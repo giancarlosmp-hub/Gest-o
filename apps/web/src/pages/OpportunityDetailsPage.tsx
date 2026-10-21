@@ -7,6 +7,7 @@ import {
 } from "react-router-dom";
 import { toast } from "sonner";
 import api from "../lib/apiClient";
+import { AI_REQUEST_TIMEOUT_MS } from "../lib/aiRequest";
 import {
   formatCurrencyBRL,
   formatDateBR,
@@ -686,6 +687,7 @@ export default function OpportunityDetailsPage() {
   const [events, setEvents] = useState<EventItem[]>([]);
   const [insight, setInsight] = useState<OpportunityInsight | null>(null);
   const [salesMessage, setSalesMessage] = useState("");
+  const [salesMessageSource, setSalesMessageSource] = useState<"ai" | "deterministic">("deterministic");
   const [loadingSalesMessage, setLoadingSalesMessage] = useState(false);
   const [showErpOrderModal, setShowErpOrderModal] = useState(false);
   const [loadingErpOrderData, setLoadingErpOrderData] = useState(false);
@@ -1273,6 +1275,7 @@ export default function OpportunityDetailsPage() {
     try {
       const response = await api.get("/ai/opportunity-message", {
         params: { opportunityId: item.id },
+        timeout: AI_REQUEST_TIMEOUT_MS,
       });
       const generatedMessage = response.data?.message;
       if (!generatedMessage) {
@@ -1280,6 +1283,7 @@ export default function OpportunityDetailsPage() {
         return;
       }
       setSalesMessage(generatedMessage);
+      setSalesMessageSource(response.data?.source === "ai" ? "ai" : "deterministic");
       toast.success("Mensagem gerada");
     } catch {
       toast.error("Erro ao gerar mensagem comercial");
@@ -1505,7 +1509,14 @@ export default function OpportunityDetailsPage() {
       </section>
 
       <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm md:p-4">
-        <h3 className="mb-3 text-lg font-semibold">📩 Mensagem comercial</h3>
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <h3 className="text-lg font-semibold">📩 Mensagem comercial</h3>
+          {!loadingSalesMessage && salesMessage ? (
+            <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-600">
+              Fonte: {salesMessageSource === "ai" ? "IA" : "sistema"}
+            </span>
+          ) : null}
+        </div>
         <div className="mobile-action-stack">
           <button
             type="button"

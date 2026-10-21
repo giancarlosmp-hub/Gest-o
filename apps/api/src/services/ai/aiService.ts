@@ -6,6 +6,7 @@ import { OpenAICompatibleProvider } from "./openAiCompatibleProvider.js";
 import { getDemetraMasterPrompt } from "./demetraMasterPrompt.js";
 import { sanitizeAiPayload } from "./aiPayloadSanitizer.js";
 import { AiUsageLimiter } from "./aiUsageLimiter.js";
+import { AI_MIN_CALL_MS, AI_TIMEOUT_BUDGET_REASON, currentAiFlow, recordAiCall, recordAiFallbackReason, remainingAiBudgetMs, timeAiStage } from "./aiTimeBudget.js";
 
 export type AiServiceStatus = {
   enabled: boolean;
@@ -98,22 +99,38 @@ export class AiService {
     });
     const requestUsageEstimate = estimateAiUsage(chatRequest.system ?? "") + chatRequest.messages.reduce((sum, message) => sum + estimateAiUsage(message.content), 0);
 
-    if (!env.aiChatEnabled || !status.configured) {
-      this.lastError = !env.aiChatEnabled ? "ai_chat_disabled" : "provider_not_configured";
+    const flow = currentAiFlow();
+    // Sem resultado aproveitável: guarda o motivo para o status e para o log do fluxo.
+    const giveUp = (reason: string) => {
+      this.lastError = reason;
       this.fallback = true;
+      recordAiFallbackReason(reason);
+      return null;
+    };
+
+    if (!env.aiChatEnabled || !status.configured) {
+      const reason = !env.aiChatEnabled ? "ai_chat_disabled" : "provider_not_configured";
       logApiEvent("INFO", "[AI] fallback", {
         provider: status.provider,
         model: status.model,
+        flow,
         fallback: true,
-        error: this.lastError,
+        error: reason,
         requestUsageEstimate
       });
-      return null;
+      return giveUp(reason);
+    }
+
+    // Orçamento do fluxo já gasto (ex.: segunda chamada do Assistente): nem chama o provedor nem conta no teto.
+    const remainingAtStart = remainingAiBudgetMs();
+    if (remainingAtStart !== null && remainingAtStart < AI_MIN_CALL_MS) {
+      logApiEvent("INFO", "[AI] budget-exhausted", { provider: status.provider, model: status.model, flow, remainingMs: remainingAtStart, fallback: true, fallbackReason: AI_TIMEOUT_BUDGET_REASON });
+      return giveUp(AI_TIMEOUT_BUDGET_REASON);
     }
 
     // Teto diário por usuário: acima dele, null sem erro (o fluxo usa o fallback determinístico). As duas
     // tentativas abaixo contam como uma chamada.
-    const reservation = await this.usageLimiter.reserve(options.userId);
+    const reservation = await timeAiStage("usage-limit", () => this.usageLimiter.reserve(options.userId));
     if (!reservation.allowed) {
       logApiEvent("INFO", "[AI] daily-limit-reached", {
         provider: status.provider,
@@ -124,30 +141,49 @@ export class AiService {
         callsToday: reservation.callsToday,
         dailyLimit: reservation.limit
       });
+      // O teto não é erro do provedor: não muda lastError, só o motivo do fallback no log do fluxo.
+      recordAiFallbackReason("ai_daily_limit");
       return null;
     }
 
+    let failure = "unknown_error";
     for (let attempt = 1; attempt <= 2; attempt += 1) {
+      const remaining = remainingAiBudgetMs();
+      if (remaining !== null && remaining < AI_MIN_CALL_MS) {
+        failure = AI_TIMEOUT_BUDGET_REASON;
+        logApiEvent("INFO", "[AI] budget-exhausted", { provider: provider.name, model: provider.model, flow, remainingMs: remaining, attempt, fallback: true, fallbackReason: AI_TIMEOUT_BUDGET_REASON });
+        break;
+      }
+      // O orçamento só encurta a chamada quando é menor que o AI_TIMEOUT_MS.
+      const budgetLimited = remaining !== null && remaining < env.aiTimeoutMs;
       try {
-        const result = await provider.chat(chatRequest);
+        const result = await provider.chat(remaining === null ? chatRequest : { ...chatRequest, timeoutMs: remaining });
+        recordAiCall(result.elapsedMs);
         // Resposta cortada pelo max_tokens não é aproveitada: o fluxo usa o fallback. Não repete a chamada.
         const truncated = result.finishReason === "length";
-        this.lastError = truncated ? "ai_truncated" : null;
-        this.fallback = truncated;
+        // Sem texto (com finish_reason nulo ou não): nada a aproveitar, fallback sem repetir.
+        const empty = !truncated && !result.content.trim();
+        const rejection = truncated ? "ai_truncated" : empty ? "ai_empty_response" : null;
+        this.lastError = rejection;
+        this.fallback = Boolean(rejection);
         const usage = result.usage?.totalTokens ?? requestUsageEstimate;
         const today = this.usageLimiter.recordUsage(options.userId, usage);
         // Só números: nunca o conteúdo enviado ou recebido.
         logApiEvent("INFO", "[AI] chat-success", {
           provider: provider.name,
           model: provider.model,
+          flow,
           elapsedMs: result.elapsedMs,
+          headersMs: result.headersMs ?? null,
+          timeoutMs: remaining ?? env.aiTimeoutMs,
           usage,
           finishReason: result.finishReason ?? null,
           // Sem "token" no nome: o logger mascara essas chaves.
           completionUsage: result.usage?.completionTokens ?? null,
           reasoningUsage: result.usage?.reasoningTokens ?? null,
-          fallback: truncated,
-          ...(truncated ? { error: "ai_truncated" } : {}),
+          maxOutput: chatRequest.maxTokens ?? null,
+          fallback: Boolean(rejection),
+          ...(rejection ? { error: rejection, fallbackReason: rejection } : {}),
           attempt,
           userId: options.userId ?? null,
           dayKey: reservation.dayKey,
@@ -155,19 +191,26 @@ export class AiService {
           usageToday: today.usageToday,
           dailyLimit: reservation.limit
         });
-        if (truncated) return null;
+        if (rejection) return giveUp(rejection);
         return { ...result, provider: provider.name };
       } catch (error) {
-        const summarizedError = summarizeError(error);
+        const timedOut = error instanceof AiProviderError && error.isTimeout;
+        const summarizedError = timedOut && budgetLimited ? AI_TIMEOUT_BUDGET_REASON : summarizeError(error);
+        failure = summarizedError;
         this.lastError = summarizedError;
         this.fallback = true;
+        if (error instanceof AiProviderError) recordAiCall(error.elapsedMs);
         logApiEvent(attempt === 1 ? "WARN" : "ERROR", "[AI] chat-failed", {
           provider: provider.name,
           model: provider.model,
+          flow,
           elapsedMs: error instanceof AiProviderError ? error.elapsedMs : null,
+          headersMs: error instanceof AiProviderError ? error.headersMs : null,
+          timeoutMs: remaining ?? env.aiTimeoutMs,
           usage: requestUsageEstimate,
           fallback: true,
           error: summarizedError,
+          fallbackReason: summarizedError,
           attempt,
           userId: options.userId ?? null,
           dayKey: reservation.dayKey,
@@ -178,7 +221,7 @@ export class AiService {
       }
     }
 
-    return null;
+    return giveUp(failure);
   }
 }
 

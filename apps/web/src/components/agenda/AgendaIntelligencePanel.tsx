@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import api from "../../lib/apiClient";
+import { AI_REQUEST_TIMEOUT_MS } from "../../lib/aiRequest";
 
 type AgendaIntelligence = {
   date: string;
@@ -61,6 +62,7 @@ export default function AgendaIntelligencePanel({ date, sellerId }: Props) {
     try {
       const response = await api.get("/ai/agenda-intelligence/day", {
         params: { date, sellerId, refresh: refresh || undefined },
+        timeout: AI_REQUEST_TIMEOUT_MS,
       });
       setData(response.data);
     } catch {

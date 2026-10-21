@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Bot, Filter, Loader2, MessageSquarePlus, Send, Sparkles } from "lucide-react";
 import api from "../lib/apiClient";
+import { AI_REQUEST_TIMEOUT_MS } from "../lib/aiRequest";
 import { useAuth } from "../context/AuthContext";
 
 type AssistantResult = { entityType: string; entityId: string; title: string; subtitle?: string; score?: number; reason?: string; action?: { label: string; path: string } };
@@ -23,7 +24,7 @@ export default function CrmAssistantPage() {
     if (!trimmed || loading) return;
     setLoading(true); setError("");
     try {
-      const { data } = await api.post<AssistantResponse>("/ai/crm-assistant/query", { question: trimmed });
+      const { data } = await api.post<AssistantResponse>("/ai/crm-assistant/query", { question: trimmed }, { timeout: AI_REQUEST_TIMEOUT_MS });
       setMessages((items) => [{ id: crypto.randomUUID(), question: trimmed, response: data }, ...items].slice(0, 5));
       setQuestion("");
     } catch (err: any) {

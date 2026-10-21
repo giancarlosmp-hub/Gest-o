@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import api from "../lib/apiClient";
+import { AI_REQUEST_TIMEOUT_MS } from "../lib/aiRequest";
 import { getApiErrorMessage } from "../lib/apiError";
 
 type Highlight = { type: string; title: string; description: string; occurredAt: string; importance: "low" | "medium" | "high" };
@@ -50,7 +51,7 @@ export default function TimelineIntelligenceCard({ clientId, opportunityId }: Pr
     setLoading(true);
     setError(null);
     try {
-      const response = await api.get<Intelligence>(`${endpoint}${refresh ? "?refresh=true" : ""}`);
+      const response = await api.get<Intelligence>(`${endpoint}${refresh ? "?refresh=true" : ""}`, { timeout: AI_REQUEST_TIMEOUT_MS });
       setData(response.data);
     } catch (err) {
       setError(getApiErrorMessage(err, "Não foi possível carregar o resumo inteligente."));

@@ -69,3 +69,23 @@ Nunca CPF/CNPJ, IE, RG, telefone, celular, e-mail, endereço nem valores de tít
 - A contagem fica em memória da API: reinício zera o dia, e mais de uma réplica contaria em separado.
 - Log `[AI] chat-success` / `[AI] chat-failed` / `[AI] daily-limit-reached`: usuário, dia, chamadas e uso de tokens
   do dia, sem conteúdo.
+
+## Orçamento de tempo por fluxo
+
+- Toda rota de IA tem um orçamento de tempo (`apps/api/src/services/ai/aiTimeBudget.ts`, 12 s por fluxo, e nunca
+  acima de `API_REQUEST_TIMEOUT_MS` menos 3 s). O orçamento conta do início do fluxo e vale para todas as chamadas
+  de IA dele, inclusive as feitas por dentro (o Assistente Comercial chama planejamento e agenda). Estourou, a rota
+  responde 200 com o fallback determinístico (`source: "deterministic"`), nunca com erro. Com menos de 1,5 s
+  sobrando, a chamada nem começa.
+- A tela usa um timeout próprio de 20 s nas rotas de IA (`apps/web/src/lib/aiRequest.ts`), maior que o orçamento;
+  o resto do app continua com o timeout global do `apiClient`.
+- Assistente Comercial: a classificação determinística vem primeiro; a IA só classifica a pergunta que ela não
+  resolve (nenhuma regra casou, ou cidade/região e produto da campanha não saíram da pergunta).
+- `elapsedMs` das chamadas inclui a leitura do corpo; `headersMs` é só até os cabeçalhos (o OpenRouter responde os
+  cabeçalhos cedo e completa o corpo depois).
+- Erro no corpo com status 200 (`provider_body_error`) e resposta sem texto (`ai_empty_response`, com
+  `finish_reason` nulo ou não) vão para o fallback.
+- Log `[AI] flow-completed` por fluxo, sem conteúdo: `flow`, `elapsedMs`, `budgetMs`, `source`, `fallbackReason`
+  (`ai_timeout_budget` quando estoura o orçamento), `aiCalls`, `aiMs` e `stagesMs` (tempo por etapa: `context`,
+  `knowledge`, `usage-limit`, e no Assistente `plan`, `scope`, `execute`, `compose`). `[AI] budget-exhausted` quando
+  uma chamada não começa por falta de orçamento.

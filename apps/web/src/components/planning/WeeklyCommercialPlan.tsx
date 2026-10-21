@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import api from "../../lib/apiClient";
+import { AI_REQUEST_TIMEOUT_MS } from "../../lib/aiRequest";
 
 type PlanningAction = {
   type: "visit" | "call" | "proposal" | "follow_up" | "whatsapp" | "review";
@@ -83,7 +84,7 @@ export default function WeeklyCommercialPlan({ sellerId, weekStart }: Props) {
     let active = true;
     const controller = new AbortController();
     setLoading(true);
-    api.get("/ai/commercial-planning/week", { params, signal: controller.signal })
+    api.get("/ai/commercial-planning/week", { params, signal: controller.signal, timeout: AI_REQUEST_TIMEOUT_MS })
       .then((response) => {
         if (!active) return;
         setPlan(response.data);

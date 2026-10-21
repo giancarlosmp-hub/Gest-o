@@ -3,6 +3,7 @@ import { prisma } from "../config/prisma.js";
 import { logApiEvent } from "../utils/logger.js";
 import { parseAiJsonObject } from "./ai/aiResponseParser.js";
 import { aiService } from "./ai/aiService.js";
+import { timeAiStage } from "./ai/aiTimeBudget.js";
 import { calculateCommercialPriority } from "./commercialPriorityService.js";
 import type { Prisma } from "@prisma/client";
 import { PORTFOLIO_APPROACH_LABELS, portfolioApproachOf, portfolioSituationLabel } from "./clientAiContext.js";
@@ -59,7 +60,7 @@ const sanitizeText = (value: string | null | undefined, max = 180) => (value || 
 export class TimelineIntelligenceService {
   async generateTimelineIntelligence(input: TimelineIntelligenceInput): Promise<TimelineIntelligenceResult | null> {
     const startedAt = Date.now();
-    const context = await this.collectAndNormalize(input);
+    const context = await timeAiStage("context", () => this.collectAndNormalize(input));
     if (!context) return null;
     const signals = this.analyzeDeterministically(context);
     const cacheKey = this.buildCacheKey(context, input, signals.lastRelevantEventAt);
@@ -140,7 +141,7 @@ export class TimelineIntelligenceService {
 
   async enrichWithAi(context: NonNullable<Context>, signals: ReturnType<TimelineIntelligenceService["analyzeDeterministically"]>, fallback: TimelineIntelligenceResult, input: Pick<TimelineIntelligenceInput, "viewerUserId">) {
     const dto = { entityType: context.entityType, timelineEvents: context.events.map((e) => ({ type: e.type, description: e.description, occurredAt: e.createdAt.toISOString() })), activities: context.activities.map((a) => ({ type: a.type, done: a.done, dueDate: a.dueDate.toISOString(), occurredAt: (a.date ?? a.createdAt).toISOString(), note: a.description || a.notes || a.result })), opportunity: context.opportunity ? { stage: context.opportunity.stage, followUpDate: context.opportunity.followUpDate.toISOString(), createdAt: context.opportunity.createdAt.toISOString(), closedAt: context.opportunity.closedAt?.toISOString() ?? null } : null, carteira: { situacao: portfolioSituationLabel(context.portfolio), esfriando: context.portfolio.cooling, abordagem: PORTFOLIO_APPROACH_LABELS[context.portfolio.approach], ultimaCompra: context.portfolio.lastPurchase?.date.toISOString() ?? null }, signals: { overdueFollowUp: signals.overdueFollowUp, daysSinceLastContact: signals.noRecentContactDays, progressed: signals.progressed, officialPriority: fallback.priority, status: fallback.status } };
-    const response = await aiService.chat({ temperature: 0.2, maxTokens: 1500, responseFormat: "json_object", messages: [{ role: "user", content: `Resuma a timeline comercial em JSON controlado. Use somente os dados recebidos, não invente eventos, valores, causas ou intenções, indique incerteza quando necessário, limite summary a ~500 caracteres e listas a 3 itens. Dados sanitizados: ${JSON.stringify(dto)}` }] }, { userId: input.viewerUserId });
+    const response = await aiService.chat({ temperature: 0.2, maxTokens: 2500, responseFormat: "json_object", messages: [{ role: "user", content: `Resuma a timeline comercial em JSON controlado. Use somente os dados recebidos, não invente eventos, valores, causas ou intenções, indique incerteza quando necessário, limite summary a ~500 caracteres e listas a 3 itens. Dados sanitizados: ${JSON.stringify(dto)}` }] }, { userId: input.viewerUserId });
     if (!response?.content) return null;
     const parsed = parseAiJsonObject(response.content);
     if (!parsed) return null;

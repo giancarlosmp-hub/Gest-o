@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { getSessionMotivationalQuote } from "../lib/dailyQuote";
 import api from "../lib/apiClient";
+import { AI_REQUEST_TIMEOUT_MS } from "../lib/aiRequest";
 import { useReminders } from "../hooks/useReminders";
 import { normalizeActivityType } from "../constants/activityTypes";
 import { getApiErrorMessage } from "../lib/apiError";
@@ -275,7 +276,7 @@ export default function HomePage() {
     setCommercialInsightsLoading(true);
     setCommercialInsightsError(null);
     try {
-      const response = await api.get<CommercialInsights>(`/ai/commercial-insights${refresh ? "?refresh=true" : ""}`, { signal });
+      const response = await api.get<CommercialInsights>(`/ai/commercial-insights${refresh ? "?refresh=true" : ""}`, { signal, timeout: AI_REQUEST_TIMEOUT_MS });
       setCommercialInsights(response.data);
     } catch (error) {
       if ((error as { code?: string })?.code === "ERR_CANCELED") return;
