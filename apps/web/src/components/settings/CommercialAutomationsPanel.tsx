@@ -138,6 +138,7 @@ export default function CommercialAutomationsPanel({ canEdit }: Props) {
                   <li>Já com oportunidade aberta: {simulation.skipped.openOpportunity}</li>
                   <li>Com reativação automática nos últimos 90 dias: {simulation.skipped.recentAutomation}</li>
                   <li>Vendedor responsável inativo: {simulation.skipped.inactiveSeller}</li>
+                  <li>Em cobrança (fora): {simulation.inCollection ?? 0}</li>
                 </ul>
                 {simulation.configIssues.length > 0 && (
                   <div className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">

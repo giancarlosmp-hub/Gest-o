@@ -22,6 +22,8 @@ export const buildClientListParams = (options: {
   filters: ClientQuickFilters;
   canFilterBySeller: boolean;
   includeArchived: boolean;
+  // Só clientes em cobrança (?cobranca=1).
+  collection?: boolean;
 }) => {
   const { filters } = options;
   const params: Record<string, string | number> = { page: options.page, pageSize: options.pageSize };
@@ -32,6 +34,7 @@ export const buildClientListParams = (options: {
   if (options.canFilterBySeller && filters.ownerSellerId) params.ownerSellerId = filters.ownerSellerId;
   if (options.includeArchived) params.includeArchived = 1;
   if (filters.portfolioStatus) params.status = filters.portfolioStatus;
+  if (options.collection) params.cobranca = 1;
   return params;
 };
 
@@ -48,3 +51,8 @@ export const withUrlFilters = (current: URLSearchParams, values: Record<string, 
 // Fatia do donut "Carteira de clientes": com vendedor escolhido, a lista abre na carteira dele.
 export const portfolioStatusClientsPath = (status: string, sellerId?: string) =>
   `/clientes?${withUrlFilters(new URLSearchParams(), { status, ownerSellerId: sellerId ?? "" }).toString()}`;
+
+// Filtro "Em cobrança" da lista de clientes: ?cobranca=1 na URL e na API.
+export const COLLECTION_URL_PARAM = "cobranca";
+export const isCollectionFilterInUrl = (searchParams: URLSearchParams) => ["1", "true"].includes(searchParams.get(COLLECTION_URL_PARAM) ?? "");
+export const collectionClientsPath = () => `/clientes?${COLLECTION_URL_PARAM}=1`;

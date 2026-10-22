@@ -1,7 +1,7 @@
 import { ChangeEvent, FormEvent, MouseEvent, useEffect, useMemo, useState } from "react";
 import { MoreHorizontal } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { PORTFOLIO_STATUSES, PORTFOLIO_STATUS_LABELS, isPortfolioStatus } from "@salesforce-pro/shared";
+import { CLIENT_IN_COLLECTION_LABEL, PORTFOLIO_STATUSES, PORTFOLIO_STATUS_LABELS, isPortfolioStatus } from "@salesforce-pro/shared";
 import api from "../lib/apiClient";
 import { toast } from "sonner";
 import { useAuth } from "../context/AuthContext";
@@ -18,7 +18,7 @@ import { buildDuplicateClientMessage, checkClientDuplicate } from "../lib/client
 import { canManageArchivedClients, clientArchiveBadgeLabel, isPortfolioCleanupArchivedClient } from "../lib/clientArchiveStatus";
 import { getApiErrorMessage } from "../lib/apiError";
 import { portfolioStatusBadgeClass } from "../lib/portfolioStatusBadge";
-import { EMPTY_CLIENT_QUICK_FILTERS, buildClientListParams, ownerSellerIdFromUrl, withUrlFilters } from "../lib/clientListFilters";
+import { COLLECTION_URL_PARAM, EMPTY_CLIENT_QUICK_FILTERS, buildClientListParams, isCollectionFilterInUrl, ownerSellerIdFromUrl, withUrlFilters } from "../lib/clientListFilters";
 
 type CrudSimplePageProps = {
   endpoint: string;
@@ -74,6 +74,8 @@ type ClientListItem = {
     name: string;
     isActive?: boolean;
   };
+  // Cliente em cobrança: dias do título de venda vencido mais antigo e total vencido.
+  collection?: { oldestOverdueDays: number; overdueTitlesTotal: number } | null;
   [key: string]: unknown;
 };
 
@@ -284,6 +286,8 @@ export default function CrudSimplePage({
   const urlPortfolioStatus = endpoint === "/clients" && isPortfolioStatus(searchParams.get("status")) ? searchParams.get("status")! : "";
   // Vendedor vem de ?ownerSellerId= (donut do Dashboard com vendedor escolhido); só gerente e diretor.
   const urlOwnerSellerId = endpoint === "/clients" ? ownerSellerIdFromUrl(searchParams, user?.role) : "";
+  // "Em cobrança" vem de ?cobranca=1 (link da Central do Dia) e fica só na URL.
+  const collectionFilter = endpoint === "/clients" && isCollectionFilterInUrl(searchParams);
   const [quickFilters, setQuickFilters] = useState({
     ...EMPTY_CLIENT_QUICK_FILTERS,
     ownerSellerId: urlOwnerSellerId,
@@ -359,7 +363,8 @@ export default function CrudSimplePage({
       search: debouncedSearch,
       filters: quickFilters,
       canFilterBySeller,
-      includeArchived: canShowArchived && showArchived
+      includeArchived: canShowArchived && showArchived,
+      collection: collectionFilter
     });
 
     try {
@@ -429,6 +434,7 @@ export default function CrudSimplePage({
     quickFilters.clientType,
     quickFilters.ownerSellerId,
     quickFilters.portfolioStatus,
+    collectionFilter,
     canFilterBySeller,
     showArchived,
     canShowArchived,
@@ -456,6 +462,8 @@ export default function CrudSimplePage({
     setQuickFilters((prev) => ({ ...prev, portfolioStatus: value }));
     updateUrlFilters({ status: value });
   };
+
+  const changeCollectionFilter = (checked: boolean) => updateUrlFilters({ [COLLECTION_URL_PARAM]: checked ? "1" : "" });
 
   const changeOwnerSellerId = (value: string) => {
     setQuickFilters((prev) => ({ ...prev, ownerSellerId: value }));
@@ -547,11 +555,24 @@ export default function CrudSimplePage({
     );
   };
 
+  const formatCurrency = (value: number) => value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+
+  const renderCollectionBadge = (item: ClientListItem) => {
+    if (!item.collection) return null;
+    const { oldestOverdueDays, overdueTitlesTotal } = item.collection;
+    return (
+      <span className="mt-1 flex w-fit flex-wrap gap-x-1 rounded-lg bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-800 ring-1 ring-red-200">
+        <span>{CLIENT_IN_COLLECTION_LABEL}</span>
+        <span className="font-normal">· título mais antigo vencido há {oldestOverdueDays} dias · {formatCurrency(overdueTitlesTotal)} vencidos</span>
+      </span>
+    );
+  };
+
   const clearClientFilters = () => {
     setSearch("");
     setDebouncedSearch("");
     setQuickFilters(EMPTY_CLIENT_QUICK_FILTERS);
-    updateUrlFilters({ status: "", ownerSellerId: "" });
+    updateUrlFilters({ status: "", ownerSellerId: "", [COLLECTION_URL_PARAM]: "" });
     setShowArchived(false);
     setPage(1);
   };
@@ -566,6 +587,7 @@ export default function CrudSimplePage({
     quickFilters.clientType,
     quickFilters.ownerSellerId,
     quickFilters.portfolioStatus,
+    collectionFilter,
     showArchived,
     isClientsPage
   ]);
@@ -2001,6 +2023,15 @@ export default function CrudSimplePage({
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-3">
               <span className="text-sm text-slate-600">{totalItems} clientes encontrados</span>
+              <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-slate-300"
+                  checked={collectionFilter}
+                  onChange={(e) => changeCollectionFilter(e.target.checked)}
+                />
+                {CLIENT_IN_COLLECTION_LABEL}
+              </label>
               {canShowArchived ? (
                 <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
                   <input
@@ -2124,6 +2155,7 @@ export default function CrudSimplePage({
                     <h3 className="text-base font-semibold text-slate-900">{String(getCellValue(it, "name") || "-")}</h3>
                     {renderArchiveBadge(it)}
                     {renderPortfolioStatusBadge(it)}
+                    {renderCollectionBadge(it)}
                     <dl className="mt-3 grid grid-cols-2 gap-3 text-sm">
                       <div>
                         <dt className="text-slate-500">Cidade</dt>
@@ -2235,6 +2267,7 @@ export default function CrudSimplePage({
                           {getCellValue(it, f.key)}
                           {isClientsPage && f.key === "name" ? renderArchiveBadge(it) : null}
                           {isClientsPage && f.key === "name" ? renderPortfolioStatusBadge(it) : null}
+                          {isClientsPage && f.key === "name" ? renderCollectionBadge(it) : null}
                         </td>
                       ))}
                       {detailsPath || !readOnly ? (
