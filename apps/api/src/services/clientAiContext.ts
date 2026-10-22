@@ -1,7 +1,8 @@
 import { OpportunityStage, Prisma } from "@prisma/client";
-import { PORTFOLIO_STATUS_LABELS, type PortfolioStatus } from "@salesforce-pro/shared";
+import { CLIENT_IN_COLLECTION_LABEL, PORTFOLIO_STATUS_LABELS, type PortfolioStatus } from "@salesforce-pro/shared";
 import { prisma } from "../config/prisma.js";
 import { isClientCoolingActive, loadLastSentCrmOrderByClient, portfolioStatusOf, resolveLastPurchase, type LastPurchase } from "./clientPortfolioStatus.js";
+import { collectionStatusOf } from "./clientCollection.js";
 
 const OPEN_STAGES = [OpportunityStage.prospeccao, OpportunityStage.negociacao, OpportunityStage.proposta] as const;
 
@@ -52,6 +53,8 @@ export type ClientAiContextPayload = {
   };
   // Situação oficial da carteira (data do ERP ou pedido sent do CRM, o mais recente).
   portfolio: ClientAiPortfolio;
+  // Cliente em cobrança (clientCollection.ts): sem oferta de venda nem reativação. Sem dias nem valores.
+  inCollection?: boolean;
   recentActivities: Array<{
     id: string;
     type: string;
@@ -115,7 +118,9 @@ export const buildClientAiContext = async ({
       archiveReason: true,
       lastPurchaseDate: true,
       lastPurchaseValue: true,
-      financialProfile: true
+      financialProfile: true,
+      partnerTitles: true,
+      overdueTitlesTotal: true
     }
   });
 
@@ -242,6 +247,7 @@ export const buildClientAiContext = async ({
       approach: portfolioApproachOf(portfolioStatus, cooling),
       lastPurchase: resolveLastPurchase(client, lastSentCrmOrderByClient)
     },
+    inCollection: collectionStatusOf(client, now) !== null,
     recentActivities: recentActivities.map((activity) => ({
       id: activity.id,
       type: activity.type,
@@ -275,19 +281,22 @@ export const portfolioSituationLabel = (portfolio: Pick<ClientAiPortfolio, "stat
 
 // O que vai para a IA externa sobre o cliente: nome, cidade/UF, situação da carteira, data da última compra e
 // textos operacionais curtos. Sem ids, valores, potencial ou motivo de arquivamento. O AiService ainda passa tudo
-// pelo filtro central (sanitizeAiPayload).
+// pelo filtro central (sanitizeAiPayload). Cliente em cobrança vai só com a situação "Em cobrança": sem dias,
+// valores, última compra nem abordagem de venda.
 export const buildClientAiPromptContext = (context: ClientAiContextPayload) => ({
   cliente: {
     nome: compactText(context.client.name, 100),
     cidade: compactText(context.client.city, 80) || null,
     uf: compactText(context.client.state, 20) || null
   },
-  carteira: {
-    situacao: portfolioSituationLabel(context.portfolio),
-    esfriando: context.portfolio.cooling,
-    ultimaCompra: formatBrazilDate(context.portfolio.lastPurchase?.date),
-    abordagem: PORTFOLIO_APPROACH_LABELS[context.portfolio.approach]
-  },
+  carteira: context.inCollection
+    ? { situacao: CLIENT_IN_COLLECTION_LABEL }
+    : {
+        situacao: portfolioSituationLabel(context.portfolio),
+        esfriando: context.portfolio.cooling,
+        ultimaCompra: formatBrazilDate(context.portfolio.lastPurchase?.date),
+        abordagem: PORTFOLIO_APPROACH_LABELS[context.portfolio.approach]
+      },
   resumo: {
     oportunidadesAbertas: context.commercialSummary.openOpportunitiesCount,
     atividadesConcluidas: context.commercialSummary.totalCompletedActivities,

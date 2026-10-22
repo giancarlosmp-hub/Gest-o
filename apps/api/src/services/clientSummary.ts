@@ -1,4 +1,5 @@
 import { OpportunityStage } from "@prisma/client";
+import { CLIENT_IN_COLLECTION_RECOMMENDATION } from "@salesforce-pro/shared";
 
 export type ClientSummaryContext = {
   client: {
@@ -32,6 +33,8 @@ export type ClientSummaryContext = {
     updatedAt: Date;
   } | null;
   lastContact: Date | null;
+  // Cliente em cobrança (clientCollection.ts): o resumo não recomenda venda nem reativação.
+  inCollection?: boolean;
 };
 
 export type ClientSummaryOutput = {
@@ -62,7 +65,20 @@ const toSentenceCase = (value: string) => {
   return value.charAt(0).toUpperCase() + value.slice(1);
 };
 
-export const generateClientSummary = (clientContext: ClientSummaryContext, now = new Date()): ClientSummaryOutput => {
+const withCollection = (summary: ClientSummaryOutput, inCollection?: boolean): ClientSummaryOutput =>
+  inCollection
+    ? {
+        ...summary,
+        profileTags: ["em cobrança", ...summary.profileTags.filter((tag) => tag !== "em cobrança")],
+        currentMoment: "Cliente em cobrança",
+        recommendedApproach: CLIENT_IN_COLLECTION_RECOMMENDATION
+      }
+    : summary;
+
+export const generateClientSummary = (clientContext: ClientSummaryContext, now = new Date()): ClientSummaryOutput =>
+  withCollection(buildClientSummaryOutput(clientContext, now), clientContext.inCollection);
+
+const buildClientSummaryOutput = (clientContext: ClientSummaryContext, now: Date): ClientSummaryOutput => {
   const { client, recentActivities, recentObservations, openOpportunities, lastWonOpportunity, lastContact } = clientContext;
   const tags = new Set<string>();
 

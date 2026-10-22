@@ -52,6 +52,7 @@ import { buildClientAiContext } from "../services/clientAiContext.js";
 import { isClientCoolingActive, listPortfolioSegment, loadLastSentCrmOrderByClient, portfolioStatusOf, resolveLastPurchase } from "../services/clientPortfolioStatus.js";
 import { aiUsageConfigSchema, saveAiUsageConfig } from "../services/ai/aiUsageLimiter.js";
 import { generateClientSuggestion } from "../services/clientSuggestion.js";
+import { collectionStatusOf, loadClientCollection, loadClientIdsInCollection, withoutClientsInCollection } from "../services/clientCollection.js";
 import { buildAssistantWhatsappContext, generateAssistantWhatsappMessage } from "../services/assistantWhatsapp.js";
 import { aiService } from "../services/ai/aiService.js";
 import { runAiFlow, timeAiStage } from "../services/ai/aiTimeBudget.js";
@@ -5365,7 +5366,9 @@ router.get("/ai/client-summary/:clientId", async (req, res) => {
       id: true,
       name: true,
       city: true,
-      state: true
+      state: true,
+      partnerTitles: true,
+      overdueTitlesTotal: true
     }
   });
 
@@ -5465,7 +5468,8 @@ router.get("/ai/client-summary/:clientId", async (req, res) => {
           updatedAt: lastWonOpportunity.createdAt
         }
       : null,
-    lastContact
+    lastContact,
+    inCollection: collectionStatusOf(client) !== null
   });
 
   return res.json(payload);
@@ -5616,14 +5620,15 @@ router.get("/ai/today-priorities", async (req, res) => {
   }
 
   const todayStart = getUtcTodayStart();
-  const openOpportunities = await prisma.opportunity.findMany({
+  // Cliente em cobrança sai das prioridades; a oportunidade continua na tela Oportunidades, com o aviso.
+  const openOpportunities = await withoutClientsInCollection(await prisma.opportunity.findMany({
     where: {
       ownerSellerId: req.user.id,
       stage: { notIn: [...CLOSED_STAGE_VALUES] },
       client: { isArchived: false }
     },
     select: TODAY_PRIORITIES_OPPORTUNITY_SELECT
-  });
+  }));
 
   // Última compra efetiva também considera o pedido sent do CRM, como a situação da carteira.
   const lastSentCrmOrderByClient = openOpportunities.length
