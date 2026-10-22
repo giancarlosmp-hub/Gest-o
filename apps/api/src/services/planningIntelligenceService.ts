@@ -6,6 +6,7 @@ import { aiService } from "./ai/aiService.js";
 import { timeAiStage } from "./ai/aiTimeBudget.js";
 import { calculateCommercialPriority } from "./commercialPriorityService.js";
 import { isClientCoolingActive, loadLastSentCrmOrderByClient, portfolioStatusOf, resolveLastPurchase } from "./clientPortfolioStatus.js";
+import { loadClientIdsInCollection } from "./clientCollection.js";
 import type { Prisma, Role } from "@prisma/client";
 
 export const COMMERCIAL_PLANNING_DEFAULTS = {
@@ -111,9 +112,10 @@ export class PlanningIntelligenceService {
     return seller.id;
   }
 
-  // Clientes arquivados ficam fora das oportunidades, atividades e candidatos a reativação.
+  // Clientes arquivados ficam fora das oportunidades, atividades e candidatos a reativação. Cliente em cobrança também
+  // não recebe sugestão (follow-up, ligação, visita, reativação); compromissos já marcados na agenda continuam.
   private async collectData(sellerId: string, from: Date, to: Date) {
-    const [events, opportunities, activities, portfolioClients] = await Promise.all([
+    const [events, allOpportunities, allActivities, allPortfolioClients] = await Promise.all([
       prisma.agendaEvent.findMany({ where: { sellerId, startDateTime: { lt: to }, endDateTime: { gte: from } }, select: { id: true, title: true, type: true, startDateTime: true, endDateTime: true, status: true, city: true, clientId: true, opportunityId: true, updatedAt: true, stops: { select: { clientId: true, city: true }, orderBy: { order: "asc" } } }, orderBy: { startDateTime: "asc" } }),
       prisma.opportunity.findMany({
         where: { ownerSellerId: sellerId, stage: { notIn: [...CLOSED_STAGES] }, client: { isArchived: false } },
@@ -145,6 +147,11 @@ export class PlanningIntelligenceService {
         select: { id: true, name: true, city: true, state: true, lastPurchaseDate: true, lastPurchaseValue: true, ownerSellerId: true, financialProfile: true, openTitlesTotal: true, overdueTitlesTotal: true, createdAt: true }
       })
     ]);
+    const relatedClientIds = [...allOpportunities.map((opportunity) => opportunity.clientId), ...allActivities.flatMap((activity) => (activity.clientId ? [activity.clientId] : []))];
+    const inCollection = await loadClientIdsInCollection({ isArchived: false, OR: [{ ownerSellerId: sellerId }, { id: { in: relatedClientIds } }] });
+    const opportunities = allOpportunities.filter((opportunity) => !inCollection.has(opportunity.clientId));
+    const activities = allActivities.filter((activity) => !activity.clientId || !inCollection.has(activity.clientId));
+    const portfolioClients = allPortfolioClients.filter((client) => !inCollection.has(client.id));
     const lastSentCrmOrderByClient = await loadLastSentCrmOrderByClient({ isArchived: false, OR: [{ ownerSellerId: sellerId }, { id: { in: opportunities.map((opportunity) => opportunity.clientId) } }] });
     const withLastSentCrmOrder = <T extends { id: string }>(client: T) => ({ ...client, lastSentCrmOrderDate: lastSentCrmOrderByClient.get(client.id) ?? null });
     return {

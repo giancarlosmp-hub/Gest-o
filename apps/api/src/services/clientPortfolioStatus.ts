@@ -2,6 +2,7 @@ import { ErpOperationalOrderStatus, ErpOrderFulfillmentStatus, ErpOrderSyncStatu
 import { classifyPortfolioStatus, isCoolingActive, type PortfolioStatus } from "@salesforce-pro/shared";
 import { prisma } from "../config/prisma.js";
 import { resolvePurchaseDate } from "./commercialAutomationsService.js";
+import { loadClientIdsInCollection } from "./clientCollection.js";
 
 type PortfolioClient = { id: string; lastPurchaseDate: Date | null; financialProfile: Prisma.JsonValue | null };
 
@@ -44,16 +45,24 @@ export const isClientCoolingActive = (client: PortfolioClient, lastSentCrmOrderB
 // - semComprar: inativo recente e depois ex-cliente, cada grupo da compra mais recente para a mais antiga;
 // - esfriando: ativo há mais de 9 meses sem comprar, da compra mais antiga (mais perto de inativar) para a mais recente;
 // - primeiraVenda: prospects (nunca compraram), por nome.
+// Cliente em cobrança (clientCollection.ts) sai dos recortes, que são sugestões de venda. Só a automação pede
+// keepCollection para contar quantos ficaram fora; aí cada entrada vem marcada em inCollection.
 export type PortfolioSegment = "semComprar" | "esfriando" | "primeiraVenda";
-export type PortfolioSegmentEntry = { id: string; status: PortfolioStatus; lastPurchase: LastPurchase | null };
+export type PortfolioSegmentEntry = { id: string; status: PortfolioStatus; lastPurchase: LastPurchase | null; inCollection: boolean };
 
 const WITHOUT_PURCHASE_ORDER: Partial<Record<PortfolioStatus, number>> = { inativoRecente: 0, exCliente: 1 };
 
-export const listPortfolioSegment = async (segment: PortfolioSegment, scope: Prisma.ClientWhereInput, now: Date): Promise<PortfolioSegmentEntry[]> => {
+export const listPortfolioSegment = async (
+  segment: PortfolioSegment,
+  scope: Prisma.ClientWhereInput,
+  now: Date,
+  options: { keepCollection?: boolean } = {}
+): Promise<PortfolioSegmentEntry[]> => {
   const where: Prisma.ClientWhereInput = { ...scope, isArchived: false };
-  const [candidates, lastSentCrmOrderByClient] = await Promise.all([
+  const [candidates, lastSentCrmOrderByClient, inCollection] = await Promise.all([
     prisma.client.findMany({ where, select: { id: true, name: true, lastPurchaseDate: true, financialProfile: true } }),
-    loadLastSentCrmOrderByClient(where)
+    loadLastSentCrmOrderByClient(where),
+    loadClientIdsInCollection(where, now)
   ]);
   const rows = candidates.map((client) => ({
     id: client.id,
@@ -73,5 +82,7 @@ export const listPortfolioSegment = async (segment: PortfolioSegment, scope: Pri
         ? rows.filter((row) => row.cooling).sort((a, b) => time(a) - time(b))
         : rows.filter((row) => row.status === "prospect").sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
 
-  return selected.map(({ id, status, lastPurchase }) => ({ id, status, lastPurchase }));
+  return selected
+    .map(({ id, status, lastPurchase }) => ({ id, status, lastPurchase, inCollection: inCollection.has(id) }))
+    .filter((entry) => options.keepCollection || !entry.inCollection);
 };

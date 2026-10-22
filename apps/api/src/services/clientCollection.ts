@@ -47,3 +47,11 @@ export const loadClientCollection = async (
 
 export const loadClientIdsInCollection = async (scope: Prisma.ClientWhereInput, now = new Date()) =>
   new Set((await loadClientCollection(scope, now)).keys());
+
+/** Tira das listas de sugestão e prioridade o que é de cliente em cobrança (oportunidades, atividades). */
+export const withoutClientsInCollection = async <T extends { clientId: string | null }>(rows: T[], now = new Date()): Promise<T[]> => {
+  const clientIds = [...new Set(rows.map((row) => row.clientId).filter((id): id is string => Boolean(id)))];
+  if (!clientIds.length) return rows;
+  const inCollection = await loadClientIdsInCollection({ id: { in: clientIds } }, now);
+  return inCollection.size ? rows.filter((row) => !row.clientId || !inCollection.has(row.clientId)) : rows;
+};

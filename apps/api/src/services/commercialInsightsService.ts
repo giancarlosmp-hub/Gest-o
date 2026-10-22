@@ -8,6 +8,7 @@ import { resolveKnowledgeContextForAi } from "./knowledgeBaseService.js";
 import { parseAiJsonObject } from "./ai/aiResponseParser.js";
 import { calculateCommercialPriority, type CommercialPriorityInput, type CommercialPriorityLevel } from "./commercialPriorityService.js";
 import { loadLastSentCrmOrderByClient } from "./clientPortfolioStatus.js";
+import { loadClientIdsInCollection } from "./clientCollection.js";
 
 // Cache atual: entrada única em memória para /ai/commercial-insights por 6h.
 // Limitação conhecida: como ainda não há chave por empresa/tenant/escopo, uma arquitetura SaaS multiempresa
@@ -122,14 +123,16 @@ const deterministicSummary = (priorities: ExecutivePriority[], stats: any) => {
 const collectDeterministicContext = async () => {
   const now = new Date();
   // Clientes arquivados ficam fora: nem eles, nem as oportunidades e atividades deles entram no ranking.
-  const [clients, opportunities, activities, sellers, products, items, lastSentCrmOrderByClient] = await Promise.all([
+  // Cliente em cobrança continua nas estatísticas, mas não entra nas prioridades (não é sugestão de venda).
+  const [clients, opportunities, activities, sellers, products, items, lastSentCrmOrderByClient, inCollection] = await Promise.all([
     prisma.client.findMany({ where: { isArchived: false }, select: { id: true, name: true, region: true, city: true, state: true, ownerSellerId: true, createdAt: true, lastPurchaseDate: true, lastPurchaseValue: true, openTitlesTotal: true, overdueTitlesTotal: true, financialProfile: true, timelineEvents: { orderBy: { createdAt: "desc" }, take: 3, select: { createdAt: true, description: true } } } }),
     prisma.opportunity.findMany({ where: { client: { isArchived: false } }, select: { id: true, title: true, value: true, stage: true, followUpDate: true, expectedCloseDate: true, lastContactAt: true, createdAt: true, ownerSellerId: true, notes: true, clientId: true, client: { select: { id: true, name: true, region: true, ownerSellerId: true, lastPurchaseDate: true, lastPurchaseValue: true, openTitlesTotal: true, overdueTitlesTotal: true, financialProfile: true } }, items: { take: 3, select: { productNameSnapshot: true, netTotal: true } } } }),
     prisma.activity.findMany({ where: { AND: [{ OR: [{ done: false }, { dueDate: { gte: todayStart() } }] }, { OR: [{ clientId: null }, { client: { isArchived: false } }] }] }, select: { id: true, dueDate: true, date: true, createdAt: true, done: true, ownerSellerId: true, clientId: true, opportunityId: true, product: true } }),
     prisma.user.findMany({ where: { role: "vendedor", isActive: true }, select: { id: true, name: true, region: true } }),
     prisma.product.findMany({ select: { id: true, name: true, isActive: true } }),
     prisma.opportunityItem.findMany({ select: { productNameSnapshot: true, netTotal: true, createdAt: true, opportunity: { select: { stage: true } } } }),
-    loadLastSentCrmOrderByClient({ isArchived: false })
+    loadLastSentCrmOrderByClient({ isArchived: false }),
+    loadClientIdsInCollection({ isArchived: false }, now)
   ]);
   const withLastSentCrmOrder = <T extends { id: string }>(client: T) => ({ ...client, lastSentCrmOrderDate: lastSentCrmOrderByClient.get(client.id) ?? null }) as CommercialPriorityInput["client"];
   const activitiesByClient = new Map<string, typeof activities>();
@@ -139,13 +142,13 @@ const collectDeterministicContext = async () => {
     if (activity.opportunityId) activitiesByOpportunity.set(activity.opportunityId, [...(activitiesByOpportunity.get(activity.opportunityId) ?? []), activity]);
   }
   const openOpps = opportunities.filter((o) => OPEN_STAGES.includes(o.stage));
-  const opportunityPriorities = openOpps.map((o) => {
+  const opportunityPriorities = openOpps.filter((o) => !inCollection.has(o.clientId)).map((o) => {
     const input: CommercialPriorityInput = { now, client: withLastSentCrmOrder(o.client), opportunity: o, activities: [...(activitiesByClient.get(o.clientId) ?? []), ...(activitiesByOpportunity.get(o.id) ?? [])], timelineEvents: clients.find((c) => c.id === o.clientId)?.timelineEvents ?? [], workflow: { automaticallyCreatedOpportunity: Boolean(o.notes?.includes("automática")) } };
     const priority = calculateCommercialPriority(input);
     return { entityType: "opportunity" as const, entityId: o.id, title: `${compactName(o.client.name)} · ${compactName(o.title)}`, score: priority.score, level: priority.level, reason: firstReason(priority.reasons), recommendedAction: `Solicitar contato do vendedor responsável hoje: ${priority.nextAction}. Score ${priority.score}; valor ${formatCurrency(o.value)}${o.followUpDate ? `; follow-up ${o.followUpDate.toLocaleDateString("pt-BR")}` : ""}.` };
   });
   const clientsWithOpenOpp = new Set(openOpps.map((o) => o.clientId));
-  const clientPriorities = clients.filter((c) => !clientsWithOpenOpp.has(c.id)).map((c) => {
+  const clientPriorities = clients.filter((c) => !clientsWithOpenOpp.has(c.id) && !inCollection.has(c.id)).map((c) => {
     const priority = calculateCommercialPriority({ now, client: withLastSentCrmOrder(c), activities: activitiesByClient.get(c.id) ?? [], timelineEvents: c.timelineEvents });
     return { entityType: "client" as const, entityId: c.id, title: compactName(c.name), score: priority.score, level: priority.level, reason: firstReason(priority.reasons), recommendedAction: `Direcionar o vendedor responsável para ${priority.nextAction.toLowerCase()} em até 24h. Score ${priority.score}; dado de suporte: ${firstReason(priority.reasons)}.` };
   });
