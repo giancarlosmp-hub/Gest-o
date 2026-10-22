@@ -53,6 +53,7 @@ import { isClientCoolingActive, listPortfolioSegment, loadLastSentCrmOrderByClie
 import { aiUsageConfigSchema, saveAiUsageConfig } from "../services/ai/aiUsageLimiter.js";
 import { generateClientSuggestion } from "../services/clientSuggestion.js";
 import { collectionStatusOf, loadClientCollection, loadClientIdsInCollection, withoutClientsInCollection } from "../services/clientCollection.js";
+import { isSellerObservationEvent } from "../services/sellerObservation.js";
 import { buildAssistantWhatsappContext, generateAssistantWhatsappMessage } from "../services/assistantWhatsapp.js";
 import { aiService } from "../services/ai/aiService.js";
 import { runAiFlow, timeAiStage } from "../services/ai/aiTimeBudget.js";
@@ -5335,6 +5336,7 @@ router.post("/ai/opportunity-insight", async (req, res) => {
           id: true,
           createdAt: true,
           type: true,
+          opportunityId: true,
           description: true
         },
         orderBy: { createdAt: "desc" },
@@ -5360,10 +5362,9 @@ router.post("/ai/opportunity-insight", async (req, res) => {
   }
   if (opportunity.client.isArchived) return res.status(409).json({ message: archivedClientOpportunityMessage(opportunity.client.archiveReason) });
 
-  const recentTimelineObservation = opportunity.timelineEvents
-    .find((event) => event.description?.trim())
-    ?.description
-    ?.trim();
+  // Só comentário do vendedor vira observação; eventos de sistema (criação, pedido ERP, follow-up) ficam de fora.
+  const recentTimelineEvent = opportunity.timelineEvents.find((event) => isSellerObservationEvent(event) && event.description?.trim());
+  const recentTimelineObservation = recentTimelineEvent?.description?.trim();
 
   const recentActivityWithObservation = opportunity.activities.find((activity) => {
     const texts = [activity.notes, activity.description, activity.result].map((text) => text?.trim() || "");
@@ -5379,7 +5380,7 @@ router.post("/ai/opportunity-insight", async (req, res) => {
   const recentActivityDate = recentActivityWithObservation
     ? (recentActivityWithObservation.date || recentActivityWithObservation.createdAt).getTime()
     : 0;
-  const recentTimelineDate = opportunity.timelineEvents.find((event) => event.description?.trim())?.createdAt.getTime() || 0;
+  const recentTimelineDate = recentTimelineEvent?.createdAt.getTime() || 0;
 
   const latestObservation = recentActivityDate >= recentTimelineDate
     ? recentActivityObservation
