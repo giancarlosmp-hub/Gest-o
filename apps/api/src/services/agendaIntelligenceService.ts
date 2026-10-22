@@ -176,7 +176,7 @@ export class AgendaIntelligenceService {
         return hit.value;
       }
     }
-    const base = await timeAiStage("deterministic", () => this.buildDeterministic(input.date, scope, data));
+    const base = await timeAiStage("deterministic", () => this.buildDeterministic(input.date, scope, data, input));
     let result = base;
     let aiUsed = false;
     let fallbackUsed = true;
@@ -206,7 +206,23 @@ export class AgendaIntelligenceService {
     );
     return result;
   }
-  private async resolveSellerScope(input: AgendaOptimizationInput): Promise<{ type: "seller" | "aggregate"; cacheSellerId: string; sellerIds: string[] }> {
+  // Só os compromissos do dia, sem encaixes sugeridos (que geram o planejamento semanal) nem IA: é o que o
+  // Assistente Comercial mostra.
+  async listDaySchedule(
+    input: Omit<AgendaOptimizationInput, "refresh">,
+  ): Promise<Pick<AgendaOptimization, "currentSchedule" | "conflicts">> {
+    const range = parseDateOnlyRange(input.date);
+    if (!range)
+      throw Object.assign(
+        new Error("Parâmetro date deve estar em YYYY-MM-DD."),
+        { statusCode: 400 },
+      );
+    const scope = await this.resolveSellerScope(input);
+    const data = await this.collectData(scope.sellerIds, range.from, range.to);
+    const { currentSchedule, conflicts } = await this.buildDeterministic(input.date, scope, data, null);
+    return { currentSchedule, conflicts };
+  }
+  private async resolveSellerScope(input: Pick<AgendaOptimizationInput, "sellerId" | "viewerUserId" | "viewerRole">): Promise<{ type: "seller" | "aggregate"; cacheSellerId: string; sellerIds: string[] }> {
     if (input.viewerRole === "vendedor") return { type: "seller", cacheSellerId: input.viewerUserId, sellerIds: [input.viewerUserId] };
     if (input.sellerId) {
       const seller = await prisma.user.findFirst({
@@ -334,6 +350,7 @@ export class AgendaIntelligenceService {
     date: string,
     scope: { type: "seller" | "aggregate"; cacheSellerId: string; sellerIds: string[] },
     data: Awaited<ReturnType<AgendaIntelligenceService["collectData"]>>,
+    viewer: Pick<AgendaOptimizationInput, "viewerUserId" | "viewerRole"> | null,
   ): Promise<AgendaOptimization> {
     const territoryByCity = new Map(
       data.territories.map((t) => [
@@ -415,7 +432,7 @@ export class AgendaIntelligenceService {
     const conflicts = this.detectConflicts(items);
     const suggested = this.orderItems(items);
     const distance = this.estimateDistance(suggested);
-    const insertions = scope.type === "seller" ? await this.suggestInsertions(scope.sellerIds[0], date, items) : [];
+    const insertions = scope.type === "seller" && viewer ? await this.suggestInsertions(scope.sellerIds[0], date, items, viewer) : [];
     const missing = items.filter((i) => !hasValidCoordinates(i)).length;
     const fixed = items.filter((i) => !i.movable).length;
     const confidence =
@@ -528,14 +545,16 @@ export class AgendaIntelligenceService {
     sellerId: string,
     date: string,
     items: ScheduleItem[],
+    viewer: Pick<AgendaOptimizationInput, "viewerUserId" | "viewerRole">,
   ): Promise<AgendaOptimization["suggestedInsertions"]> {
     const scheduled = new Set(items.map((i) => i.clientId).filter(Boolean));
+    // A IA do planejamento conta na cota de quem abriu a agenda, não do vendedor dela.
     const plan = await planningIntelligenceService.generateWeeklyCommercialPlan(
       {
         sellerId,
         weekStart: date,
-        viewerUserId: sellerId,
-        viewerRole: "diretor",
+        viewerUserId: viewer.viewerUserId,
+        viewerRole: viewer.viewerRole,
         refresh: false,
       },
     );
