@@ -33,7 +33,8 @@ export const loadClientCollection = async (
   orderBy?: Prisma.ClientOrderByWithRelationInput | Prisma.ClientOrderByWithRelationInput[]
 ): Promise<Map<string, ClientCollectionStatus>> => {
   const rows = await prisma.client.findMany({
-    where: { AND: [scope, WITH_OPEN_TITLES] },
+    // O recorte fica no topo (isArchived, dono, ids) e o filtro de títulos entra no AND, sem colidir com um OR dele.
+    where: { ...scope, AND: [...(scope.AND ? (Array.isArray(scope.AND) ? scope.AND : [scope.AND]) : []), WITH_OPEN_TITLES] },
     ...(orderBy ? { orderBy } : {}),
     select: { id: true, partnerTitles: true, overdueTitlesTotal: true }
   });
