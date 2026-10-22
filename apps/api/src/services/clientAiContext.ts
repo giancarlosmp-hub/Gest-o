@@ -3,6 +3,7 @@ import { CLIENT_IN_COLLECTION_LABEL, PORTFOLIO_STATUS_LABELS, type PortfolioStat
 import { prisma } from "../config/prisma.js";
 import { isClientCoolingActive, loadLastSentCrmOrderByClient, portfolioStatusOf, resolveLastPurchase, type LastPurchase } from "./clientPortfolioStatus.js";
 import { collectionStatusOf } from "./clientCollection.js";
+import { SELLER_OBSERVATION_TIMELINE_WHERE } from "./sellerObservation.js";
 
 const OPEN_STAGES = [OpportunityStage.prospeccao, OpportunityStage.negociacao, OpportunityStage.proposta] as const;
 
@@ -198,6 +199,7 @@ export const buildClientAiContext = async ({
     prisma.timelineEvent.findFirst({
       where: {
         clientId: client.id,
+        ...SELLER_OBSERVATION_TIMELINE_WHERE,
         description: {
           not: ""
         }

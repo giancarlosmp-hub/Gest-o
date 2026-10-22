@@ -61,6 +61,7 @@
     "test:ai-context-official-rule": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/services/ai/aiPayloadSanitizer.test.ts && tsx src/routes/aiContextOfficialRule.http.test.ts",
     "test:crm-assistant-today": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/routes/crmAssistantToday.http.test.ts",
     "test:client-collection": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/routes/clientCollection.http.test.ts",
+    "test:client-system-notes": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/routes/clientSystemNotes.http.test.ts",
     "test:erp-order-open-errors": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/services/erpOrderOpenErrors.test.ts",
     "smoke:ultrafv3-order-number-parser": "tsx src/scripts/ultraFv3OrderNumberParserSmoke.ts",
     "smoke:ultrafv3-order-protocol-test": "tsx src/scripts/ultraFv3OrderProtocolTestSmoke.ts",

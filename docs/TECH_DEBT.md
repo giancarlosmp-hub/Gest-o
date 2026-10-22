@@ -407,6 +407,23 @@ ainda usam a abordagem da carteira (podem sugerir reativação para cliente em c
 `partnerTitles` não foi medido em produção; se pesar, a alternativa é gravar o vencimento mais antigo na
 sincronização (exige migration e aprovação).
 
+### TD-SYSTEM-TIMELINE-NOTES — registros de sistema viravam "observação recente"
+
+**Resolvido no código, aguardando deploy.** A sincronização UltraFV3 (`createUltraFv3ClientAuditEvent` em
+`ultraFv3SyncService.ts`), os saneamentos e a limpeza da carteira gravam auditoria na `TimelineEvent` com
+`type=status`, sem oportunidade e com o vendedor dono em `ownerSellerId` (não há autor de sistema). A Sugestão
+inteligente pegava o evento mais novo do cliente e mostrava esse texto como "Observação recente". Critério estrutural
+em `apps/api/src/services/sellerObservation.ts`: observação do vendedor é só `type=comentario` com oportunidade (o
+único formato que o usuário grava). Aplicado na observação da Sugestão inteligente, no contexto do cliente enviado à
+IA (inclui a mensagem de WhatsApp do assistente) e no insight da oportunidade. Nada foi apagado no banco. O Resumo
+automático do cliente passou a usar a situação oficial da carteira e a mesma recomendação da Sugestão inteligente.
+
+Pendente: a timeline do cliente e a inteligência da timeline continuam mostrando os registros de sistema, porque eles
+têm o mesmo formato dos eventos de agenda e visita (`status` sem oportunidade); separar exige marcar a origem do
+evento (coluna nova, migration e aprovação). As prioridades do dia ainda leem qualquer evento da oportunidade como
+observação. A atividade criada pela automação de inativos (`Contato automático: …`) não tem marcação de origem e
+continua entrando como observação no Resumo automático.
+
 ### TD-ERP-DUE-DATE-ISO-DEPENDENCY — vencimento dos títulos lido com `new Date()` na sincronização
 
 **Aberto, baixo.** Em consulta somente leitura à produção (12/10/2026), 100% dos `DATA_VENCIMENTO`

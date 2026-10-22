@@ -1,5 +1,7 @@
 import { OpportunityStage } from "@prisma/client";
-import { CLIENT_IN_COLLECTION_RECOMMENDATION } from "@salesforce-pro/shared";
+import { CLIENT_IN_COLLECTION_LABEL, CLIENT_IN_COLLECTION_RECOMMENDATION } from "@salesforce-pro/shared";
+import { portfolioSituationLabel, type ClientAiPortfolio } from "./clientAiContext.js";
+import { SUGGESTION_BY_APPROACH } from "./clientSuggestion.js";
 
 export type ClientSummaryContext = {
   client: {
@@ -33,6 +35,8 @@ export type ClientSummaryContext = {
     updatedAt: Date;
   } | null;
   lastContact: Date | null;
+  // Situação oficial da carteira: define o momento e a abordagem sem negociação aberta, como na Sugestão inteligente.
+  portfolio: ClientAiPortfolio;
   // Cliente em cobrança (clientCollection.ts): o resumo não recomenda venda nem reativação.
   inCollection?: boolean;
 };
@@ -79,8 +83,14 @@ export const generateClientSummary = (clientContext: ClientSummaryContext, now =
   withCollection(buildClientSummaryOutput(clientContext, now), clientContext.inCollection);
 
 const buildClientSummaryOutput = (clientContext: ClientSummaryContext, now: Date): ClientSummaryOutput => {
-  const { client, recentActivities, recentObservations, openOpportunities, lastWonOpportunity, lastContact } = clientContext;
+  const { client, recentActivities, recentObservations, openOpportunities, lastWonOpportunity, lastContact, portfolio } = clientContext;
   const tags = new Set<string>();
+  const situation = clientContext.inCollection ? CLIENT_IN_COLLECTION_LABEL : portfolioSituationLabel(portfolio);
+  const portfolioApproach = clientContext.inCollection
+    ? CLIENT_IN_COLLECTION_RECOMMENDATION
+    : SUGGESTION_BY_APPROACH[portfolio.approach].recommendation;
+  const lastPurchaseLabel = toPtBrDate(portfolio.lastPurchase?.date);
+  const portfolioSignal = `Situação da carteira: ${situation}.${lastPurchaseLabel && !clientContext.inCollection ? ` Última compra em ${lastPurchaseLabel}.` : ""}`;
 
   const observationTexts = recentObservations.map((item) => normalizeText(item.text));
   const observationsJoined = observationTexts.join(" ");
@@ -109,15 +119,16 @@ const buildClientSummaryOutput = (clientContext: ClientSummaryContext, now: Date
 
   if (!hasAnyHistory) {
     return {
-      summary: `${client.name} (${client.city}/${client.state}) ainda não possui histórico recente registrado. Priorize uma abordagem de descoberta para mapear necessidades e abrir próximos passos comerciais.`,
-      profileTags: ["sem histórico recente"],
-      currentMoment: "cliente sem histórico recente",
-      recommendedApproach: "realizar contato inicial e registrar primeiras observações",
-      lastRelevantSignals: ["Sem atividades, observações ou oportunidades recentes para este cliente."]
+      summary: `${client.name} (${client.city}/${client.state}): ${situation}. Sem atividades, observações ou oportunidades recentes no CRM.
+Abordagem: ${portfolioApproach}.`,
+      profileTags: [],
+      currentMoment: situation,
+      recommendedApproach: portfolioApproach,
+      lastRelevantSignals: [portfolioSignal, "Sem atividades, observações ou oportunidades recentes para este cliente."]
     };
   }
 
-  const signals: string[] = [];
+  const signals: string[] = [portfolioSignal];
 
   if (lastContact) {
     const daysSinceLastContact = Math.floor((now.getTime() - lastContact.getTime()) / DAY_IN_MS);
@@ -156,8 +167,9 @@ const buildClientSummaryOutput = (clientContext: ClientSummaryContext, now: Date
     signals.push(`Observação recente: "${clipped}".`);
   }
 
-  let currentMoment = "cliente em acompanhamento";
-  let recommendedApproach = "manter cadência de acompanhamento com próximo passo claro";
+  // Sem negociação aberta, momento e abordagem vêm da situação oficial da carteira.
+  let currentMoment = situation;
+  let recommendedApproach = portfolioApproach;
 
   if (hasHotOpportunity) {
     currentMoment = "cliente em fase de avaliação";
@@ -165,16 +177,18 @@ const buildClientSummaryOutput = (clientContext: ClientSummaryContext, now: Date
   } else if (hasOverdueFollowUp) {
     currentMoment = "cliente com retorno pendente";
     recommendedApproach = "fazer follow-up imediato e alinhar prazo de decisão";
-  } else if (openOpportunities.length === 0 && lastWonOpportunity) {
-    currentMoment = "cliente com histórico de ganho e sem negociação ativa";
-    recommendedApproach = "reativar relacionamento com nova oportunidade consultiva";
+  } else if (openOpportunities.length > 0) {
+    currentMoment = "cliente em acompanhamento";
+    recommendedApproach = "manter cadência de acompanhamento com próximo passo claro";
   }
 
   const summaryLines = [
     `${client.name}, ${client.city}/${client.state}, possui ${openOpportunities.length} oportunidade(s) aberta(s).`,
     hasHotOpportunity
       ? "Há sinais de avanço comercial em proposta/negociação e janela para fechamento no curto prazo."
-      : "O momento pede manutenção de relacionamento e evolução estruturada do próximo passo.",
+      : openOpportunities.length > 0
+        ? "O momento pede manutenção de relacionamento e evolução estruturada do próximo passo."
+        : `Situação da carteira: ${situation}. Abordagem: ${portfolioApproach}.`,
     hasOverdueFollowUp
       ? "Existem retornos vencidos que devem ser tratados com prioridade para evitar perda de timing."
       : "Não há follow-up vencido identificado nas oportunidades abertas.",
