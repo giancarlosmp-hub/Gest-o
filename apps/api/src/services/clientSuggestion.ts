@@ -48,7 +48,8 @@ const buildSummary = (clientContext: ClientAiContextPayload) => {
 };
 
 // Sem negociação aberta, a sugestão segue a situação oficial da carteira (não mais limites de 60/90 dias).
-const SUGGESTION_BY_APPROACH: Record<PortfolioApproach, Omit<ClientSuggestionPayload, "source" | "summary">> = {
+// O Resumo automático do cliente usa a mesma recomendação (clientSummary.ts).
+export const SUGGESTION_BY_APPROACH: Record<PortfolioApproach, Omit<ClientSuggestionPayload, "source" | "summary">> = {
   reativacao: {
     status: "parado",
     recommendation: "Reativar o cliente: ele parou de comprar",

@@ -48,7 +48,7 @@ import { z } from "zod";
 import { hashPassword } from "../utils/password.js";
 import { calculateOpportunityRisk } from "../services/opportunityInsight.js";
 import { generateSalesMessageResult } from "../services/opportunitySalesMessage.js";
-import { buildClientAiContext } from "../services/clientAiContext.js";
+import { buildClientAiContext, portfolioApproachOf } from "../services/clientAiContext.js";
 import { isClientCoolingActive, listPortfolioSegment, loadLastSentCrmOrderByClient, portfolioStatusOf, resolveLastPurchase } from "../services/clientPortfolioStatus.js";
 import { aiUsageConfigSchema, saveAiUsageConfig } from "../services/ai/aiUsageLimiter.js";
 import { generateClientSuggestion } from "../services/clientSuggestion.js";
@@ -5402,6 +5402,13 @@ const clientSummaryParamsSchema = z.object({
   clientId: z.string().trim().min(1, "clientId é obrigatório")
 });
 
+// Situação oficial da carteira para o Resumo automático (mesma regra da Sugestão inteligente).
+const summaryPortfolioOf = (client: { id: string; lastPurchaseDate: Date | null; financialProfile: Prisma.JsonValue | null }, lastSentCrmOrderByClient: Map<string, Date>, now = new Date()) => {
+  const status = portfolioStatusOf(client, lastSentCrmOrderByClient, now);
+  const cooling = isClientCoolingActive(client, lastSentCrmOrderByClient, now);
+  return { status, cooling, approach: portfolioApproachOf(status, cooling), lastPurchase: resolveLastPurchase(client, lastSentCrmOrderByClient) };
+};
+
 router.get("/ai/client-summary/:clientId", async (req, res) => {
   const parsed = clientSummaryParamsSchema.safeParse(req.params);
   if (!parsed.success) {
@@ -5421,6 +5428,8 @@ router.get("/ai/client-summary/:clientId", async (req, res) => {
       name: true,
       city: true,
       state: true,
+      lastPurchaseDate: true,
+      financialProfile: true,
       partnerTitles: true,
       overdueTitlesTotal: true
     }
@@ -5430,7 +5439,8 @@ router.get("/ai/client-summary/:clientId", async (req, res) => {
     return res.status(404).json({ message: "Cliente não encontrado" });
   }
 
-  const [recentActivities, openOpportunities, lastWonOpportunity] = await Promise.all([
+  const [lastSentCrmOrderByClient, recentActivities, openOpportunities, lastWonOpportunity] = await Promise.all([
+    loadLastSentCrmOrderByClient({ id: client.id }),
     prisma.activity.findMany({
       where: { clientId: client.id },
       orderBy: [{ dueDate: "desc" }, { createdAt: "desc" }],
@@ -5523,6 +5533,7 @@ router.get("/ai/client-summary/:clientId", async (req, res) => {
         }
       : null,
     lastContact,
+    portfolio: summaryPortfolioOf(client, lastSentCrmOrderByClient),
     inCollection: collectionStatusOf(client) !== null
   });
 
