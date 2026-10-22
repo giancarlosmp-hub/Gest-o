@@ -2,6 +2,7 @@ import { z } from "zod";
 
 export * from "./portfolioStatus.js";
 export * from "./rankingSellers.js";
+export * from "./clientCollection.js";
 
 /** The browser-facing route. Reverse proxies may forward it with or without
  * `/api`; the API registers both forms, but callers must only use this value. */
@@ -431,6 +432,8 @@ export type CommercialAutomationsSimulation = {
   eligibleClients: number;
   wouldCreate: number;
   skipped: InactiveClientWorkflowSkips;
+  // Inativos recentes em cobrança: ficam fora da automação, antes dos demais motivos (não entram em elegíveis).
+  inCollection: number;
 };
 export type TimelineEventInput = z.infer<typeof timelineEventSchema>;
 export type EventInput = z.infer<typeof eventSchema>;
