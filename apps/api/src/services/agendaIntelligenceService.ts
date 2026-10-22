@@ -446,7 +446,7 @@ export class AgendaIntelligenceService {
       sellerId: scope.cacheSellerId,
       scope: scope.type,
       sellerIds: scope.sellerIds,
-      summary: `${scope.type === "aggregate" ? `Análise agregada de ${scope.sellerIds.length} vendedor(es): ` : ""}Análise determinística de ${items.length} visita(s)/compromisso(s); ${fixed} fixo(s) preservado(s), ${items.length - fixed} reordenável(is).`,
+      summary: `${scope.type === "aggregate" ? `Análise agregada de ${scope.sellerIds.length} vendedor(es): ` : ""}Análise de ${items.length} visita(s)/compromisso(s); ${fixed} fixo(s) preservado(s), ${items.length - fixed} reordenável(is).`,
       currentSchedule: items.map(
         ({
           status,

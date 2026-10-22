@@ -51,7 +51,8 @@ test("agrupa cidade\/território, usa Haversine só com coordenadas válidas e n
   assert.match(geoSource, /hasValidCoordinates/);
   assert.match(source, /estimatedDistanceKm: distance/);
   assert.match(source, /return null/);
-  assert.match(webSource, /Haversine é\s+linha reta/);
+  assert.doesNotMatch(webSource, /Haversine/);
+  assert.match(webSource, /distâncias em linha reta, não pelo trajeto/);
 });
 
 test("prioridade oficial, inserções, fallback IA, cache e date-only", () => {

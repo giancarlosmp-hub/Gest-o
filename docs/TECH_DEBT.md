@@ -424,6 +424,21 @@ evento (coluna nova, migration e aprovação). As prioridades do dia ainda leem 
 observação. A atividade criada pela automação de inativos (`Contato automático: …`) não tem marcação de origem e
 continua entrando como observação no Resumo automático.
 
+### TD-AGENDA-WEEKLY-PLAN-TODAY — planejamento semanal sugeria dias passados e agrupava ligação por cidade
+
+**Resolvido no código, aguardando deploy.** `planningIntelligenceService.ts` sugere só de max(início da semana,
+hoje pela data de Brasília) em diante; follow-up e atividade vencidos ficam presos em hoje (antes, na segunda); dias
+que já passaram mostram só os compromissos, agrupados pela data de Brasília. Só visita e compromisso presencial
+(`roteiro_visita`, `reuniao_presencial`) definem a cidade do dia e só visita busca o dia da mesma cidade; ligação,
+WhatsApp, follow-up, proposta e revisão não. Textos da tela do planejamento e da Agenda Inteligente em português
+("Sugestão do sistema"/"Sugestão da IA", carga, período, confiança), sem "determinístico", "Fallback" e "Haversine".
+
+Pendente: semana inteira no passado deixa todas as sugestões em `unallocatedPriorities` e a carga aparece como "Carga
+alta" (`overloaded`). Prazos de follow-up e atividade continuam com a data UTC (`dateOnly`). A chave dos cards
+(`data-clientId`) se repete quando o mesmo cliente tem duas ações no dia (aviso do React). O cabeçalho mostra as datas
+em ISO (`2026-10-19`). O aviso fixo "Cache em memória…" segue em `warnings` (não aparece na tela). Proximidade por mapa
+fica para outro PR.
+
 ### TD-ERP-DUE-DATE-ISO-DEPENDENCY — vencimento dos títulos lido com `new Date()` na sincronização
 
 **Aberto, baixo.** Em consulta somente leitura à produção (12/10/2026), 100% dos `DATA_VENCIMENTO`
