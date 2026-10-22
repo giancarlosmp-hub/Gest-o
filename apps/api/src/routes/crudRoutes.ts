@@ -52,6 +52,7 @@ import { buildClientAiContext } from "../services/clientAiContext.js";
 import { isClientCoolingActive, listPortfolioSegment, loadLastSentCrmOrderByClient, portfolioStatusOf, resolveLastPurchase } from "../services/clientPortfolioStatus.js";
 import { aiUsageConfigSchema, saveAiUsageConfig } from "../services/ai/aiUsageLimiter.js";
 import { generateClientSuggestion } from "../services/clientSuggestion.js";
+import { collectionStatusOf, loadClientCollection, loadClientIdsInCollection, withoutClientsInCollection } from "../services/clientCollection.js";
 import { buildAssistantWhatsappContext, generateAssistantWhatsappMessage } from "../services/assistantWhatsapp.js";
 import { aiService } from "../services/ai/aiService.js";
 import { runAiFlow, timeAiStage } from "../services/ai/aiTimeBudget.js";
@@ -729,6 +730,10 @@ const toIsoStringOrNull = (value: unknown) => {
   if (Number.isNaN(date.getTime())) return null;
   return date.toISOString();
 };
+
+// Oportunidade aberta de cliente em cobrança continua na lista, com o aviso "Cliente em cobrança".
+const loadOpportunityClientsInCollection = async (opportunities: Array<{ clientId: string }>) =>
+  opportunities.length ? loadClientIdsInCollection({ id: { in: [...new Set(opportunities.map((opportunity) => opportunity.clientId))] } }) : new Set<string>();
 
 const serializeOpportunity = (opportunity: any, todayStart: Date) => ({
   ...opportunity,
@@ -4005,6 +4010,13 @@ router.get("/clients/alerts/cooling", async (req, res) => {
   return res.json({ count: segment.length, clients, items: clients, months: COOLING_ACTIVE_MONTHS, generatedAt: new Date().toISOString() });
 });
 
+// Clientes em cobrança da carteira visível (título de venda vencido há mais de 30 dias): só a contagem, para o
+// bloco da Central do Dia; a lista fica em GET /clients?cobranca=1.
+router.get("/clients/alerts/collection", async (req, res) => {
+  const inCollection = await loadClientIdsInCollection({ ...sellerWhere(req), isArchived: false });
+  return res.json({ count: inCollection.size, generatedAt: new Date().toISOString() });
+});
+
 // Valores distintos sem vazios; maiúsculas/minúsculas iguais viram uma opção só (o filtro da lista é insensível).
 const distinctFilterValues = (values: Array<string | null>) => {
   const byKey = new Map<string, string>();
@@ -4033,6 +4045,8 @@ router.get("/clients", async (req, res) => {
   const ownerSellerIdFilter = String(req.query.ownerSellerId || req.query.vendedorId || "").trim();
   // Situação da carteira (?status=ativo|inativoRecente|exCliente|prospect); valor inválido é ignorado.
   const portfolioStatusFilter = isPortfolioStatus(req.query.status) ? req.query.status : null;
+  // Só clientes em cobrança (?cobranca=1), com os dias do título vencido mais antigo e o total vencido.
+  const collectionFilter = ["1", "true"].includes(String(req.query.cobranca || ""));
   const page = parsePositiveInt(req.query.page, 1);
   const pageSize = Math.min(parsePositiveInt(req.query.pageSize, 20), 100);
   const orderBy = parseClientSort(String(req.query.sort || "").trim() || undefined);
@@ -4066,7 +4080,7 @@ router.get("/clients", async (req, res) => {
       : {})
   };
 
-  const hasAdvancedQuery = Boolean(portfolioStatusFilter) || ["q", "uf", "regiao", "tipo", "ownerSellerId", "vendedorId", "page", "pageSize", "sort"].some(
+  const hasAdvancedQuery = Boolean(portfolioStatusFilter) || collectionFilter || ["q", "uf", "regiao", "tipo", "ownerSellerId", "vendedorId", "page", "pageSize", "sort"].some(
     (key) => req.query[key] !== undefined
   );
 
@@ -4103,6 +4117,46 @@ router.get("/clients", async (req, res) => {
 
   const ownerSellerInclude = { ownerSeller: { select: { id: true, name: true } } } as const;
   const now = new Date();
+  // Selo "Em cobrança" na lista: calculado dos títulos já carregados de cada linha.
+  const withCollection = <T extends { partnerTitles?: unknown; overdueTitlesTotal?: number | null; financialProfile?: unknown }>(row: T) => ({
+    ...projectClientForResponse(row),
+    collection: collectionStatusOf(row, now)
+  });
+
+  if (collectionFilter) {
+    // A cobrança não é coluna: lê os títulos de quem tem saldo em aberto, na ordem pedida, e pagina os ids.
+    // Com "Mostrar arquivados" a lista fica vazia, como no filtro de situação.
+    const collection = showArchivedOnly ? new Map() : await loadClientCollection(where, now, orderBy);
+    let matchingIds = [...collection.keys()];
+    if (portfolioStatusFilter && matchingIds.length) {
+      const [candidates, lastSentCrmOrderByClient] = await Promise.all([
+        prisma.client.findMany({ where: { ...where, id: { in: matchingIds } }, select: { id: true, lastPurchaseDate: true, financialProfile: true } }),
+        loadLastSentCrmOrderByClient({ id: { in: matchingIds } })
+      ]);
+      const matchingStatus = new Set(candidates.filter((client) => portfolioStatusOf(client, lastSentCrmOrderByClient, now) === portfolioStatusFilter).map((client) => client.id));
+      matchingIds = matchingIds.filter((id) => matchingStatus.has(id));
+    }
+    const pageIds = matchingIds.slice((page - 1) * pageSize, page * pageSize);
+    const [pageRows, lastSentCrmOrderByClient] = pageIds.length
+      ? await Promise.all([
+          prisma.client.findMany({ where: { ...where, id: { in: pageIds } }, include: ownerSellerInclude }),
+          loadLastSentCrmOrderByClient({ id: { in: pageIds } })
+        ])
+      : [[], new Map<string, Date>()];
+    const rowsById = new Map(pageRows.map((row) => [row.id, row]));
+
+    await runShadow(matchingIds.length);
+
+    return res.json({
+      items: pageIds.flatMap((id) => {
+        const row = rowsById.get(id);
+        return row ? [{ ...withCollection(row), portfolioStatus: portfolioStatusOf(row, lastSentCrmOrderByClient, now) }] : [];
+      }),
+      total: matchingIds.length,
+      page,
+      pageSize
+    });
+  }
 
   if (portfolioStatusFilter) {
     // Mesma regra e mesmo recorte do card do Dashboard (só não arquivados): a situação não é coluna, então
@@ -4126,7 +4180,7 @@ router.get("/clients", async (req, res) => {
     return res.json({
       items: pageIds.flatMap((id) => {
         const row = rowsById.get(id);
-        return row ? [{ ...projectClientForResponse(row), portfolioStatus: portfolioStatusFilter }] : [];
+        return row ? [{ ...withCollection(row), portfolioStatus: portfolioStatusFilter }] : [];
       }),
       total: matchingIds.length,
       page,
@@ -4158,7 +4212,7 @@ router.get("/clients", async (req, res) => {
   const lastSentCrmOrderByClient = items.length ? await loadLastSentCrmOrderByClient({ id: { in: items.map((item) => item.id) } }) : new Map<string, Date>();
 
   res.json({
-    items: items.map((item) => ({ ...projectClientForResponse(item), portfolioStatus: portfolioStatusOf(item, lastSentCrmOrderByClient, now) })),
+    items: items.map((item) => ({ ...withCollection(item), portfolioStatus: portfolioStatusOf(item, lastSentCrmOrderByClient, now) })),
     total,
     page,
     pageSize
@@ -5365,7 +5419,9 @@ router.get("/ai/client-summary/:clientId", async (req, res) => {
       id: true,
       name: true,
       city: true,
-      state: true
+      state: true,
+      partnerTitles: true,
+      overdueTitlesTotal: true
     }
   });
 
@@ -5465,7 +5521,8 @@ router.get("/ai/client-summary/:clientId", async (req, res) => {
           updatedAt: lastWonOpportunity.createdAt
         }
       : null,
-    lastContact
+    lastContact,
+    inCollection: collectionStatusOf(client) !== null
   });
 
   return res.json(payload);
@@ -5616,14 +5673,15 @@ router.get("/ai/today-priorities", async (req, res) => {
   }
 
   const todayStart = getUtcTodayStart();
-  const openOpportunities = await prisma.opportunity.findMany({
+  // Cliente em cobrança sai das prioridades; a oportunidade continua na tela Oportunidades, com o aviso.
+  const openOpportunities = await withoutClientsInCollection(await prisma.opportunity.findMany({
     where: {
       ownerSellerId: req.user.id,
       stage: { notIn: [...CLOSED_STAGE_VALUES] },
       client: { isArchived: false }
     },
     select: TODAY_PRIORITIES_OPPORTUNITY_SELECT
-  });
+  }));
 
   // Última compra efetiva também considera o pedido sent do CRM, como a situação da carteira.
   const lastSentCrmOrderByClient = openOpportunities.length
@@ -5720,8 +5778,11 @@ router.get("/opportunities", async (req, res) => {
         consideredOpportunities
       });
     }
-    const effectiveStates = await loadEffectiveWonContributions(opportunities.filter((opportunity) => opportunity.stage === "ganho"));
-    return res.json(opportunities.map((opportunity) => serializeOpportunity(withEffectiveWin(opportunity, effectiveStates), todayStart)));
+    const [effectiveStates, inCollection] = await Promise.all([
+      loadEffectiveWonContributions(opportunities.filter((opportunity) => opportunity.stage === "ganho")),
+      loadOpportunityClientsInCollection(opportunities)
+    ]);
+    return res.json(opportunities.map((opportunity) => ({ ...serializeOpportunity(withEffectiveWin(opportunity, effectiveStates), todayStart), clientInCollection: inCollection.has(opportunity.clientId) })));
   }
 
   const [total, opportunities] = await Promise.all([
@@ -5767,9 +5828,12 @@ router.get("/opportunities", async (req, res) => {
       consideredOpportunities
     });
   }
-  const effectiveStates = await loadEffectiveWonContributions(opportunities.filter((opportunity) => opportunity.stage === "ganho"));
+  const [effectiveStates, inCollection] = await Promise.all([
+    loadEffectiveWonContributions(opportunities.filter((opportunity) => opportunity.stage === "ganho")),
+    loadOpportunityClientsInCollection(opportunities)
+  ]);
   return res.json({
-    items: opportunities.map((opportunity) => serializeOpportunity(withEffectiveWin(opportunity, effectiveStates), todayStart)),
+    items: opportunities.map((opportunity) => ({ ...serializeOpportunity(withEffectiveWin(opportunity, effectiveStates), todayStart), clientInCollection: inCollection.has(opportunity.clientId) })),
     total,
     page,
     pageSize,

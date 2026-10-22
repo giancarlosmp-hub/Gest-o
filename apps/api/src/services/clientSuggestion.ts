@@ -1,3 +1,4 @@
+import { CLIENT_IN_COLLECTION_LABEL, CLIENT_IN_COLLECTION_RECOMMENDATION } from "@salesforce-pro/shared";
 import { buildClientAiPromptContext, portfolioSituationLabel, type ClientAiContextPayload, type PortfolioApproach } from "./clientAiContext.js";
 import { aiService } from "./ai/aiService.js";
 import { getDemetraMasterPrompt } from "./ai/demetraMasterPrompt.js";
@@ -33,7 +34,7 @@ const buildSummary = (clientContext: ClientAiContextPayload) => {
   const { client, commercialSummary, latestObservation, portfolio } = clientContext;
   const parts = [
     `Cliente: ${client.name}.`,
-    `Situação da carteira: ${portfolioSituationLabel(portfolio)}.`,
+    `Situação da carteira: ${clientContext.inCollection ? CLIENT_IN_COLLECTION_LABEL : portfolioSituationLabel(portfolio)}.`,
     `Oportunidades abertas: ${commercialSummary.openOpportunitiesCount}.`,
     `Última atividade: ${formatDatePtBr(commercialSummary.lastActivityAt)}.`,
     `Última compra: ${formatDatePtBr(portfolio.lastPurchase?.date)}.`
@@ -74,9 +75,21 @@ const SUGGESTION_BY_APPROACH: Record<PortfolioApproach, Omit<ClientSuggestionPay
   }
 };
 
+// Cliente em cobrança: recomendação fixa, acima da negociação aberta e da situação da carteira (nunca reativação).
+const COLLECTION_SUGGESTION: Omit<ClientSuggestionPayload, "source" | "summary"> = {
+  status: "acompanhamento",
+  recommendation: CLIENT_IN_COLLECTION_RECOMMENDATION,
+  nextAction: "Alinhar com o financeiro a regularização dos títulos vencidos antes de qualquer oferta",
+  riskLevel: "alto"
+};
+
 export const buildClientSuggestion = (clientContext: ClientAiContextPayload): ClientSuggestionPayload => {
   const { commercialSummary, portfolio } = clientContext;
   const daysSinceLastActivity = getDaysSince(commercialSummary.lastActivityAt);
+
+  if (clientContext.inCollection) {
+    return { source: "deterministic", summary: buildSummary(clientContext), ...COLLECTION_SUGGESTION };
+  }
 
   if (commercialSummary.openOpportunitiesCount > 0) {
     return {
@@ -132,7 +145,9 @@ const buildSuggestionPrompt = (clientContext: ClientAiContextPayload, knowledgeC
     "- recommendation: estratégia comercial clara, sem repetir o summary.",
     "- nextAction: ação objetiva, executável e iniciada com verbo de ação.",
     "- riskLevel: coerente com os dados disponíveis.",
-    "- A abordagem segue carteira.abordagem: reativação para inativo recente e ex-cliente, primeira venda para prospect, manutenção/recompra para ativo esfriando.",
+    clientContext.inCollection
+      ? "- Cliente em cobrança: não sugira venda, oferta nem reativação; recommendation e nextAction ficam com a base determinística."
+      : "- A abordagem segue carteira.abordagem: reativação para inativo recente e ex-cliente, primeira venda para prospect, manutenção/recompra para ativo esfriando.",
     "Retorne APENAS JSON válido, sem markdown, sem explicações, sem texto extra.",
     "Use exatamente a estrutura abaixo (sem adicionar ou remover campos):",
     '{"status":"negociacao|ativo|parado|acompanhamento","summary":"...","recommendation":"...","nextAction":"...","riskLevel":"baixo|medio|alto"}',
@@ -234,7 +249,8 @@ export const generateClientSuggestion = async (clientContext: ClientAiContextPay
       return finalizeSuggestion(fallbackSuggestion);
     }
 
-    return finalizeSuggestion(suggestionFromAi);
+    // Em cobrança, a IA só reescreve o resumo: status, recomendação, próxima ação e risco são os fixos.
+    return finalizeSuggestion(clientContext.inCollection ? { ...suggestionFromAi, ...COLLECTION_SUGGESTION } : suggestionFromAi);
   } catch (error) {
     fallbackReason = error instanceof SyntaxError || (error instanceof Error && error.message === "ai_invalid_json")
       ? "ai_invalid_json"

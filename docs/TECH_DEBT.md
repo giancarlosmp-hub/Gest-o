@@ -387,6 +387,26 @@ renomear um tipo de venda, os títulos dele somem do banner sem erro; conferir `
 Histórico. Para reverter: reverter o PR; a sincronização seguinte volta a gravar todos os tipos (sem
 migration nem mudança de schema).
 
+### TD-CLIENT-COLLECTION-RULE — cliente em cobrança fora das sugestões de venda
+
+**Resolvido no código, aguardando deploy (decisão da diretoria de 22/10/2026).** Cliente com qualquer título de
+venda vencido há mais de 30 dias (dia de Brasília), de qualquer valor, está "em cobrança". A regra fica em
+`packages/shared/src/clientCollection.ts` (`COLLECTION_OVERDUE_DAYS`, `isClientInCollection`); os dias são os do
+"Maior atraso em aberto" (`buildClientDelayMetrics`), só com títulos `isSalesReceivableTitle`, em
+`apps/api/src/services/clientCollection.ts`. Sem coluna nova: lê `partnerTitles` só de quem tem `openTitlesTotal` ou
+`overdueTitlesTotal` > 0.
+
+Sai de: prioridades do dia e "Minha IA Comercial", planejamento semanal (e encaixes da Agenda), Assistente
+Comercial (prioridades, sem comprar, esfriando, primeira venda, oportunidades por prioridade, ações sugeridas,
+audiência de campanha), IA Comercial do gestor, alerta de esfriando e automação de inativos recentes (a simulação
+mostra "Em cobrança (fora)"). Sugestão inteligente e resumo do cliente recomendam só apoiar a regularização; a IA
+recebe só a situação "Em cobrança". Lista em `/clientes?cobranca=1` e contagem na Central do Dia.
+
+Pendente: a mensagem de WhatsApp do assistente, a inteligência da timeline e a mensagem de venda da oportunidade
+ainda usam a abordagem da carteira (podem sugerir reativação para cliente em cobrança). O peso de ler
+`partnerTitles` não foi medido em produção; se pesar, a alternativa é gravar o vencimento mais antigo na
+sincronização (exige migration e aprovação).
+
 ### TD-ERP-DUE-DATE-ISO-DEPENDENCY — vencimento dos títulos lido com `new Date()` na sincronização
 
 **Aberto, baixo.** Em consulta somente leitura à produção (12/10/2026), 100% dos `DATA_VENCIMENTO`

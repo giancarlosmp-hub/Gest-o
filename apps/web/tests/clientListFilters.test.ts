@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import {
   EMPTY_CLIENT_QUICK_FILTERS,
   buildClientListParams,
+  collectionClientsPath,
+  isCollectionFilterInUrl,
   ownerSellerIdFromUrl,
   portfolioStatusClientsPath,
   withUrlFilters,
@@ -54,4 +56,13 @@ assert.equal(portfolioStatusClientsPath("exCliente", ""), "/clientes?status=exCl
 assert.equal(portfolioStatusClientsPath("inativoRecente", "seller-a"), "/clientes?status=inativoRecente&ownerSellerId=seller-a");
 assert.equal(portfolioStatusClientsPath("prospect", "seller a&b"), "/clientes?status=prospect&ownerSellerId=seller+a%26b");
 
-console.log("CLIENT_LIST_FILTERS=PASS api_param_names=PASS combined=PASS seller_scope=PASS url_sync=PASS clear=PASS donut_links=PASS");
+// "Em cobrança": ?cobranca=1 na URL e na API, combinável com os demais filtros.
+assert.deepEqual(buildClientListParams({ ...base, collection: true, filters: { ...EMPTY_CLIENT_QUICK_FILTERS, portfolioStatus: "ativo" } }), { page: 1, pageSize: 10, status: "ativo", cobranca: 1 });
+assert.deepEqual(buildClientListParams({ ...base, collection: false, filters: EMPTY_CLIENT_QUICK_FILTERS }), { page: 1, pageSize: 10 });
+assert.equal(isCollectionFilterInUrl(new URLSearchParams("cobranca=1")), true);
+assert.equal(isCollectionFilterInUrl(new URLSearchParams("cobranca=0")), false);
+assert.equal(isCollectionFilterInUrl(new URLSearchParams("")), false);
+assert.equal(collectionClientsPath(), "/clientes?cobranca=1");
+assert.equal(withUrlFilters(new URLSearchParams("cobranca=1&status=ativo"), { cobranca: "" }).toString(), "status=ativo");
+
+console.log("CLIENT_LIST_FILTERS=PASS api_param_names=PASS combined=PASS seller_scope=PASS url_sync=PASS clear=PASS donut_links=PASS collection=PASS");

@@ -55,7 +55,12 @@ type Opportunity = {
   priceTableCode?: string | null;
   risk?: OpportunityRisk;
   effectiveWin?: { value: number; count: number; disregarded: boolean; partialCancellation: boolean; reason: string | null; originalValue: number } | null;
+  // Cliente em cobrança: a oportunidade continua aqui, com aviso, mas sai das sugestões e prioridades.
+  clientInCollection?: boolean;
 };
+
+const CollectionWarning = ({ item }: { item: Opportunity }) =>
+  item.clientInCollection ? <span className="mt-1 inline-flex w-fit whitespace-nowrap rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-800 ring-1 ring-red-200">Cliente em cobrança</span> : null;
 
 type Client = {
   id: string;
@@ -2123,7 +2128,7 @@ export default function OpportunitiesPage() {
                 return (
                   <tr key={item.id} className={`border-t border-slate-100 ${riskRowClassName[risk]}`}>
                     <td className="p-2 font-medium text-slate-800">{item.title}</td>
-                    <td className="p-2">{getClientName(item)}</td>
+                    <td className="p-2"><div>{getClientName(item)}</div><CollectionWarning item={item} /></td>
                     <td className="p-2">{getSellerName(item)}</td>
                     <td className="p-2">
                       <span className={`inline-flex whitespace-nowrap rounded-full border px-2 py-0.5 text-xs font-semibold ${riskBadgeClassName[risk]}`}>
@@ -2283,6 +2288,7 @@ export default function OpportunitiesPage() {
                             <div className="text-sm font-semibold leading-tight text-slate-800 break-words">{item.title}</div>
                             {item.effectiveWin?.reason ? <div className="rounded bg-red-50 px-2 py-1 text-[11px] font-semibold text-red-800">{item.effectiveWin.reason}</div> : null}
                             <div className="text-xs text-slate-600 break-words">{getClientName(item)}</div>
+                            <CollectionWarning item={item} />
                           </div>
                           <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                             <div className="space-y-1">

@@ -10,7 +10,7 @@ import { normalizeActivityType } from "../constants/activityTypes";
 import { getApiErrorMessage } from "../lib/apiError";
 import { DASHBOARD_REFRESH_EVENT } from "../lib/dashboardRefresh";
 import { brazilMonthKey, brazilTodayKey } from "../lib/brazilDate";
-import { portfolioStatusClientsPath } from "../lib/clientListFilters";
+import { collectionClientsPath, portfolioStatusClientsPath } from "../lib/clientListFilters";
 
 type Activity = {
   id: string;
@@ -48,6 +48,8 @@ type Opportunity = {
   updatedAt?: string | null;
   lastActivityAt?: string | null;
   client?: { id: string; name: string } | string;
+  // Cliente em cobrança: a oportunidade fica fora do Pipeline do Dia e da "Minha IA Comercial".
+  clientInCollection?: boolean;
 };
 
 type SmartAlertItem = {
@@ -253,6 +255,8 @@ export default function HomePage() {
   const [agendaEventsToday, setAgendaEventsToday] = useState<AgendaEventLite[]>([]);
   const [pipelineError, setPipelineError] = useState<string | null>(null);
   const [coolingClients, setCoolingClients] = useState<CoolingClientsState>({ count: 0, unavailable: false });
+  // null: ainda carregando ou indisponível; o bloco só aparece com a contagem.
+  const [collectionClientsCount, setCollectionClientsCount] = useState<number | null>(null);
   const [weeklyMissions, setWeeklyMissions] = useState<WeeklyMissionSeller[]>([]);
   const [loading, setLoading] = useState(true);
   const [panelOrder, setPanelOrder] = useState<PanelId[]>(() => {
@@ -270,6 +274,20 @@ export default function HomePage() {
   const dashboardQueryKey = useMemo(() => brazilMonthKey(), []);
   const isSeller = user?.role === "vendedor";
   const canViewCommercialInsights = user?.role === "diretor" || user?.role === "gerente";
+
+  // Clientes em cobrança da carteira do vendedor: só a contagem, com link para a lista; sem ação de venda.
+  useEffect(() => {
+    if (!isSeller) return;
+    const controller = new AbortController();
+    api
+      .get<{ count?: number }>("/clients/alerts/collection", { signal: controller.signal })
+      .then((response) => {
+        const count = Number(response.data?.count ?? 0);
+        setCollectionClientsCount(Number.isFinite(count) ? count : 0);
+      })
+      .catch(() => setCollectionClientsCount(null));
+    return () => controller.abort();
+  }, [isSeller]);
 
   const loadCommercialInsights = useCallback(async (refresh = false, signal?: AbortSignal) => {
     if (!canViewCommercialInsights) return;
@@ -551,6 +569,7 @@ export default function HomePage() {
     };
 
     const prioritized: PipelineOpportunity[] = opportunities
+      .filter((item) => !item.clientInCollection)
       .map((item) => {
         const followUpLateDays = getDayDiff(item.followUpDate);
         if (followUpLateDays >= 0) {
@@ -896,6 +915,16 @@ export default function HomePage() {
     );
   };
 
+  const renderSellerCollectionBlock = () => {
+    if (!isSeller || collectionClientsCount === null) return null;
+    return (
+      <section className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm shadow-sm">
+        <p className="font-semibold text-red-800">Clientes em cobrança: {collectionClientsCount}</p>
+        <Link to={collectionClientsPath()} className="font-semibold text-red-800 underline hover:text-red-900">Ver lista</Link>
+      </section>
+    );
+  };
+
   const renderCommercialInsightsCard = () => {
     if (!canViewCommercialInsights) return null;
     return (
@@ -990,6 +1019,7 @@ export default function HomePage() {
       <div className="flex flex-col gap-5 pb-4">
         {renderCentralDayHero(false)}
         {renderSellerOperationalAiCard()}
+        {renderSellerCollectionBlock()}
         {renderCommercialInsightsCard()}
 
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -1125,6 +1155,7 @@ export default function HomePage() {
 
       {renderCentralDayHero(true)}
       {renderSellerOperationalAiCard()}
+      {renderSellerCollectionBlock()}
       {renderCommercialInsightsCard()}
 
       <section className="flex flex-col gap-4">

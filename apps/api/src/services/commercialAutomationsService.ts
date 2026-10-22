@@ -52,6 +52,8 @@ export type CommercialAutomationRunResult = {
   createdActivities: number;
   createdTimelineEvents: number;
   skippedByReason: InactiveClientWorkflowSkips;
+  // Inativos recentes em cobrança, fora da automação (execuções antigas do histórico não têm o campo).
+  inCollection: number;
 };
 
 const OPEN_OPPORTUNITY_STAGES = [OpportunityStage.prospeccao, OpportunityStage.negociacao, OpportunityStage.proposta] as const;
@@ -146,19 +148,22 @@ type InactiveClientWorkflowPlan = {
   dayKey: string;
   inactiveRecentClients: number;
   eligibleClients: number;
+  inCollection: number;
   toCreate: PlannedClient[];
   skipped: InactiveClientWorkflowSkips;
 };
 
-// Quem a automação atende hoje: inativo recente pela regra oficial da carteira (sem arquivados), com vendedor
+// Quem a automação atende hoje: inativo recente pela regra oficial da carteira (sem arquivados), fora de cobrança, com vendedor
 // responsável ativo, sem oportunidade aberta e sem oportunidade da automação nos últimos 90 dias (mesmo encerrada).
 // O teto diário por vendedor conta o que a automação já criou no dia de Brasília; a fila segue a compra mais
 // recente primeiro e o excedente fica para os próximos dias.
 const planInactiveClientWorkflow = async (dailyLimitPerSeller: number, now: Date): Promise<InactiveClientWorkflowPlan> => {
   const dayKey = brazilDayKeyOf(now);
-  const plan: InactiveClientWorkflowPlan = { dayKey, inactiveRecentClients: 0, eligibleClients: 0, toCreate: [], skipped: emptySkips() };
-  const segment = (await listPortfolioSegment("semComprar", {}, now)).filter((entry) => entry.status === "inativoRecente");
-  plan.inactiveRecentClients = segment.length;
+  const plan: InactiveClientWorkflowPlan = { dayKey, inactiveRecentClients: 0, eligibleClients: 0, inCollection: 0, toCreate: [], skipped: emptySkips() };
+  const inactiveRecent = (await listPortfolioSegment("semComprar", {}, now, { keepCollection: true })).filter((entry) => entry.status === "inativoRecente");
+  plan.inactiveRecentClients = inactiveRecent.length;
+  const segment = inactiveRecent.filter((entry) => !entry.inCollection);
+  plan.inCollection = inactiveRecent.length - segment.length;
   if (!segment.length) return plan;
 
   const ids = segment.map((entry) => entry.id);
@@ -207,7 +212,8 @@ export const simulateCommercialAutomations = async (now = new Date()): Promise<C
     inactiveRecentClients: plan.inactiveRecentClients,
     eligibleClients: plan.eligibleClients,
     wouldCreate: plan.toCreate.length,
-    skipped: plan.skipped
+    skipped: plan.skipped,
+    inCollection: plan.inCollection
   };
 };
 
@@ -236,7 +242,7 @@ const appendHistory = async (entry: CommercialAutomationRunResult) => {
 export const runCommercialAutomations = async (trigger: "manual" | "scheduler" = "manual", now = new Date()): Promise<CommercialAutomationRunResult> => {
   const result: CommercialAutomationRunResult = {
     at: now.toISOString(), trigger, skipped: false, dayKey: brazilDayKeyOf(now), inactiveRecentClients: 0, eligibleClients: 0,
-    createdOpportunities: 0, createdActivities: 0, createdTimelineEvents: 0, skippedByReason: emptySkips()
+    createdOpportunities: 0, createdActivities: 0, createdTimelineEvents: 0, skippedByReason: emptySkips(), inCollection: 0
   };
   if (status.running) return { ...result, skipped: true, reason: "already_running" };
 
@@ -260,6 +266,7 @@ export const runCommercialAutomations = async (trigger: "manual" | "scheduler" =
     result.inactiveRecentClients = plan.inactiveRecentClients;
     result.eligibleClients = plan.eligibleClients;
     result.skippedByReason = plan.skipped;
+    result.inCollection = plan.inCollection;
 
     const today = new Date(`${plan.dayKey}T00:00:00.000Z`);
     const dueDayKey = addBusinessDays(plan.dayKey, workflow.returnDeadlineBusinessDays);
