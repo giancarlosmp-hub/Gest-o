@@ -255,6 +255,7 @@ export default function ActivitiesPage() {
     const notes = searchParams.get("notes") || "";
     const title = searchParams.get("title") || "";
     const city = searchParams.get("city") || "";
+    const executed = searchParams.get("executed") === "true";
 
     setForm((current) => ({
       ...current,
@@ -265,7 +266,8 @@ export default function ActivitiesPage() {
       agendaEventId,
       ownerSellerId: ownerSellerId || current.ownerSellerId,
       notes: notes || title || current.notes,
-      city: city || current.city
+      city: city || current.city,
+      executed
     }));
     setVisitCheckIn(null);
     setIsModalOpen(true);
@@ -281,6 +283,7 @@ export default function ActivitiesPage() {
     params.delete("notes");
     params.delete("title");
     params.delete("city");
+    params.delete("executed");
     setSearchParams(params, { replace: true });
   }, [searchParams, setSearchParams]);
 

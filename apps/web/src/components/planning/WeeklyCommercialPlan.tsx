@@ -1,30 +1,23 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
+import { toast } from "sonner";
+import { useAuth } from "../../context/AuthContext";
 import api from "../../lib/apiClient";
 import { AI_REQUEST_TIMEOUT_MS } from "../../lib/aiRequest";
+import { getApiErrorMessage } from "../../lib/apiError";
+import { canActOnPlan, openHref, registerHref, toAgendaEvent, type PlanningAction } from "./weeklyPlanActions";
 
-type PlanningAction = {
-  type: "visit" | "call" | "proposal" | "follow_up" | "whatsapp" | "review";
-  clientId?: string | null;
-  opportunityId?: string | null;
-  title: string;
-  city?: string | null;
-  score: number;
-  priorityLevel: "urgente" | "alta" | "normal" | "baixa";
-  reason: string;
-  objective: string;
-  suggestedPeriod: "morning" | "afternoon" | null;
-  estimatedDurationMinutes: number;
-  source: string;
-};
+type Appointment = { id: string; title: string; startsAt: string; endsAt: string; city?: string | null; type: string };
 
 type PlanningDay = {
   date: string;
   label: string;
-  existingAppointments: Array<{ id: string; title: string; startsAt: string; endsAt: string; city?: string | null; type: string }>;
+  existingAppointments: Appointment[];
   suggestedActions: PlanningAction[];
 };
 
 type WeeklyPlan = {
+  sellerId: string;
   weekStart: string;
   weekEnd: string;
   summary: string;
@@ -60,7 +53,10 @@ const capacityLabel: Record<WeeklyPlan["workload"]["capacityStatus"], string> = 
 
 const formatHour =(value: string) => new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(new Date(value));
 
-function ActionCard({ action }: { action: PlanningAction }) {
+type ActionCardProps = { action: PlanningAction; date: string; sellerId: string; canAct: boolean; scheduling: boolean; onSchedule: () => void };
+
+function ActionCard({ action, date, sellerId, canAct, scheduling, onSchedule }: ActionCardProps) {
+  const open = openHref(action);
   return (
     <article className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
       <div className="flex flex-wrap items-center gap-2">
@@ -76,12 +72,23 @@ function ActionCard({ action }: { action: PlanningAction }) {
         <span>{action.suggestedPeriod === "morning" ? "Manhã" : action.suggestedPeriod === "afternoon" ? "Tarde" : "Período flexível"}</span>
         <span>{action.estimatedDurationMinutes} min</span>
       </div>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {canAct ? (
+          <>
+            <button type="button" onClick={onSchedule} disabled={scheduling} className="rounded-lg bg-brand-700 px-3 py-2 text-xs font-semibold text-white hover:bg-brand-800 disabled:opacity-60">{scheduling ? "Agendando…" : "Agendar"}</button>
+            <Link to={registerHref(action, date, sellerId)} className="inline-flex items-center rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">Registrar</Link>
+          </>
+        ) : null}
+        {open ? <Link to={open} className="inline-flex items-center rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">Abrir</Link> : null}
+      </div>
     </article>
   );
 }
 
 export default function WeeklyCommercialPlan({ sellerId, weekStart }: Props) {
+  const { user } = useAuth();
   const [plan, setPlan] = useState<WeeklyPlan | null>(null);
+  const [schedulingKey, setSchedulingKey] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [openDay, setOpenDay] = useState<string | null>(null);
   const params = useMemo(() => ({ ...(sellerId ? { sellerId } : {}), ...(weekStart ? { weekStart } : {}) }), [sellerId, weekStart]);
@@ -102,6 +109,36 @@ export default function WeeklyCommercialPlan({ sellerId, weekStart }: Props) {
       .finally(() => active && setLoading(false));
     return () => { active = false; controller.abort(); };
   }, [params]);
+
+  const canAct = Boolean(plan && canActOnPlan(user, plan.sellerId));
+
+  // O compromisso criado sai das sugestões e entra como "Já agendado" no mesmo dia; a API também não sugere de novo.
+  const schedule = async (date: string, action: PlanningAction, key: string) => {
+    if (!plan) return;
+    setSchedulingKey(key);
+    try {
+      const response = await api.post("/agenda/events", toAgendaEvent(action, date, plan.sellerId));
+      const created = response.data as Appointment;
+      setPlan((current) => current && {
+        ...current,
+        days: current.days.map((day) => (day.date !== date ? day : {
+          ...day,
+          existingAppointments: [...day.existingAppointments, { id: created.id, title: created.title || action.title, startsAt: created.startsAt, endsAt: created.endsAt, city: created.city ?? action.city ?? null, type: created.type }],
+          suggestedActions: day.suggestedActions.filter((item) => item !== action)
+        }))
+      });
+      toast.success("Compromisso agendado.");
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "Não foi possível agendar a sugestão."));
+    } finally {
+      setSchedulingKey(null);
+    }
+  };
+
+  const renderActions = (day: PlanningDay) => day.suggestedActions.map((action, index) => {
+    const key = `${day.date}-${action.clientId || action.opportunityId || index}`;
+    return <ActionCard key={key} action={action} date={day.date} sellerId={plan!.sellerId} canAct={canAct} scheduling={schedulingKey === key} onSchedule={() => void schedule(day.date, action, key)} />;
+  });
 
   if (loading) return <section className="rounded-xl border bg-white p-4 text-sm text-slate-500">Carregando planejamento comercial inteligente…</section>;
   if (!plan) return <section className="rounded-xl border bg-white p-4 text-sm text-slate-500">Planejamento comercial indisponível no momento.</section>;
@@ -131,7 +168,7 @@ export default function WeeklyCommercialPlan({ sellerId, weekStart }: Props) {
             <h4 className="text-sm font-semibold text-slate-900">{day.label}</h4>
             <p className="text-[11px] text-slate-500">{day.date}</p>
             {day.existingAppointments.map((appointment) => <div key={appointment.id} className="rounded-lg border border-sky-200 bg-sky-50 p-2 text-xs text-sky-900"><strong>Já agendado</strong><br />{formatHour(appointment.startsAt)} · {appointment.title}</div>)}
-            {day.suggestedActions.map((action, index) => <ActionCard key={`${day.date}-${action.clientId || action.opportunityId || index}`} action={action} />)}
+            {renderActions(day)}
           </div>
         ))}
       </div>
@@ -142,7 +179,7 @@ export default function WeeklyCommercialPlan({ sellerId, weekStart }: Props) {
             <summary className="cursor-pointer text-sm font-semibold text-slate-900">{day.label} · {day.suggestedActions.length} ações · {day.existingAppointments.length} agendado(s)</summary>
             <div className="mt-2 space-y-2">
               {day.existingAppointments.map((appointment) => <div key={appointment.id} className="rounded-lg border border-sky-200 bg-sky-50 p-2 text-xs text-sky-900"><strong>Já agendado</strong><br />{formatHour(appointment.startsAt)} · {appointment.title}</div>)}
-              {day.suggestedActions.map((action, index) => <ActionCard key={`${day.date}-${action.clientId || action.opportunityId || index}`} action={action} />)}
+              {renderActions(day)}
             </div>
           </details>
         ))}
