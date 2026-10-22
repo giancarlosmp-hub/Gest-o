@@ -77,6 +77,8 @@ const matchValue = (value: unknown, condition: any): boolean => {
   if (typeof condition !== "object") return value === condition;
   if ("in" in condition) return condition.in.includes(value);
   if ("notIn" in condition) return !condition.notIn.includes(value);
+  // Totais de títulos (filtro de cobrança): comparação numérica.
+  if ("gt" in condition) return typeof value === "number" && value > condition.gt;
   const time = (value as Date).getTime();
   if ("lt" in condition && !(time < condition.lt.getTime())) return false;
   if ("lte" in condition && !(time <= condition.lte.getTime())) return false;
