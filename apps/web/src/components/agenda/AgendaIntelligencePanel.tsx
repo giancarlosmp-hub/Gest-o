@@ -50,6 +50,15 @@ const severityClass: Record<string, string> = {
   medium: "border-amber-200 bg-amber-50 text-amber-800",
   low: "border-slate-200 bg-slate-50 text-slate-700",
 };
+const confidenceLabel: Record<string, string> = {
+  low: "Baixa",
+  medium: "Média",
+  high: "Alta",
+};
+const periodLabel: Record<string, string> = {
+  morning: "Manhã",
+  afternoon: "Tarde",
+};
 
 export default function AgendaIntelligencePanel({ date, sellerId }: Props) {
   const [data, setData] = useState<AgendaIntelligence | null>(null);
@@ -122,7 +131,11 @@ export default function AgendaIntelligencePanel({ date, sellerId }: Props) {
               <strong>{data.metrics.stopsWithoutLocation}</strong>
             </span>
             <span className="rounded-lg bg-slate-50 p-2">
-              Confiança: <strong>{data.metrics.optimizationConfidence}</strong>
+              Confiança:{" "}
+              <strong>
+                {confidenceLabel[data.metrics.optimizationConfidence] ||
+                  data.metrics.optimizationConfidence}
+              </strong>
             </span>
           </div>
 
@@ -229,14 +242,17 @@ export default function AgendaIntelligencePanel({ date, sellerId }: Props) {
                   className="rounded-lg border border-emerald-200 bg-emerald-50 p-2 text-sm text-emerald-800"
                 >
                   Visita em {item.city || "região compatível"} · prioridade{" "}
-                  {item.priorityScore} · {item.suggestedPeriod}: {item.reason}
+                  {item.priorityScore} ·{" "}
+                  {periodLabel[item.suggestedPeriod] || "Período flexível"}:{" "}
+                  {item.reason}
                 </p>
               ))}
             </div>
           ) : null}
           <p className="text-xs text-slate-500">
-            Somente leitura · fonte {data.source} · distância por Haversine é
-            linha reta quando disponível, não rota rodoviária.
+            {data.source === "ai" ? "Sugestão da IA" : "Sugestão do sistema"} ·
+            não altera sua agenda · distâncias em linha reta, não pelo trajeto
+            da estrada.
           </p>
         </div>
       ) : null}

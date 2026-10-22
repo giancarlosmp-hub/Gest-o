@@ -52,14 +52,20 @@ const priorityClass: Record<PlanningAction["priorityLevel"], string> = {
   baixa: "border-slate-200 bg-slate-50 text-slate-700"
 };
 
-const formatHour = (value: string) => new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(new Date(value));
+const capacityLabel: Record<WeeklyPlan["workload"]["capacityStatus"], string> = {
+  balanced: "Carga equilibrada",
+  light: "Carga leve",
+  overloaded: "Carga alta"
+};
+
+const formatHour =(value: string) => new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(new Date(value));
 
 function ActionCard({ action }: { action: PlanningAction }) {
   return (
     <article className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
       <div className="flex flex-wrap items-center gap-2">
         <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-800">Sugerido</span>
-        <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${priorityClass[action.priorityLevel]}`}>{action.priorityLevel} · score {action.score}</span>
+        <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${priorityClass[action.priorityLevel]}`}>{action.priorityLevel} · {action.score} pontos</span>
         <span className="rounded-full border border-slate-200 px-2 py-0.5 text-[11px] font-semibold text-slate-600">{actionLabel[action.type]}</span>
       </div>
       <h4 className="mt-2 text-sm font-semibold text-slate-900">{action.title}</h4>
@@ -88,7 +94,9 @@ export default function WeeklyCommercialPlan({ sellerId, weekStart }: Props) {
       .then((response) => {
         if (!active) return;
         setPlan(response.data);
-        setOpenDay(response.data?.days?.[0]?.date ?? null);
+        // Abre o primeiro dia com sugestões (hoje em diante); dias que já passaram só têm compromissos.
+        const days: PlanningDay[] = response.data?.days ?? [];
+        setOpenDay((days.find((day) => day.suggestedActions.length) ?? days[0])?.date ?? null);
       })
       .catch(() => active && setPlan(null))
       .finally(() => active && setLoading(false));
@@ -106,7 +114,7 @@ export default function WeeklyCommercialPlan({ sellerId, weekStart }: Props) {
           <h3 className="text-lg font-semibold text-slate-900">Semana de {plan.weekStart} a {plan.weekEnd}</h3>
           <p className="mt-1 text-sm text-slate-600">{plan.summary}</p>
         </div>
-        <span className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600">{plan.source === "ai" ? "Resumo com IA" : "Fallback determinístico"}</span>
+        <span className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600">{plan.source === "ai" ? "Sugestão da IA" : "Sugestão do sistema"}</span>
       </div>
 
       <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-5">
@@ -114,7 +122,7 @@ export default function WeeklyCommercialPlan({ sellerId, weekStart }: Props) {
         <span className="rounded-lg bg-slate-50 p-2"><strong>{plan.workload.visits}</strong><br />visitas</span>
         <span className="rounded-lg bg-slate-50 p-2"><strong>{plan.workload.calls}</strong><br />contatos</span>
         <span className="rounded-lg bg-slate-50 p-2"><strong>{plan.workload.proposals}</strong><br />propostas</span>
-        <span className="rounded-lg bg-slate-50 p-2"><strong>{plan.workload.capacityStatus}</strong><br />capacidade</span>
+        <span className="rounded-lg bg-slate-50 p-2"><strong>{capacityLabel[plan.workload.capacityStatus]}</strong><br />capacidade</span>
       </div>
 
       <div className="hidden gap-3 lg:grid lg:grid-cols-5">
