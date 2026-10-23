@@ -1,3 +1,11 @@
+# Agenda × Atividades: migration aditiva cadastrada, não aplicada — 23/10/2026
+
+- PR 1 de 4 (migration `20261023120000_agenda_activity_planning_split`): 8 valores de enum e 2 colunas
+  `TEXT` opcionais. **Não aplicada em produção.**
+- Depois do merge, o cutover fica bloqueado até o apply pelo **Production Schema PR827**.
+- Procedimento: [`DEPLOY_GUIDE.md`](DEPLOY_GUIDE.md), seção “Migration
+  `20261023120000_agenda_activity_planning_split`”.
+
 # Deploy em duas fases com artefato de release e primeiro cutover sem rebaseline — 07/10/2026
 
 - **Produção em `b3a662a95771b8c76ff5d84ef3de80c114be664f`** (merge da PR #921):
