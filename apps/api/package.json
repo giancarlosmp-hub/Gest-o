@@ -80,7 +80,7 @@
     "test:erp-payment-method-eligibility": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/services/erpPaymentMethodEligibility.test.ts",
     "test:ultrafv3-financial-sync": "npm run prisma:generate && tsx src/services/ultraFv3FinancialSync.test.ts",
     "test:opportunity-product-availability": "tsx src/services/opportunityProductAvailability.test.ts",
-    "test:erp-price-variation-policy": "tsx src/services/erpPriceVariationPolicy.test.ts",
+    "test:erp-price-variation-policy": "tsx src/services/erpPriceVariationPolicy.test.ts && tsx src/services/erpTable2VariationCatalog.test.ts",
     "crm:audit-erp-client": "tsx src/scripts/crmAuditErpClient.ts",
     "crm:audit-erp-client:prod": "node dist/scripts/crmAuditErpClient.js",
     "crm:repair-erp-client": "tsx src/scripts/crmRepairErpClient.ts",
