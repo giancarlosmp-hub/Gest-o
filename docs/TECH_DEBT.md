@@ -1,3 +1,12 @@
+# Validador do preview de schema não bloqueia DML (23/10/2026)
+
+`scripts/production-schema-preview.sh` passa o conteúdo do SQL como nome de arquivo para o `grep`
+na checagem de `UPDATE|DELETE|INSERT|MERGE|COPY|CREATE OR REPLACE`. O `grep` falha, a condição é
+falsa e o arquivo passa: um `UPDATE` ou `DELETE` numa migration não é bloqueado por essa linha.
+Comprovado com SQL fictício em 23/10/2026; o defeito já existia na `main`. A migration
+`20261023120000_agenda_activity_planning_split` não tem DML, e o smoke `production-schema-safety`
+prova isso no próprio arquivo. A correção fica para uma PR própria.
+
 # Progresso 1.0B.2-H — descendentes ainda isolados
 
 Adapters de AgendaStop e Activity somente-Agenda existem apenas como prova. Integração dos acessos legados, decisão sobre multi-parent, includes filtrados e saneamento de vínculos históricos seguem abertos. CASCADE/SET NULL continuam exigindo cuidado e não foram alterados.

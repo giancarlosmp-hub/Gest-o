@@ -114,6 +114,12 @@ if [[ "$MIGRATION_ID_REQUESTED" == 20260927160000_product_price_source_observati
   [[ "$product_price_obs_columns" == 0 || "$product_price_obs_columns" == 3 ]] || die "migration ProductPrice observação de origem parcialmente aplicada"
   admin_psql -Atc 'SELECT count(*) FROM "ProductPrice"' >"$evidence/product-price-counts.before.tsv"
 fi
+agenda_split_enum_sql="SELECT count(*) FROM pg_enum e JOIN pg_type t ON t.oid=e.enumtypid WHERE t.typnamespace='public'::regnamespace AND ((t.typname='ActivityType' AND e.enumlabel IN ('reuniao_online','reuniao_presencial')) OR (t.typname='AgendaEventType' AND e.enumlabel IN ('ligacao','whatsapp','visita','proposta','fechamento')) OR (t.typname='AgendaEventStatus' AND e.enumlabel='nao_realizado'))"
+agenda_split_columns_sql="SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND ((table_name='AgendaEvent' AND column_name='notDoneReason') OR (table_name='Activity' AND column_name='noNextStepReason'))"
+if [[ "$MIGRATION_ID_REQUESTED" == 20261023120000_agenda_activity_planning_split ]]; then
+  agenda_split_state="$(admin_psql -Atc "$agenda_split_enum_sql"):$(admin_psql -Atc "$agenda_split_columns_sql")"
+  [[ "$agenda_split_state" == 0:0 || "$agenda_split_state" == 8:2 ]] || die "migration Agenda/Atividades parcialmente aplicada"
+fi
 
 # Repeat every mutable safety gate immediately before granting the migration its short-lived
 # administrative authority. The runtime URL remains in use for Prisma and incident reads.
@@ -130,6 +136,8 @@ elif [[ "$MIGRATION_ID_REQUESTED" == 20260911190000_product_price_authority && "
   log "migration de autoridade ProductPrice já presente; DDL ignorado e pós-condições serão revalidadas"
 elif [[ "$MIGRATION_ID_REQUESTED" == 20260927160000_product_price_source_observation && "$product_price_obs_columns" == 3 ]]; then
   log "migration de observação de origem ProductPrice já presente; DDL ignorado e pós-condições serão revalidadas"
+elif [[ "$MIGRATION_ID_REQUESTED" == 20261023120000_agenda_activity_planning_split && "$agenda_split_state" == 8:2 ]]; then
+  log "migration Agenda/Atividades já presente; DDL ignorado e pós-condições serão revalidadas"
 else
   log "aplicando migration versionada isoladamente; containers da aplicação não serão iniciados"
   admin_psql --single-transaction -f - < "$MIGRATION"
@@ -179,6 +187,15 @@ case "$MIGRATION_ID_REQUESTED" in
     obs_index=$(admin_psql -Atc "SELECT count(*) FROM pg_indexes WHERE schemaname='public' AND tablename='ProductPrice' AND indexname='ProductPrice_erpSourcePriceId_idx'")
     [[ "$columns:$obs_index" == 3:1 ]] || die "pós-condições da migration de observação ProductPrice divergentes"
     printf 'columns_nullable\t%s\nobs_index\t%s\nexisting_rows_preserved\tPASS\nold_api_compatible\tPASS\n' "$columns" "$obs_index" >"$evidence/post-validation.tsv"
+    ;;
+  20261023120000_agenda_activity_planning_split)
+    enum_values=$(admin_psql -Atc "$agenda_split_enum_sql")
+    columns=$(admin_psql -Atc "$agenda_split_columns_sql AND is_nullable='YES' AND data_type='text'")
+    # The running (old) API knows neither the new values nor the new columns, so any row
+    # using them would mean the migration itself wrote data. Race-free, unlike row counts.
+    touched_rows=$(admin_psql -Atc "SELECT (SELECT count(*) FROM \"AgendaEvent\" WHERE \"notDoneReason\" IS NOT NULL OR status::text='nao_realizado' OR type::text IN ('ligacao','whatsapp','visita','proposta','fechamento')) + (SELECT count(*) FROM \"Activity\" WHERE \"noNextStepReason\" IS NOT NULL OR type::text IN ('reuniao_online','reuniao_presencial'))")
+    [[ "$enum_values:$columns:$touched_rows" == 8:2:0 ]] || die "pós-condições da migration Agenda/Atividades divergentes"
+    printf 'enum_values\t%s\ncolumns_nullable\t%s\nrows_using_new_objects\t%s\nexisting_rows_preserved\tPASS\nold_api_compatible\tPASS\n' "$enum_values" "$columns" "$touched_rows" >"$evidence/post-validation.tsv"
     ;;
   *) die "migration sem pós-condições cadastradas" ;;
 esac

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "../..");
@@ -19,6 +20,10 @@ assert.match(step.with.script, /20260911190000_product_price_authority:preview:\
 assert.match(step.with.script, /20260911190000_product_price_authority:apply:PRODUCTION_SCHEMA_APPLY/, "ProductPrice apply must retain its exact confirmation");
 assert.match(step.with.script, /20260927160000_product_price_source_observation:preview:\*/, "ProductPrice source observation preview must be selectable");
 assert.match(step.with.script, /20260927160000_product_price_source_observation:apply:PRODUCTION_SCHEMA_APPLY/, "ProductPrice source observation apply must retain its exact confirmation");
+assert.match(step.with.script, /20261023120000_agenda_activity_planning_split:preview:\*/, "Agenda/Activity split preview must be selectable");
+assert.match(step.with.script, /20261023120000_agenda_activity_planning_split:apply:PRODUCTION_SCHEMA_APPLY/, "Agenda/Activity split apply must retain its exact confirmation");
+assert.match(step.with.script, /\[ "\$SCHEMA_MIGRATION" = 20261023120000_agenda_activity_planning_split \]; then\n\s+MODE="\$SCHEMA_MODE"[\s\S]*bash scripts\/production-schema-apply\.sh/, "Agenda/Activity split must run through production-schema-apply.sh");
+assert.match(readFileSync(workflowPath, "utf8"), /options:\n(?:\s+- \S+\n)*\s+- 20261023120000_agenda_activity_planning_split\n/, "Agenda/Activity split must be a dispatch option");
 
 const expression = /\$\{\{ inputs\.mode == 'apply' && format\('API_IMAGE=gest-o-api:\{0\}', github\.sha\) \|\| '' \}\}/g;
 const cases = [

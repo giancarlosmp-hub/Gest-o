@@ -6,6 +6,24 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 export const migrations = Object.freeze({
+  "20261023120000_agenda_activity_planning_split": Object.freeze({
+    id: "20261023120000_agenda_activity_planning_split",
+    path: "apps/api/prisma/migrations/20261023120000_agenda_activity_planning_split/migration.sql",
+    sha256: "df6508474fed9dd2a7a3f7492946d69158b12ce43e599f2fb6178540af8d2b5e",
+    objects: Object.freeze({
+      enumValues: Object.freeze({
+        ActivityType: Object.freeze(["reuniao_online", "reuniao_presencial"]),
+        AgendaEventType: Object.freeze(["ligacao", "whatsapp", "visita", "proposta", "fechamento"]),
+        AgendaEventStatus: Object.freeze(["nao_realizado"])
+      }),
+      columns: Object.freeze({
+        "AgendaEvent.notDoneReason": "TEXT",
+        "Activity.noNextStepReason": "TEXT"
+      })
+    }),
+    postconditions: Object.freeze(["existing-rows-preserved", "enum-values-present", "columns-nullable", "managed-diff-empty", "old-api-compatible"]),
+    evidenceVersion: 1
+  }),
   "20260927160000_product_price_source_observation": Object.freeze({
     id: "20260927160000_product_price_source_observation",
     path: "apps/api/prisma/migrations/20260927160000_product_price_source_observation/migration.sql",

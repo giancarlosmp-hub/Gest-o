@@ -1,3 +1,49 @@
+## Migration `20261023120000_agenda_activity_planning_split` (23/10/2026)
+
+Primeira de quatro PRs que separam Agenda (planejamento) de Atividades (execução). Só aditiva:
+8 valores de enum com `ADD VALUE IF NOT EXISTS` (`ActivityType`: `reuniao_online`,
+`reuniao_presencial`; `AgendaEventType`: `ligacao`, `whatsapp`, `visita`, `proposta`, `fechamento`;
+`AgendaEventStatus`: `nao_realizado`) e 2 colunas `TEXT` opcionais (`AgendaEvent.notDoneReason`,
+`Activity.noNextStepReason`). Nenhum dado é alterado. A API desta PR ainda não grava os valores
+novos; as regras chegam nas PRs seguintes.
+
+Cadastro: manifesto `scripts/production-schema-migrations.mjs` (SHA-256
+`df6508474fed9dd2a7a3f7492946d69158b12ce43e599f2fb6178540af8d2b5e`), apply, filtro pre-apply,
+evidência do cutover e opção no workflow **Production Schema PR827**. O validador
+`production-schema-preview.sh` aceita somente a linha exata
+`ALTER TYPE "<enum>" ADD VALUE IF NOT EXISTS '<valor>';`; qualquer outro `ALTER TYPE` é bloqueado.
+
+**Depois do merge, todo cutover fica bloqueado até esta migration ser aplicada** (equivalência da
+árvore `apps/api/prisma`). Ordem, sem pular etapa:
+
+1. **Prepare Production Recovery Backup** na `main` do merge. Conferir run verde; a prova vale 24 h
+   e é amarrada ao SHA.
+2. **Deploy Production** `phase=build` no mesmo SHA. Conferir `gest-o-api:<sha>` construída com o
+   rótulo `org.opencontainers.image.revision=<sha>`. Nenhum container é parado.
+3. **Production Schema PR827** `mode=preview`, `migration=20261023120000_agenda_activity_planning_split`,
+   `confirm` vazio. Conferir `RESUMO aditivas=10 destrutivas=0 bloqueadas=0`, o diff pre-apply com
+   exatamente os 8 `ALTER TYPE … ADD VALUE` e os 2 `ADD COLUMN`, e
+   `preview validado em modo estritamente read-only`.
+4. **Production Schema PR827** `mode=apply`, mesma migration, `confirm=PRODUCTION_SCHEMA_APPLY`.
+   Conferir no log `aplicando migration versionada isoladamente` e
+   `schema aplicado e validado; nenhum cutover foi executado`. Evidência em
+   `/var/log/gest-o/schema/<sha>/`: `post-validation.tsv` com `enum_values 8`,
+   `columns_nullable 2`, `rows_using_new_objects 0`; `post-apply-diff.sql` vazio; `applied.tsv`
+   presente (gravado por último, só depois de todas as pós-condições).
+5. **Deploy Production** `phase=cutover` no mesmo SHA. Conferir `evidência de schema validada para o
+   SHA atual` e `/health/version` com o SHA.
+
+**Falha no apply:** o DDL roda em `psql --single-transaction` com `ON_ERROR_STOP=1`. Erro em qualquer
+comando desfaz tudo: nenhum valor de enum nem coluna fica criado, e `applied.tsv` não é gravado, então
+o cutover continua bloqueado e a produção segue na versão anterior sem mudança. Corrigir a causa e
+repetir o passo 4. Se a falha for depois do commit (pós-condição ou diff final), o estado é `8:2`:
+o reapply pula o DDL (`migration Agenda/Atividades já presente; DDL ignorado`) e só revalida. Um
+estado parcial (diferente de `0:0` e `8:2`) é recusado antes de qualquer DDL.
+
+**Voltar:** a API anterior continua compatível (colunas opcionais, valores não usados). Não há
+reversão por DDL: o PostgreSQL não remove valor de enum, e remover as colunas exigiria nova migration
+aprovada. Restauração do backup só com aprovação explícita.
+
 ## Validação e Aplicação da Regra LIBERAR_INTERNET no CRM (Setembro/2026)
 
 A alteração para impor a regra `LIBERAR_INTERNET` em Operações e Condições de Recebimento no CRM
