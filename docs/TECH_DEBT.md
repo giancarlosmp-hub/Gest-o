@@ -456,8 +456,25 @@ Pendente: `POST /agenda/events` não confere se o cliente e a oportunidade são 
 tipo de compromisso "ligação" (`AgendaEventType`), por isso ligação, WhatsApp, proposta e revisão viram `followup`.
 Qualquer compromisso ou atividade do cliente na semana, mesmo criado fora do planejamento, tira o cliente das
 sugestões. A atividade salva pela tela de Atividades grava o vencimento à meia-noite UTC (21h do dia anterior em
-Brasília). Depois de "Agendar", os totais do topo só se atualizam ao recarregar. A Agenda Inteligente mostra o horário
-do compromisso em UTC (14h aparece 17:00). WhatsApp fica para a integração de WhatsApp.
+Brasília). Depois de "Agendar", os totais do topo só se atualizam ao recarregar. WhatsApp fica para a integração de
+WhatsApp.
+
+### TD-AGENDA-SCHEDULE-DIALOG-TIMEZONE — "Agendar" sem confirmação, horário em UTC e plano só até sexta
+
+**Resolvido no código, aguardando deploy.** "Agendar" abre uma janela com dia, horário (manhã 09:00, tarde 14:00) e
+duração da sugestão, editáveis, e só grava em Confirmar. A Agenda Inteligente (`agendaIntelligenceService.ts`) calcula
+e mostra os horários no relógio de Brasília (antes 09:00 aparecia 12:00), o que também corrige o horário no Assistente
+Comercial (`listDaySchedule`). Só roteiro, parada e reunião presencial contam como visita: follow-up e reunião online
+não pedem coordenada nem entram no excesso de visitas. O vendedor vê só a ordem do dia (horário, tipo, cidade e
+sobreposição); a análise de rota fica para gerente e diretor. Sem `weekStart` (a Agenda), o planejamento cobre os
+próximos 5 dias úteis a partir de hoje, entrando na semana seguinte, com 8 ações e 3 visitas por dia; vencimento no
+fim de semana vai para o próximo dia útil. Datas do cabeçalho em `dd/mm`.
+
+Pendente: a página da Agenda (`AgendaPage.tsx`: calendário, lista, formulários `datetime-local`, `formatDayKey`) usa
+o fuso do aparelho; certo em aparelho no horário de Brasília, errado em outro fuso. Os encaixes da Agenda Inteligente
+chamam o planejamento com `weekStart` = dia escolhido, então a "semana" começa nesse dia e pode incluir sábado e
+domingo. Compromisso ou atividade desta semana continuam tirando o cliente das sugestões também nos dias da semana
+seguinte. Sugestão por proximidade fica para o PR de proximidade.
 
 ### TD-ERP-DUE-DATE-ISO-DEPENDENCY — vencimento dos títulos lido com `new Date()` na sincronização
 
