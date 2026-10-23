@@ -70,6 +70,14 @@ const addDays = (date: Date, days: number) => new Date(date.getTime() + days * D
 // Dia de Brasília (UTC-3 fixo) como meia-noite UTC: das 21h à meia-noite ainda é o mesmo dia.
 const brazilToday = () => startOfDay(new Date(Date.now() - BRAZIL_UTC_OFFSET_MS));
 const brazilDateOnly = (date: Date) => dateOnly(new Date(date.getTime() - BRAZIL_UTC_OFFSET_MS));
+const PLANNING_DAYS = 5;
+const isBusinessDay = (date: Date) => date.getUTCDay() !== 0 && date.getUTCDay() !== 6;
+// Próximos dias úteis a partir de um dia (sábado e domingo pulam para a segunda), entrando na semana seguinte.
+const nextBusinessDays = (from: Date, count: number) => {
+  const days: Date[] = [];
+  for (let day = from; days.length < count; day = addDays(day, 1)) if (isBusinessDay(day)) days.push(day);
+  return days;
+};
 // Só a visita é presencial: ligação, WhatsApp, follow-up, proposta e revisão não definem a cidade do dia.
 const isInPersonAppointment = (type: string) => type === "roteiro_visita" || type === "reuniao_presencial";
 const sanitize = (value: string | null | undefined, max = 160) => (value || "").replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[contato]").replace(/\b\d{10,}\b/g, "[numero]").replace(/\b\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}\b/g, "[documento]").slice(0, max);
@@ -79,14 +87,21 @@ export class PlanningIntelligenceService {
   async generateWeeklyCommercialPlan(input: Input): Promise<WeeklyCommercialPlan> {
     const startedAt = Date.now();
     const sellerId = await this.resolveSeller(input);
-    const weekStartDate = input.weekStart ? startOfDay(new Date(`${input.weekStart}T00:00:00.000Z`)) : mondayOf(brazilToday());
-    const weekEndDate = addDays(weekStartDate, 4);
-    // Sugestões só de hoje (data de Brasília) em diante; dias que já passaram mostram só os compromissos.
+    // Sem weekStart (a Agenda): os próximos 5 dias úteis a partir de hoje (data de Brasília). Com weekStart: a semana
+    // de segunda a sexta, e os dias que já passaram mostram só os compromissos.
     const today = brazilToday();
-    const firstOpenDay = weekStartDate > today ? weekStartDate : today;
-    const data = await timeAiStage("context", () => this.collectData(sellerId, new Date(weekStartDate.getTime() + BRAZIL_UTC_OFFSET_MS), new Date(addDays(weekEndDate, 1).getTime() + BRAZIL_UTC_OFFSET_MS)));
+    const rolling = !input.weekStart;
+    const dayDates = rolling
+      ? nextBusinessDays(today, PLANNING_DAYS)
+      : Array.from({ length: PLANNING_DAYS }, (_, index) => addDays(startOfDay(new Date(`${input.weekStart}T00:00:00.000Z`)), index));
+    const firstDay = dayDates[0];
+    const lastDay = dayDates[dayDates.length - 1];
+    const firstOpenDay = firstDay > today ? firstDay : today;
+    const openDates = dayDates.filter((date) => date >= firstOpenDay);
+    // Agenda e atividades desde a segunda da semana do primeiro dia: o que já foi tratado nela não volta a ser sugerido.
+    const data = await timeAiStage("context", () => this.collectData(sellerId, new Date(mondayOf(firstDay).getTime() + BRAZIL_UTC_OFFSET_MS), new Date(addDays(lastDay, 1).getTime() + BRAZIL_UTC_OFFSET_MS)));
     const lastRelevant = this.latestUpdate(data);
-    const cacheKey = ["commercial-planning", sellerId, dateOnly(weekStartDate), dateOnly(today), lastRelevant.toISOString(), "company-scope:futura"].join(":");
+    const cacheKey = ["commercial-planning", sellerId, rolling ? "rolling" : "week", dateOnly(firstDay), dateOnly(today), lastRelevant.toISOString(), "company-scope:futura"].join(":");
     if (!input.refresh) {
       const cached = cache.get(cacheKey);
       if (cached && cached.expiresAt > Date.now()) {
@@ -95,8 +110,8 @@ export class PlanningIntelligenceService {
       }
     }
 
-    const candidates = this.deduplicate(this.buildCandidates(data, firstOpenDay, weekEndDate));
-    const base = this.distribute(sellerId, weekStartDate, firstOpenDay, weekEndDate, data.events, candidates);
+    const candidates = this.deduplicate(this.buildCandidates(data, openDates));
+    const base = this.distribute(sellerId, dayDates, openDates, data.events, candidates, rolling);
     let result = base;
     let aiUsed = false;
     let fallbackUsed = true;
@@ -183,11 +198,17 @@ export class PlanningIntelligenceService {
     return [...inactiveRecent, ...cooling, ...exClients].slice(0, COMMERCIAL_PLANNING_DEFAULTS.maxReactivationCandidates).map((row) => row.client);
   }
 
-  // Data fixa: o dia do vencimento quando cai entre o primeiro dia aberto e a sexta; vencido fica preso no primeiro dia
-  // aberto (hoje, ou a segunda de uma semana futura).
-  private buildCandidates(data: Awaited<ReturnType<PlanningIntelligenceService["collectData"]>>, firstOpenDay: Date, weekEnd: Date): Candidate[] {
+  // Data fixa: o dia do vencimento quando cai num dos dias abertos (no fim de semana, o próximo dia útil); vencido fica
+  // preso no primeiro dia aberto (hoje, ou a segunda de uma semana futura).
+  private buildCandidates(data: Awaited<ReturnType<PlanningIntelligenceService["collectData"]>>, openDates: Date[]): Candidate[] {
     const now = new Date();
-    const fixedDateFor = (due: Date) => (due >= firstOpenDay && due <= weekEnd ? dateOnly(due) : due < now ? dateOnly(firstOpenDay) : null);
+    const openKeys = openDates.map(dateOnly);
+    const fixedDateFor = (due: Date) => {
+      const key = dateOnly(due);
+      if (!openKeys.length || key > openKeys[openKeys.length - 1]) return null;
+      if (key < openKeys[0]) return due < now ? openKeys[0] : null;
+      return openKeys.find((day) => day >= key) ?? null;
+    };
     const candidates: Candidate[] = [];
     const handled = this.handledThisWeek(data);
     for (const opportunity of data.opportunities) {
@@ -226,10 +247,11 @@ export class PlanningIntelligenceService {
     return [...map.values()];
   }
 
-  private distribute(sellerId: string, weekStart: Date, firstOpenDay: Date, weekEnd: Date, events: Awaited<ReturnType<PlanningIntelligenceService["collectData"]>>["events"], candidates: Candidate[]): WeeklyCommercialPlan {
-    const days = Array.from({ length: 5 }, (_, index) => { const date = addDays(weekStart, index); return { date: dateOnly(date), label: labels[date.getUTCDay()], existingAppointments: events.filter((event) => brazilDateOnly(event.startDateTime) === dateOnly(date)).map((event) => ({ id: event.id, title: event.title, type: event.type, startsAt: event.startDateTime.toISOString(), endsAt: event.endDateTime.toISOString(), city: event.city || event.stops.find((s) => s.city)?.city || null, clientId: event.clientId, opportunityId: event.opportunityId })), suggestedActions: [] as Omit<Candidate, "fixedDate" | "dedupeKey">[] }; });
+  private distribute(sellerId: string, dayDates: Date[], openDates: Date[], events: Awaited<ReturnType<PlanningIntelligenceService["collectData"]>>["events"], candidates: Candidate[], rolling: boolean): WeeklyCommercialPlan {
+    const days = dayDates.map((date) => { return { date: dateOnly(date), label: labels[date.getUTCDay()], existingAppointments: events.filter((event) => brazilDateOnly(event.startDateTime) === dateOnly(date)).map((event) => ({ id: event.id, title: event.title, type: event.type, startsAt: event.startDateTime.toISOString(), endsAt: event.endDateTime.toISOString(), city: event.city || event.stops.find((s) => s.city)?.city || null, clientId: event.clientId, opportunityId: event.opportunityId })), suggestedActions: [] as Omit<Candidate, "fixedDate" | "dedupeKey">[] }; });
     const state = new Map(days.map((day) => { const inPerson = day.existingAppointments.filter((a) => isInPersonAppointment(a.type)); return [day.date, { actions: day.existingAppointments.length, visits: inPerson.length, cities: new Set(inPerson.map((a) => a.city).filter(Boolean) as string[]) }]; }));
-    const openDays = days.filter((day) => day.date >= dateOnly(firstOpenDay));
+    const openKeys = new Set(openDates.map(dateOnly));
+    const openDays = days.filter((day) => openKeys.has(day.date));
     const unallocated: Omit<Candidate, "fixedDate" | "dedupeKey">[] = [];
     for (const candidate of candidates.slice(0, COMMERCIAL_PLANNING_DEFAULTS.maxPlannedActions)) {
       const target = this.pickDay(openDays, state, candidate);
@@ -243,7 +265,8 @@ export class PlanningIntelligenceService {
     const proposals = allActions.filter((a) => a.type === "proposal").length;
     const followUps = allActions.filter((a) => a.type === "follow_up").length;
     const capacityStatus = unallocated.length ? "overloaded" : allActions.length < 8 ? "light" : "balanced";
-    return { weekStart: dateOnly(weekStart), weekEnd: dateOnly(weekEnd), sellerId, summary: `${allActions.length} ações sugeridas para a semana e ${events.length} compromisso(s) já na agenda.`, workload: { plannedActions: allActions.length, visits, calls, proposals, followUps, capacityStatus }, days, unallocatedPriorities: unallocated, warnings: ["Cache em memória tem limitação multi-instância/SaaS; Redis fica para evolução futura."], generatedAt: new Date().toISOString(), source: "deterministic" };
+    const shownEvents = days.reduce((total, day) => total + day.existingAppointments.length, 0);
+    return { weekStart: dateOnly(dayDates[0]), weekEnd: dateOnly(dayDates[dayDates.length - 1]), sellerId, summary: `${allActions.length} ações sugeridas para ${rolling ? "os próximos 5 dias úteis" : "a semana"} e ${shownEvents} compromisso(s) já na agenda.`, workload: { plannedActions: allActions.length, visits, calls, proposals, followUps, capacityStatus }, days, unallocatedPriorities: unallocated, warnings: ["Cache em memória tem limitação multi-instância/SaaS; Redis fica para evolução futura."], generatedAt: new Date().toISOString(), source: "deterministic" };
   }
 
   private pickDay(days: WeeklyCommercialPlan["days"], state: Map<string, { actions: number; visits: number; cities: Set<string> }>, candidate: Candidate) {

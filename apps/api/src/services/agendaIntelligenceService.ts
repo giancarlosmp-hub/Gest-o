@@ -36,6 +36,8 @@ export type AgendaOptimizationInput = {
 };
 type ScheduleItem = {
   agendaEventId: string;
+  type: string;
+  isVisit: boolean;
   agendaStopId: string | null;
   clientId: string | null;
   title: string;
@@ -129,12 +131,17 @@ const parseDateOnlyRange = (value: string) => {
     to: new Date(Date.UTC(year, month - 1, day + 1, 2, 59, 59, 999)),
   };
 };
+// Horários no relógio de Brasília (UTC-3 fixo), como o planejamento semanal: 09:00 de Brasília não vira 12:00.
+const BRAZIL_UTC_OFFSET_MS = 3 * 3_600_000;
+const brazilClock = (date: Date) => new Date(date.getTime() - BRAZIL_UTC_OFFSET_MS);
 const time = (date: Date | null | undefined) =>
   date
-    ? `${String(date.getUTCHours()).padStart(2, "0")}:${String(date.getUTCMinutes()).padStart(2, "0")}`
+    ? `${String(brazilClock(date).getUTCHours()).padStart(2, "0")}:${String(brazilClock(date).getUTCMinutes()).padStart(2, "0")}`
     : null;
 const minutes = (date: Date | null | undefined) =>
-  date ? date.getUTCHours() * 60 + date.getUTCMinutes() : null;
+  date ? brazilClock(date).getUTCHours() * 60 + brazilClock(date).getUTCMinutes() : null;
+// Só roteiro e reunião presencial são visita; follow-up e reunião online não contam como visita nem pedem localização.
+const isVisitType = (type: string) => type === "roteiro_visita" || type === "reuniao_presencial";
 const periodOf = (m: number | null): Period =>
   m == null ? null : m < 12 * 60 ? "morning" : "afternoon";
 const safe = (value: string | null | undefined, max = 160) =>
@@ -395,6 +402,8 @@ export class AgendaIntelligenceService {
         ].includes(status);
         items.push({
           agendaEventId: event.id,
+          type: event.type,
+          isVisit: Boolean(stop) || isVisitType(event.type),
           agendaStopId: stop?.id || null,
           clientId: stop?.clientId || event.clientId,
           title: safe(
@@ -433,10 +442,11 @@ export class AgendaIntelligenceService {
     const suggested = this.orderItems(items);
     const distance = this.estimateDistance(suggested);
     const insertions = scope.type === "seller" && viewer ? await this.suggestInsertions(scope.sellerIds[0], date, items, viewer) : [];
-    const missing = items.filter((i) => !hasValidCoordinates(i)).length;
+    const visits = items.filter((i) => i.isVisit);
+    const missing = visits.filter((i) => !hasValidCoordinates(i)).length;
     const fixed = items.filter((i) => !i.movable).length;
     const confidence =
-      missing === items.length
+      missing === visits.length
         ? "low"
         : distance == null || missing
           ? "medium"
@@ -446,7 +456,7 @@ export class AgendaIntelligenceService {
       sellerId: scope.cacheSellerId,
       scope: scope.type,
       sellerIds: scope.sellerIds,
-      summary: `${scope.type === "aggregate" ? `Análise agregada de ${scope.sellerIds.length} vendedor(es): ` : ""}Análise de ${items.length} visita(s)/compromisso(s); ${fixed} fixo(s) preservado(s), ${items.length - fixed} reordenável(is).`,
+      summary: `${scope.type === "aggregate" ? `Análise agregada de ${scope.sellerIds.length} vendedor(es): ` : ""}Análise de ${visits.length} visita(s) e ${items.length - visits.length} outro(s) compromisso(s); ${fixed} fixo(s) preservado(s), ${items.length - fixed} reordenável(is).`,
       currentSchedule: items.map(
         ({
           status,
@@ -466,7 +476,7 @@ export class AgendaIntelligenceService {
           ? this.reason(item)
           : "Compromisso fixo/concluído mantido na posição operacional.",
         movable: item.movable,
-        warning: hasValidCoordinates(item)
+        warning: !item.isVisit || hasValidCoordinates(item)
           ? null
           : "Localização sem coordenadas confiáveis; agrupamento usa cidade/território.",
       })),
@@ -514,7 +524,7 @@ export class AgendaIntelligenceService {
           severity: "high",
         });
     for (const item of items)
-      if (!hasValidCoordinates(item))
+      if (item.isVisit && !hasValidCoordinates(item))
         conflicts.push({
           type: "missing_location",
           description:
@@ -523,7 +533,7 @@ export class AgendaIntelligenceService {
         });
     for (const period of ["morning", "afternoon"] as const)
       if (
-        items.filter((i) => i.period === period).length >
+        items.filter((i) => i.isVisit && i.period === period).length >
         AGENDA_INTELLIGENCE_DEFAULTS.maxStopsPerPeriod
       )
         conflicts.push({
@@ -533,7 +543,8 @@ export class AgendaIntelligenceService {
         });
     return conflicts;
   }
-  private estimateDistance(items: ScheduleItem[]) {
+  private estimateDistance(allItems: ScheduleItem[]) {
+    const items = allItems.filter((i) => i.isVisit);
     if (items.length < 2 || items.some((i) => !hasValidCoordinates(i)))
       return null;
     let total = 0;

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useAuth } from "../../context/AuthContext";
 import api from "../../lib/apiClient";
 import { AI_REQUEST_TIMEOUT_MS } from "../../lib/aiRequest";
 
@@ -8,6 +9,8 @@ type AgendaIntelligence = {
   currentSchedule: Array<{
     agendaEventId: string;
     agendaStopId: string | null;
+    type: string;
+    isVisit: boolean;
     title: string;
     city: string | null;
     fixedStartTime: string | null;
@@ -59,8 +62,53 @@ const periodLabel: Record<string, string> = {
   morning: "Manhã",
   afternoon: "Tarde",
 };
+const typeLabel: Record<string, string> = {
+  roteiro_visita: "Visita",
+  reuniao_presencial: "Visita",
+  reuniao_online: "Reunião online",
+  followup: "Follow-up",
+};
+const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
+
+// Vendedor vê só a ordem do dia, por horário de Brasília e em linguagem simples; a análise de rota (fixos,
+// coordenadas, confiança) fica para gerente e diretor até a sugestão por proximidade.
+function SellerDayOrder({ data }: { data: AgendaIntelligence }) {
+  const schedule = [...data.currentSchedule].sort((a, b) => (a.fixedStartTime || "99:99").localeCompare(b.fixedStartTime || "99:99") || a.currentOrder - b.currentOrder);
+  const visits = schedule.filter((item) => item.isVisit).length;
+  const overlap = data.conflicts.some((conflict) => conflict.type === "time_overlap");
+  return (
+    <div className="mt-4 space-y-2">
+      <p className="text-sm text-slate-700">
+        {schedule.length
+          ? `Hoje: ${plural(visits, "visita", "visitas")} e ${plural(schedule.length - visits, "outro compromisso", "outros compromissos")}.`
+          : "Nenhum compromisso na agenda deste dia."}
+      </p>
+      <ol className="space-y-2">
+        {schedule.map((item, index) => (
+          <li key={`${item.agendaEventId}-${item.agendaStopId || "event"}`} className="rounded-lg bg-slate-50 p-2 text-sm">
+            <strong>
+              {index + 1}. {item.fixedStartTime || "Sem horário"} · {item.title}
+            </strong>
+            <br />
+            <span className="text-xs text-slate-600">
+              {typeLabel[item.type] || "Compromisso"} · {item.city || "Cidade não informada"}
+            </span>
+          </li>
+        ))}
+      </ol>
+      {overlap ? (
+        <p className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-sm text-amber-800">
+          Há compromissos com horários sobrepostos.
+        </p>
+      ) : null}
+      <p className="text-xs text-slate-500">Em ordem de horário (Brasília) · não altera sua agenda.</p>
+    </div>
+  );
+}
 
 export default function AgendaIntelligencePanel({ date, sellerId }: Props) {
+  const { user } = useAuth();
+  const isSeller = user?.role === "vendedor";
   const [data, setData] = useState<AgendaIntelligence | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -96,8 +144,10 @@ export default function AgendaIntelligencePanel({ date, sellerId }: Props) {
             Sugestão operacional do dia
           </h3>
           <p className="mt-1 text-sm text-slate-600">
-            {data?.summary ||
-              "Analisa compromissos, paradas, prioridades e limitações sem alterar sua agenda."}
+            {isSeller
+              ? "A ordem dos seus compromissos do dia."
+              : data?.summary ||
+                "Analisa compromissos, paradas, prioridades e limitações sem alterar sua agenda."}
           </p>
         </div>
         <button
@@ -114,7 +164,8 @@ export default function AgendaIntelligencePanel({ date, sellerId }: Props) {
           {error}
         </p>
       ) : null}
-      {data ? (
+      {data && isSeller ? <SellerDayOrder data={data} /> : null}
+      {data && !isSeller ? (
         <div className="mt-4 space-y-3">
           <div className="grid gap-2 text-xs sm:grid-cols-5">
             <span className="rounded-lg bg-slate-50 p-2">

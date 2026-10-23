@@ -213,15 +213,16 @@ try {
   assert.equal(actions.find((action) => action.opportunityId === "opp-titulos")?.reason, OVERDUE_TITLES_REASON, "motivo do planejamento");
   assert(actions.every((action) => !/títulos?/.test(action.reason) || action.opportunityId === "opp-titulos"), "cliente sem títulos vencidos não traz texto de títulos");
 
-  // Semana sem weekStart: domingo 22h em Brasília (já segunda em UTC) ainda pertence à semana iniciada na segunda anterior.
+  // Sem weekStart: próximos 5 dias úteis a partir de hoje em Brasília. Sexta 22h em Brasília (já sábado em UTC) ainda
+  // começa na sexta; sábado 0h30 em Brasília pula para a segunda.
   const realNow = Date.now;
   try {
-    Date.now = () => Date.parse("2026-10-19T01:00:00.000Z");
-    const sundayNight = await planningIntelligenceService.generateWeeklyCommercialPlan({ viewerUserId: "seller-a", viewerRole: "vendedor", refresh: true });
-    assert.equal(sundayNight.weekStart, "2026-10-12");
-    Date.now = () => Date.parse("2026-10-19T03:30:00.000Z");
-    const mondayEarly = await planningIntelligenceService.generateWeeklyCommercialPlan({ viewerUserId: "seller-a", viewerRole: "vendedor", refresh: true });
-    assert.equal(mondayEarly.weekStart, "2026-10-19");
+    Date.now = () => Date.parse("2026-10-24T01:00:00.000Z");
+    const fridayNight = await planningIntelligenceService.generateWeeklyCommercialPlan({ viewerUserId: "seller-a", viewerRole: "vendedor", refresh: true });
+    assert.equal(fridayNight.weekStart, "2026-10-23");
+    Date.now = () => Date.parse("2026-10-24T03:30:00.000Z");
+    const saturdayEarly = await planningIntelligenceService.generateWeeklyCommercialPlan({ viewerUserId: "seller-a", viewerRole: "vendedor", refresh: true });
+    assert.equal(saturdayEarly.weekStart, "2026-10-26");
   } finally {
     Date.now = realNow;
   }
