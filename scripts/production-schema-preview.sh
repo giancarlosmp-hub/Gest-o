@@ -27,8 +27,12 @@ fi
 
 cat "$sql"
 normalized=$(sed -E 's/--.*$//' "$sql")
-additive=$(printf '%s\n' "$normalized" | grep -Eic '^[[:space:]]*(CREATE (TYPE|TABLE|UNIQUE INDEX|INDEX)|ALTER TABLE .*ADD (COLUMN|CONSTRAINT))' || true)
-destructive=$(printf '%s\n' "$normalized" | grep -Eic 'DROP[[:space:]]+(TABLE|COLUMN|TYPE)|TRUNCATE|DROP[^;]*CASCADE|ALTER[[:space:]]+(TABLE|TYPE)[^;]*(TYPE|DROP VALUE|RENAME VALUE)' || true)
+# The only accepted ALTER TYPE is one exact enum addition per line; every other ALTER TYPE
+# (RENAME, DROP, ADD VALUE without IF NOT EXISTS, anything else) stays blocked below.
+enum_add_line="^[[:space:]]*ALTER TYPE \"[A-Za-z][A-Za-z0-9_]*\" ADD VALUE IF NOT EXISTS '[a-z][a-z0-9_]*';[[:space:]]*\$"
+checked=$(printf '%s\n' "$normalized" | grep -Ev "$enum_add_line" || true)
+additive=$(printf '%s\n' "$normalized" | grep -Eic "^[[:space:]]*(CREATE (TYPE|TABLE|UNIQUE INDEX|INDEX)|ALTER TABLE .*ADD (COLUMN|CONSTRAINT))|$enum_add_line" || true)
+destructive=$(printf '%s\n' "$checked" | grep -Eic 'DROP[[:space:]]+(TABLE|COLUMN|TYPE)|TRUNCATE|DROP[^;]*CASCADE|ALTER[[:space:]]+(TABLE|TYPE)[^;]*(TYPE|DROP VALUE|RENAME VALUE)|^[[:space:]]*ALTER[[:space:]]+TYPE' || true)
 incident=$(printf '%s\n' "$normalized" | grep -Eic 'incident_[0-9]+' || true)
 blocked=0
 
