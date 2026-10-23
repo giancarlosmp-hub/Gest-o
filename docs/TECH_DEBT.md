@@ -439,6 +439,26 @@ alta" (`overloaded`). Prazos de follow-up e atividade continuam com a data UTC (
 em ISO (`2026-10-19`). O aviso fixo "Cache em memória…" segue em `warnings` (não aparece na tela). Proximidade por mapa
 fica para outro PR.
 
+### TD-AGENDA-WEEKLY-PLAN-ACTIONS — sugestão do planejamento semanal sem ação
+
+**Resolvido no código, aguardando deploy.** Cada sugestão do planejamento semanal tem "Agendar", "Registrar" e
+"Abrir" (`WeeklyCommercialPlan.tsx`, funções em `weeklyPlanActions.ts`). "Agendar" cria o compromisso pela rota que a
+Agenda já usa (`POST /agenda/events`) no dia da sugestão, às 9h (manhã ou sem período) ou 14h (tarde) de Brasília;
+visita entra como `reuniao_presencial` e o resto como `followup`. "Registrar" abre a Nova atividade em Atividades
+(`/atividades?open=create&…`, o mesmo caminho da Agenda) com tipo, cliente, oportunidade, data e "Atividade já
+realizada" marcada. "Abrir" vai para a oportunidade ou, sem ela, para o cliente. Gerente e diretor criam no nome do
+vendedor do planejamento (`resolveOwnerId`); vendedor só no próprio. Sem migration: o vínculo é cliente + oportunidade
+na semana. `planningIntelligenceService.ts` não sugere cliente que já tem compromisso na semana (de segunda a sexta,
+inclusive parada de roteiro) ou atividade criada desde segunda, com a mesma oportunidade quando os dois têm uma; a
+atividade pendente não esconde a própria sugestão "Concluir atividade".
+
+Pendente: `POST /agenda/events` não confere se o cliente e a oportunidade são do vendedor (já era assim). Não existe
+tipo de compromisso "ligação" (`AgendaEventType`), por isso ligação, WhatsApp, proposta e revisão viram `followup`.
+Qualquer compromisso ou atividade do cliente na semana, mesmo criado fora do planejamento, tira o cliente das
+sugestões. A atividade salva pela tela de Atividades grava o vencimento à meia-noite UTC (21h do dia anterior em
+Brasília). Depois de "Agendar", os totais do topo só se atualizam ao recarregar. A Agenda Inteligente mostra o horário
+do compromisso em UTC (14h aparece 17:00). WhatsApp fica para a integração de WhatsApp.
+
 ### TD-ERP-DUE-DATE-ISO-DEPENDENCY — vencimento dos títulos lido com `new Date()` na sincronização
 
 **Aberto, baixo.** Em consulta somente leitura à produção (12/10/2026), 100% dos `DATA_VENCIMENTO`

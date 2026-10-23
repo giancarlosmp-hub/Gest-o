@@ -39,6 +39,7 @@ type Candidate = {
   source: Source;
   fixedDate?: string | null;
   dedupeKey: string;
+  sourceActivityId?: string;
 };
 
 export type WeeklyCommercialPlan = {
@@ -72,7 +73,7 @@ const brazilDateOnly = (date: Date) => dateOnly(new Date(date.getTime() - BRAZIL
 // Só a visita é presencial: ligação, WhatsApp, follow-up, proposta e revisão não definem a cidade do dia.
 const isInPersonAppointment = (type: string) => type === "roteiro_visita" || type === "reuniao_presencial";
 const sanitize = (value: string | null | undefined, max = 160) => (value || "").replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[contato]").replace(/\b\d{10,}\b/g, "[numero]").replace(/\b\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}\b/g, "[documento]").slice(0, max);
-const stripInternal = ({ fixedDate, dedupeKey, ...candidate }: Candidate) => candidate;
+const stripInternal = ({ fixedDate, dedupeKey, sourceActivityId, ...candidate }: Candidate) => candidate;
 
 export class PlanningIntelligenceService {
   async generateWeeklyCommercialPlan(input: Input): Promise<WeeklyCommercialPlan> {
@@ -121,7 +122,7 @@ export class PlanningIntelligenceService {
   // Clientes arquivados ficam fora das oportunidades, atividades e candidatos a reativação. Cliente em cobrança também
   // não recebe sugestão (follow-up, ligação, visita, reativação); compromissos já marcados na agenda continuam.
   private async collectData(sellerId: string, from: Date, to: Date) {
-    const [events, allOpportunities, allActivities, allPortfolioClients] = await Promise.all([
+    const [events, allOpportunities, allActivities, allPortfolioClients, weekActivities] = await Promise.all([
       prisma.agendaEvent.findMany({ where: { sellerId, startDateTime: { lt: to }, endDateTime: { gte: from } }, select: { id: true, title: true, type: true, startDateTime: true, endDateTime: true, status: true, city: true, clientId: true, opportunityId: true, updatedAt: true, stops: { select: { clientId: true, city: true }, orderBy: { order: "asc" } } }, orderBy: { startDateTime: "asc" } }),
       prisma.opportunity.findMany({
         where: { ownerSellerId: sellerId, stage: { notIn: [...CLOSED_STAGES] }, client: { isArchived: false } },
@@ -151,7 +152,9 @@ export class PlanningIntelligenceService {
       prisma.client.findMany({
         where: { ownerSellerId: sellerId, isArchived: false },
         select: { id: true, name: true, city: true, state: true, lastPurchaseDate: true, lastPurchaseValue: true, ownerSellerId: true, financialProfile: true, openTitlesTotal: true, overdueTitlesTotal: true, createdAt: true }
-      })
+      }),
+      // Atividades registradas desde o início da semana: o cliente já foi tratado e sai das sugestões.
+      prisma.activity.findMany({ where: { ownerSellerId: sellerId, createdAt: { gte: from }, OR: [{ clientId: null }, { client: { isArchived: false } }] }, select: { id: true, clientId: true, opportunityId: true, createdAt: true } })
     ]);
     const relatedClientIds = [...allOpportunities.map((opportunity) => opportunity.clientId), ...allActivities.flatMap((activity) => (activity.clientId ? [activity.clientId] : []))];
     const inCollection = await loadClientIdsInCollection({ isArchived: false, OR: [{ ownerSellerId: sellerId }, { id: { in: relatedClientIds } }] });
@@ -162,6 +165,7 @@ export class PlanningIntelligenceService {
     const withLastSentCrmOrder = <T extends { id: string }>(client: T) => ({ ...client, lastSentCrmOrderDate: lastSentCrmOrderByClient.get(client.id) ?? null });
     return {
       events,
+      weekActivities: weekActivities.filter((activity) => activity.clientId && activity.createdAt >= from),
       opportunities: opportunities.map((opportunity) => ({ ...opportunity, client: withLastSentCrmOrder(opportunity.client) })),
       activities,
       inactiveClients: this.selectReactivationClients(portfolioClients, lastSentCrmOrderByClient, new Date()).map(withLastSentCrmOrder)
@@ -185,6 +189,7 @@ export class PlanningIntelligenceService {
     const now = new Date();
     const fixedDateFor = (due: Date) => (due >= firstOpenDay && due <= weekEnd ? dateOnly(due) : due < now ? dateOnly(firstOpenDay) : null);
     const candidates: Candidate[] = [];
+    const handled = this.handledThisWeek(data);
     for (const opportunity of data.opportunities) {
       const priority = calculateCommercialPriority({ client: opportunity.client as any, opportunity, activities: opportunity.activities, timelineEvents: opportunity.timelineEvents, now });
       const overdueFollow = opportunity.followUpDate < now;
@@ -193,13 +198,23 @@ export class PlanningIntelligenceService {
     }
     for (const activity of data.activities) {
       const type: ActionType = String(activity.type).includes("whatsapp") ? "whatsapp" : String(activity.type).includes("proposta") ? "proposal" : String(activity.type).includes("visita") ? "visit" : "follow_up";
-      candidates.push({ type, clientId: activity.clientId, opportunityId: activity.opportunityId, title: `${type === "visit" ? "Visitar" : "Concluir atividade"}: ${sanitize(activity.client?.name || "cliente", 80)}`, city: activity.city || activity.client?.city || null, score: activity.dueDate < now ? 90 : 55, priorityLevel: activity.dueDate < now ? "urgente" : "alta", reason: activity.dueDate < now ? "Atividade pendente vencida" : "Atividade pendente", objective: sanitize(activity.description || activity.notes || "Concluir atividade aberta"), suggestedPeriod: null, estimatedDurationMinutes: COMMERCIAL_PLANNING_DEFAULTS.durations[type], source: "follow_up", fixedDate: fixedDateFor(activity.dueDate),dedupeKey: `${activity.clientId || activity.id}:${type}` });
+      candidates.push({ type, clientId: activity.clientId, opportunityId: activity.opportunityId, title: `${type === "visit" ? "Visitar" : "Concluir atividade"}: ${sanitize(activity.client?.name || "cliente", 80)}`, city: activity.city || activity.client?.city || null, score: activity.dueDate < now ? 90 : 55, priorityLevel: activity.dueDate < now ? "urgente" : "alta", reason: activity.dueDate < now ? "Atividade pendente vencida" : "Atividade pendente", objective: sanitize(activity.description || activity.notes || "Concluir atividade aberta"), suggestedPeriod: null, estimatedDurationMinutes: COMMERCIAL_PLANNING_DEFAULTS.durations[type], source: "follow_up", fixedDate: fixedDateFor(activity.dueDate),dedupeKey: `${activity.clientId || activity.id}:${type}`, sourceActivityId: activity.id });
     }
     for (const client of data.inactiveClients) {
       const priority = calculateCommercialPriority({ client: client as any, now });
       candidates.push({ type: "call", clientId: client.id, title: `Reativar cliente: ${sanitize(client.name, 80)}`, city: client.city, score: priority.score, priorityLevel: priority.level, reason: sanitize(priority.reasons.join("; ") || "Cliente sem compra"), objective: "Identificar demanda e recuperar relacionamento", suggestedPeriod: null, estimatedDurationMinutes: COMMERCIAL_PLANNING_DEFAULTS.durations.call, source: "inactive_client", fixedDate: null, dedupeKey: `${client.id}:call` });
     }
-    return candidates.sort((a, b) => b.score - a.score).slice(0, COMMERCIAL_PLANNING_DEFAULTS.maxCandidates);
+    return candidates.filter((candidate) => !handled(candidate)).sort((a, b) => b.score - a.score).slice(0, COMMERCIAL_PLANNING_DEFAULTS.maxCandidates);
+  }
+
+  // Sugestão já tratada na semana não volta: compromisso na agenda (Agendar) ou atividade registrada (Registrar) para o
+  // mesmo cliente, com a mesma oportunidade quando os dois têm uma. A atividade pendente não esconde a própria sugestão.
+  private handledThisWeek(data: Awaited<ReturnType<PlanningIntelligenceService["collectData"]>>) {
+    const records = [
+      ...data.events.flatMap((event) => [event.clientId, ...event.stops.map((stop) => stop.clientId)].flatMap((clientId) => (clientId ? [{ id: event.id, clientId, opportunityId: event.opportunityId }] : []))),
+      ...data.weekActivities.map((activity) => ({ id: activity.id, clientId: activity.clientId, opportunityId: activity.opportunityId }))
+    ];
+    return (candidate: Candidate) => Boolean(candidate.clientId) && records.some((record) => record.id !== candidate.sourceActivityId && record.clientId === candidate.clientId && (!candidate.opportunityId || !record.opportunityId || record.opportunityId === candidate.opportunityId));
   }
 
   private deduplicate(candidates: Candidate[]) {
@@ -247,7 +262,7 @@ export class PlanningIntelligenceService {
   }
 
   private latestUpdate(data: Awaited<ReturnType<PlanningIntelligenceService["collectData"]>>) {
-    const dates = [...data.events.map((e) => e.updatedAt), ...data.opportunities.map((o) => o.createdAt), ...data.activities.map((a) => a.createdAt), ...data.inactiveClients.map((c) => c.createdAt)];
+    const dates = [...data.events.map((e) => e.updatedAt), ...data.opportunities.map((o) => o.createdAt), ...data.activities.map((a) => a.createdAt), ...data.weekActivities.map((a) => a.createdAt), ...data.inactiveClients.map((c) => c.createdAt)];
     return dates.sort((a, b) => b.getTime() - a.getTime())[0] || new Date(0);
   }
 
