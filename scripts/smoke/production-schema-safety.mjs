@@ -66,6 +66,36 @@ rmSync(temporary, { recursive: true });
 assert.notEqual(malicious.status, 0, "preview must reject DROP");
 assert.match(malicious.stdout + malicious.stderr, /BLOQUEADO/);
 
+// Enum additions: only the exact one-line ALTER TYPE "<enum>" ADD VALUE IF NOT EXISTS '<value>' passes.
+function runPreview(sql) {
+  const dir = mkdtempSync(resolve(tmpdir(), "gesto-schema-enum-"));
+  const file = resolve(dir, "candidate.sql");
+  writeFileSync(file, sql);
+  const result = spawnSync("bash", [preview], { cwd: root, env: { ...process.env, MODE: "validate", SQL_FILE: file }, encoding: "utf8" });
+  rmSync(dir, { recursive: true });
+  return result;
+}
+const agendaSplitSql = readFileSync(resolve(root, "apps/api/prisma/migrations/20261023120000_agenda_activity_planning_split/migration.sql"), "utf8");
+const agendaSplitPreview = runPreview(agendaSplitSql);
+assert.equal(agendaSplitPreview.status, 0, `Agenda/Activity migration must pass the preview validator: ${agendaSplitPreview.stdout}${agendaSplitPreview.stderr}`);
+assert.match(agendaSplitPreview.stdout, /RESUMO aditivas=10 destrutivas=0 bloqueadas=0/);
+for (const [name, sql] of [
+  ["enum value rename", `ALTER TYPE "AgendaEventStatus" RENAME VALUE 'vencido' TO 'cancelado';\n`],
+  ["enum value drop", `ALTER TYPE "AgendaEventStatus" DROP VALUE 'vencido';\n`],
+  ["enum type drop", `DROP TYPE "AgendaEventStatus";\n`],
+  ["enum type rename", `ALTER TYPE "AgendaEventStatus" RENAME TO "AgendaStatus";\n`],
+  ["column type change", `ALTER TABLE "Activity" ALTER COLUMN "type" TYPE TEXT;\n`],
+  ["column type change via SET DATA TYPE", `ALTER TABLE "AgendaEvent" ALTER COLUMN "status" SET DATA TYPE TEXT;\n`],
+  ["enum addition without IF NOT EXISTS", `ALTER TYPE "AgendaEventStatus" ADD VALUE 'cancelado';\n`],
+  ["enum addition with positional clause", `ALTER TYPE "AgendaEventStatus" ADD VALUE IF NOT EXISTS 'cancelado' BEFORE 'vencido';\n`],
+  ["enum addition sharing its line with a drop", `ALTER TYPE "AgendaEventStatus" ADD VALUE IF NOT EXISTS 'cancelado'; DROP TYPE "ActivityType";\n`],
+  ["lowercase enum addition", `alter type "AgendaEventStatus" add value if not exists 'cancelado';\n`]
+]) {
+  const result = runPreview(sql);
+  assert.equal(result.status, 42, `${name} must stay blocked: ${result.stdout}${result.stderr}`);
+  assert.match(result.stdout + result.stderr, /BLOQUEADO/, name);
+}
+
 const registry = resolve(root, "scripts/production-schema-migrations.mjs");
 const ordersId = "20260904120000_orders_operational_view";
 const ordersEntry = spawnSync("node", [registry, ordersId], { cwd: root, encoding: "utf8" });
@@ -80,14 +110,20 @@ assert.equal(JSON.parse(authorityEntry.stdout).sha256, "52101c9cee86211717bac9ba
 const sourceObsEntry = spawnSync("node", [registry, "20260927160000_product_price_source_observation"], { cwd: root, encoding: "utf8" });
 assert.equal(sourceObsEntry.status, 0, sourceObsEntry.stderr);
 assert.equal(JSON.parse(sourceObsEntry.stdout).sha256, "5f15e0ec506452ee9f341fa836ad9857baf1bf523f5dd1c7e21bea8f93079e70");
+const agendaSplitEntry = spawnSync("node", [registry, "20261023120000_agenda_activity_planning_split"], { cwd: root, encoding: "utf8" });
+assert.equal(agendaSplitEntry.status, 0, agendaSplitEntry.stderr);
+assert.equal(JSON.parse(agendaSplitEntry.stdout).sha256, "df6508474fed9dd2a7a3f7492946d69158b12ce43e599f2fb6178540af8d2b5e");
+assert.doesNotMatch(agendaSplitSql, /\b(UPDATE|DELETE|INSERT|DROP|RENAME|TRUNCATE)\b|NOT NULL|DEFAULT/i, "Agenda/Activity migration must only add enum values and nullable columns");
 
 const apply = readFileSync(resolve(root, "scripts/production-schema-apply.sh"), "utf8");
 const productPricePostgres = readFileSync(resolve(root, "scripts/smoke/product-price-authority-migration-postgres.sh"), "utf8");
 assert.match(productPricePostgres, /column_name IN \('source', 'availabilityState'\)/, "authority column names must reach PostgreSQL as SQL string literals");
 assert.doesNotMatch(productPricePostgres, /-Atc '[^\n]*\\'/, "multi-layer shell quote splicing is forbidden for ProductPrice SQL assertions");
 assert.match(productPricePostgres, /authority_columns=\$\(psql -At <<'SQL'/, "catalog assertion must use a protected heredoc");
-assert.match(productPricePostgres, /20260911190000_product_price_authority[\s\S]*20260927160000_product_price_source_observation[\s\S]*prisma migrate diff[\s\S]*--exit-code/,
-  "authority harness must apply the later provenance expansion before comparing with the current schema");
+assert.match(productPricePostgres, /20260911190000_product_price_authority[\s\S]*20260927160000_product_price_source_observation[\s\S]*20261023120000_agenda_activity_planning_split[\s\S]*prisma migrate diff[\s\S]*--exit-code/,
+  "authority harness must apply every later expansion before comparing with the current schema");
+for (const agendaSplitPostcondition of ["migration Agenda/Atividades parcialmente aplicada", "agenda_split_state\" == 0:0", "agenda_split_state\" == 8:2", "migration Agenda/Atividades já presente; DDL ignorado", "rows_using_new_objects", "8:2:0", "is_nullable='YES' AND data_type='text'"]) assert.ok(apply.includes(agendaSplitPostcondition), `missing Agenda/Activity postcondition ${agendaSplitPostcondition}`);
+assert.match(apply, /agenda_split_state" == 8:2 \]\]; then\n  log "migration Agenda\/Atividades já presente; DDL ignorado[\s\S]*else[\s\S]*admin_psql --single-transaction/, "already-applied Agenda/Activity path must not repeat DDL");
 assert.match(apply, /production-schema-migrations\.mjs "\$MIGRATION_ID_REQUESTED"/);
 for (const ordersPostcondition of ["orders-counts.before.tsv", "tenant_not_null", "tenant_nulls", "ErpOperationalOrderStatus", "ErpRequestAuthorizationStatus", "ErpOrderSync_tenantId_fkey", "ErpOrderSync_tenantId_createdAt_idx", "ErpOrderSync_tenantId_sellerId_createdAt_idx", "ErpOrderStatusHistory", "ErpOrderStatusHistory_erpOrderSyncId_fkey", "ErpOrderStatusHistory_opportunityId_fkey", "ErpOrderStatusHistory_erpOrderSyncId_occurredAt_idx", "ErpOrderStatusHistory_opportunityId_occurredAt_idx", "migration-backfill"]) assert.ok(apply.includes(ordersPostcondition), `missing Orders postcondition ${ordersPostcondition}`);
 assert.match(apply, /20260731150000_safe_production_schema_transition\)[\s\S]*required_tables/, "the historical migration must retain its dedicated postconditions");
@@ -321,6 +357,45 @@ ADD COLUMN "operationalStatusRaw" TEXT,
 ADD COLUMN "requestAuthorizationStatus" "ErpRequestAuthorizationStatus" NOT NULL DEFAULT 'UNKNOWN',
 ADD COLUMN "tenantId" TEXT NOT NULL;`, true);
 assertContactDiff("partial Orders columns", 'ALTER TABLE "ErpOrderSync" ADD COLUMN "tenantId" TEXT NOT NULL;', false);
+
+function assertAgendaSplitDiff(name, sql, accepted) {
+  const testDir = mkdtempSync(resolve(tmpdir(), "gesto-agenda-split-diff-"));
+  const input = resolve(testDir, "input.sql");
+  const output = resolve(testDir, "output.sql");
+  writeFileSync(input, sql);
+  const result = spawnSync("node", [resolve(root, "scripts/schema-diff-filter.mjs"), input, output, "pre", "20261023120000_agenda_activity_planning_split"], { encoding: "utf8" });
+  rmSync(testDir, { recursive: true });
+  assert.equal(result.status === 0, accepted, `${name}: ${result.stdout}${result.stderr}`);
+}
+// Exactly what `prisma migrate diff` emits for this migration against the previous schema.
+const agendaSplitEnumLines = [
+  `ALTER TYPE "ActivityType" ADD VALUE 'reuniao_online';`,
+  `ALTER TYPE "ActivityType" ADD VALUE 'reuniao_presencial';`,
+  `ALTER TYPE "AgendaEventType" ADD VALUE 'ligacao';`,
+  `ALTER TYPE "AgendaEventType" ADD VALUE 'whatsapp';`,
+  `ALTER TYPE "AgendaEventType" ADD VALUE 'visita';`,
+  `ALTER TYPE "AgendaEventType" ADD VALUE 'proposta';`,
+  `ALTER TYPE "AgendaEventType" ADD VALUE 'fechamento';`,
+  `ALTER TYPE "AgendaEventStatus" ADD VALUE 'nao_realizado';`
+];
+const agendaSplitColumnLines = [
+  `-- AlterTable\nALTER TABLE "AgendaEvent" ADD COLUMN     "notDoneReason" TEXT;`,
+  `-- AlterTable\nALTER TABLE "Activity" ADD COLUMN     "noNextStepReason" TEXT;`
+];
+const agendaSplitFullDiff = `-- AlterEnum\n-- This migration adds more than one value to an enum.\n\n${agendaSplitEnumLines.join("\n")}\n\n${agendaSplitColumnLines.join("\n\n")}\n`;
+assertAgendaSplitDiff("complete Agenda/Activity diff", agendaSplitFullDiff, true);
+assertAgendaSplitDiff("already applied (empty diff)", "", true);
+assertAgendaSplitDiff("reordered Agenda/Activity diff", [...agendaSplitColumnLines].reverse().join("\n") + "\n" + [...agendaSplitEnumLines].reverse().join("\n"), true);
+assertAgendaSplitDiff("partial: enum values without columns", agendaSplitEnumLines.join("\n"), false);
+assertAgendaSplitDiff("partial: columns without enum values", agendaSplitColumnLines.join("\n"), false);
+assertAgendaSplitDiff("unexpected enum value", `${agendaSplitFullDiff}ALTER TYPE "AgendaEventStatus" ADD VALUE 'cancelado';\n`, false);
+assertAgendaSplitDiff("enum value on another enum", agendaSplitFullDiff.replace(`"AgendaEventStatus" ADD VALUE 'nao_realizado'`, `"ActivityType" ADD VALUE 'nao_realizado'`), false);
+assertAgendaSplitDiff("non-null reason column", agendaSplitFullDiff.replace(`"notDoneReason" TEXT`, `"notDoneReason" TEXT NOT NULL`), false);
+assertAgendaSplitDiff("defaulted reason column", agendaSplitFullDiff.replace(`"noNextStepReason" TEXT`, `"noNextStepReason" TEXT DEFAULT ''`), false);
+assertAgendaSplitDiff("unexpected extra column", `${agendaSplitFullDiff}ALTER TABLE "Activity" ADD COLUMN "unexpected" TEXT;\n`, false);
+assertAgendaSplitDiff("column type change", `${agendaSplitFullDiff}ALTER TABLE "Activity" ALTER COLUMN "type" SET DATA TYPE TEXT;\n`, false);
+assertAgendaSplitDiff("enum value rename", `${agendaSplitFullDiff}ALTER TYPE "AgendaEventStatus" RENAME VALUE 'vencido' TO 'cancelado';\n`, false);
+assertAgendaSplitDiff("duplicated enum value", `${agendaSplitFullDiff}${agendaSplitEnumLines[0]}\n`, false);
 const bootstrap = readFileSync(resolve(root, "apps/api/src/scripts/bootstrap.ts"), "utf8");
 assert.match(bootstrap, /type DatabaseSchemaMode = "external" \| "ephemeral-push"/);
 assert.match(bootstrap, /if \(value === "external" \|\| value === "ephemeral-push"\) return value/);

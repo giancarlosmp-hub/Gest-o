@@ -58,6 +58,10 @@ apply_product_price_source_observation_migration() {
   local db=$1 phase=$2
   run_observed "$phase" "$phase" 20260927160000_product_price_source_observation psql docker exec -i "$pg" psql -X -v ON_ERROR_STOP=1 -U postgres -d "$db" <apps/api/prisma/migrations/20260927160000_product_price_source_observation/migration.sql
 }
+apply_agenda_activity_split_migration() {
+  local db=$1 phase=$2
+  run_observed "$phase" "$phase" 20261023120000_agenda_activity_planning_split psql docker exec -i "$pg" psql -X -v ON_ERROR_STOP=1 -U postgres -d "$db" --single-transaction <apps/api/prisma/migrations/20261023120000_agenda_activity_planning_split/migration.sql
+}
 
 intro=$(git log --all --format=%H --diff-filter=A -- apps/api/prisma/migrations/20260904120000_orders_operational_view/migration.sql)
 [[ -n "$intro" && "$intro" != *$'\n'* ]]
@@ -79,6 +83,7 @@ apply_orders_migration fresh fresh_sequence
 run_observed fresh_sequence orders_schema_diff orders_schema prisma_diff run_tooling fresh ./node_modules/.bin/prisma migrate diff --from-url "$(url fresh)" --to-schema-datamodel /work/orders-target.prisma --exit-code
 apply_product_price_authority_migration fresh complete_relevant_sequence
 apply_product_price_source_observation_migration fresh complete_relevant_sequence
+apply_agenda_activity_split_migration fresh complete_relevant_sequence
 run_observed fresh_sequence final_schema_diff current_schema prisma_diff run_tooling fresh ./node_modules/.bin/prisma migrate diff --from-url "$(url fresh)" --to-schema-datamodel /app/apps/api/prisma/schema.prisma --exit-code
 
 for db in upgrade invalid historical; do run_tooling "$db" ./node_modules/.bin/prisma db push --schema /work/previous/schema.prisma --skip-generate >/dev/null; done
@@ -107,7 +112,9 @@ if docker exec -i "$pg" psql -X -v ON_ERROR_STOP=1 -U postgres -d upgrade <apps/
 run_observed upgrade_from_previous orders_schema_diff orders_schema prisma_diff run_tooling upgrade ./node_modules/.bin/prisma migrate diff --from-url "$(url upgrade)" --to-schema-datamodel /work/orders-target.prisma --exit-code
 apply_product_price_authority_migration upgrade complete_relevant_sequence
 apply_product_price_source_observation_migration upgrade complete_relevant_sequence
+apply_agenda_activity_split_migration upgrade complete_relevant_sequence
 run_observed upgrade_from_previous final_schema_diff current_schema prisma_diff run_tooling upgrade ./node_modules/.bin/prisma migrate diff --from-url "$(url upgrade)" --to-schema-datamodel /app/apps/api/prisma/schema.prisma --exit-code
+[[ $(docker exec "$pg" psql -X -U postgres -d upgrade -qAt -c 'SELECT count(*) FROM "Activity" WHERE id='"'"'activity-a'"'"' AND type='"'"'followup'"'"' AND "noNextStepReason" IS NULL') == 1 ]]
 
 printf '%s\n' "$fixture_sql" | docker exec -i "$pg" psql -X -v ON_ERROR_STOP=1 -U postgres -d invalid >/dev/null
 docker exec "$pg" psql -X -v ON_ERROR_STOP=1 -U postgres -d invalid -c 'INSERT INTO "Tenant" (id,slug,"legalName","displayName",status,"createdAt","updatedAt") VALUES ('"'"'tenant-b'"'"','"'"'tenant-b'"'"','"'"'Synthetic B'"'"','"'"'Synthetic B'"'"','"'"'active'"'"',now(),now())' >/dev/null

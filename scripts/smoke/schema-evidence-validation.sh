@@ -11,8 +11,9 @@ pr827=apps/api/prisma/migrations/20260827190000_add_erp_order_manual_resolution/
 orders=apps/api/prisma/migrations/20260904120000_orders_operational_view/migration.sql
 authority=apps/api/prisma/migrations/20260911190000_product_price_authority/migration.sql
 sourceObs=apps/api/prisma/migrations/20260927160000_product_price_source_observation/migration.sql
-mkdir -p "${legacy%/*}" "${pr827%/*}" "${orders%/*}" "${authority%/*}" "${sourceObs%/*}"
-printf 'legacy\n' >"$legacy"; printf 'pr827\n' >"$pr827"; printf 'orders\n' >"$orders"; printf 'authority\n' >"$authority"; printf 'sourceObs\n' >"$sourceObs"
+agendaSplit=apps/api/prisma/migrations/20261023120000_agenda_activity_planning_split/migration.sql
+mkdir -p "${legacy%/*}" "${pr827%/*}" "${orders%/*}" "${authority%/*}" "${sourceObs%/*}" "${agendaSplit%/*}"
+printf 'legacy\n' >"$legacy"; printf 'pr827\n' >"$pr827"; printf 'orders\n' >"$orders"; printf 'authority\n' >"$authority"; printf 'sourceObs\n' >"$sourceObs"; printf 'agendaSplit\n' >"$agendaSplit"
 git add .; git commit -qm baseline; BASE=$(git rev-parse HEAD)
 # shellcheck source=scripts/schema-evidence-validation.sh
 source scripts/schema-evidence-validation.sh
@@ -90,6 +91,10 @@ validate_schema_evidence "$dir/applied.tsv" # ProductPrice authority evidence va
 
 rm -rf "$TMP/evidence"; dir=$(make_bundle "$BASE" "$sourceObs"); : >"$dir/post-apply-diff.sql"; chmod 600 "$dir/post-apply-diff.sql"
 validate_schema_evidence "$dir/applied.tsv" # ProductPrice source observation evidence valid
+
+rm -rf "$TMP/evidence"; dir=$(make_bundle "$BASE" "$agendaSplit"); : >"$dir/post-apply-diff.sql"; chmod 600 "$dir/post-apply-diff.sql"
+validate_schema_evidence "$dir/applied.tsv" # Agenda/Activity split evidence valid
+printf 'ALTER TABLE "Activity" ADD COLUMN "noNextStepReason" TEXT;\n' >"$dir/post-apply-diff.sql"; expect_reject "$dir" agenda_split_with_post_diff
 
 rm -rf "$TMP/evidence"; dir=$(make_bundle "$BASE" "$pr827")
 validate_schema_evidence "$dir/applied.tsv" # exact PR827 V1 valid without post-diff
