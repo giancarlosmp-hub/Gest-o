@@ -5,7 +5,7 @@ import { useAuth } from "../../context/AuthContext";
 import api from "../../lib/apiClient";
 import { AI_REQUEST_TIMEOUT_MS } from "../../lib/aiRequest";
 import { getApiErrorMessage } from "../../lib/apiError";
-import { canActOnPlan, openHref, registerHref, toAgendaEvent, type PlanningAction } from "./weeklyPlanActions";
+import { canActOnPlan, defaultScheduleTime, openHref, registerHref, toAgendaEvent, type PlanningAction } from "./weeklyPlanActions";
 
 type Appointment = { id: string; title: string; startsAt: string; endsAt: string; city?: string | null; type: string };
 
@@ -51,7 +51,48 @@ const capacityLabel: Record<WeeklyPlan["workload"]["capacityStatus"], string> = 
   overloaded: "Carga alta"
 };
 
-const formatHour =(value: string) => new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(new Date(value));
+// Horários e datas sempre no relógio de Brasília, qualquer que seja o fuso do aparelho.
+const formatHour = (value: string) => new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }).format(new Date(value));
+const formatDay = (date: string) => new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", timeZone: "UTC" }).format(new Date(`${date}T00:00:00.000Z`));
+
+type ScheduleDraft = { key: string; fromDate: string; action: PlanningAction; date: string; time: string; durationMinutes: number };
+
+type ScheduleDialogProps = { draft: ScheduleDraft; saving: boolean; onChange: (draft: ScheduleDraft) => void; onCancel: () => void; onConfirm: () => void };
+
+// Janela do "Agendar": dia, horário e duração da sugestão já preenchidos e editáveis; nada é gravado sem Confirmar.
+function ScheduleDialog({ draft, saving, onChange, onCancel, onConfirm }: ScheduleDialogProps) {
+  const valid = Boolean(draft.date && draft.time && draft.durationMinutes > 0);
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4" role="dialog" aria-modal="true" aria-labelledby="schedule-dialog-title">
+      <form
+        className="w-full max-w-sm rounded-xl bg-white p-4 shadow-xl"
+        onSubmit={(event) => { event.preventDefault(); if (valid && !saving) onConfirm(); }}
+      >
+        <h3 id="schedule-dialog-title" className="text-base font-semibold text-slate-900">Agendar compromisso</h3>
+        <p className="mt-1 text-sm text-slate-600">{draft.action.title}</p>
+        <div className="mt-3 grid grid-cols-2 gap-3">
+          <label className="col-span-2 block text-sm font-medium text-slate-700">
+            Dia
+            <input type="date" required value={draft.date} onChange={(event) => onChange({ ...draft, date: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          </label>
+          <label className="block text-sm font-medium text-slate-700">
+            Horário
+            <input type="time" required value={draft.time} onChange={(event) => onChange({ ...draft, time: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          </label>
+          <label className="block text-sm font-medium text-slate-700">
+            Duração (min)
+            <input type="number" required min={5} step={5} value={draft.durationMinutes || ""} onChange={(event) => onChange({ ...draft, durationMinutes: Number(event.target.value) })} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          </label>
+        </div>
+        <p className="mt-2 text-xs text-slate-500">Horário de Brasília.</p>
+        <div className="mt-4 flex justify-end gap-2">
+          <button type="button" onClick={onCancel} disabled={saving} className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60">Cancelar</button>
+          <button type="submit" disabled={!valid || saving} className="rounded-lg bg-brand-700 px-3 py-2 text-sm font-semibold text-white hover:bg-brand-800 disabled:opacity-60">{saving ? "Agendando…" : "Confirmar"}</button>
+        </div>
+      </form>
+    </div>
+  );
+}
 
 type ActionCardProps = { action: PlanningAction; date: string; sellerId: string; canAct: boolean; scheduling: boolean; onSchedule: () => void };
 
@@ -89,6 +130,7 @@ export default function WeeklyCommercialPlan({ sellerId, weekStart }: Props) {
   const { user } = useAuth();
   const [plan, setPlan] = useState<WeeklyPlan | null>(null);
   const [schedulingKey, setSchedulingKey] = useState<string | null>(null);
+  const [draft, setDraft] = useState<ScheduleDraft | null>(null);
   const [loading, setLoading] = useState(false);
   const [openDay, setOpenDay] = useState<string | null>(null);
   const params = useMemo(() => ({ ...(sellerId ? { sellerId } : {}), ...(weekStart ? { weekStart } : {}) }), [sellerId, weekStart]);
@@ -112,21 +154,27 @@ export default function WeeklyCommercialPlan({ sellerId, weekStart }: Props) {
 
   const canAct = Boolean(plan && canActOnPlan(user, plan.sellerId));
 
-  // O compromisso criado sai das sugestões e entra como "Já agendado" no mesmo dia; a API também não sugere de novo.
-  const schedule = async (date: string, action: PlanningAction, key: string) => {
+  const openSchedule = (date: string, action: PlanningAction, key: string) =>
+    setDraft({ key, fromDate: date, action, date, time: defaultScheduleTime(action), durationMinutes: action.estimatedDurationMinutes });
+
+  // O compromisso criado sai das sugestões e entra como "Já agendado" no dia escolhido; a API também não sugere de novo.
+  const schedule = async ({ key, fromDate, action, date, time, durationMinutes }: ScheduleDraft) => {
     if (!plan) return;
     setSchedulingKey(key);
     try {
-      const response = await api.post("/agenda/events", toAgendaEvent(action, date, plan.sellerId));
+      const response = await api.post("/agenda/events", toAgendaEvent(action, date, plan.sellerId, time, durationMinutes));
       const created = response.data as Appointment;
       setPlan((current) => current && {
         ...current,
-        days: current.days.map((day) => (day.date !== date ? day : {
+        days: current.days.map((day) => ({
           ...day,
-          existingAppointments: [...day.existingAppointments, { id: created.id, title: created.title || action.title, startsAt: created.startsAt, endsAt: created.endsAt, city: created.city ?? action.city ?? null, type: created.type }],
-          suggestedActions: day.suggestedActions.filter((item) => item !== action)
+          existingAppointments: day.date === date
+            ? [...day.existingAppointments, { id: created.id, title: created.title || action.title, startsAt: created.startsAt, endsAt: created.endsAt, city: created.city ?? action.city ?? null, type: created.type }]
+            : day.existingAppointments,
+          suggestedActions: day.date === fromDate ? day.suggestedActions.filter((item) => item !== action) : day.suggestedActions
         }))
       });
+      setDraft(null);
       toast.success("Compromisso agendado.");
     } catch (error) {
       toast.error(getApiErrorMessage(error, "Não foi possível agendar a sugestão."));
@@ -137,7 +185,7 @@ export default function WeeklyCommercialPlan({ sellerId, weekStart }: Props) {
 
   const renderActions = (day: PlanningDay) => day.suggestedActions.map((action, index) => {
     const key = `${day.date}-${action.clientId || action.opportunityId || index}`;
-    return <ActionCard key={key} action={action} date={day.date} sellerId={plan!.sellerId} canAct={canAct} scheduling={schedulingKey === key} onSchedule={() => void schedule(day.date, action, key)} />;
+    return <ActionCard key={key} action={action} date={day.date} sellerId={plan!.sellerId} canAct={canAct} scheduling={schedulingKey === key} onSchedule={() => openSchedule(day.date, action, key)} />;
   });
 
   if (loading) return <section className="rounded-xl border bg-white p-4 text-sm text-slate-500">Carregando planejamento comercial inteligente…</section>;
@@ -148,7 +196,7 @@ export default function WeeklyCommercialPlan({ sellerId, weekStart }: Props) {
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-brand-700">Planejamento Comercial Inteligente</p>
-          <h3 className="text-lg font-semibold text-slate-900">Semana de {plan.weekStart} a {plan.weekEnd}</h3>
+          <h3 className="text-lg font-semibold text-slate-900">Próximos dias úteis: {formatDay(plan.weekStart)} a {formatDay(plan.weekEnd)}</h3>
           <p className="mt-1 text-sm text-slate-600">{plan.summary}</p>
         </div>
         <span className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600">{plan.source === "ai" ? "Sugestão da IA" : "Sugestão do sistema"}</span>
@@ -166,7 +214,7 @@ export default function WeeklyCommercialPlan({ sellerId, weekStart }: Props) {
         {plan.days.map((day) => (
           <div key={day.date} className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-2">
             <h4 className="text-sm font-semibold text-slate-900">{day.label}</h4>
-            <p className="text-[11px] text-slate-500">{day.date}</p>
+            <p className="text-[11px] text-slate-500">{formatDay(day.date)}</p>
             {day.existingAppointments.map((appointment) => <div key={appointment.id} className="rounded-lg border border-sky-200 bg-sky-50 p-2 text-xs text-sky-900"><strong>Já agendado</strong><br />{formatHour(appointment.startsAt)} · {appointment.title}</div>)}
             {renderActions(day)}
           </div>
@@ -176,7 +224,7 @@ export default function WeeklyCommercialPlan({ sellerId, weekStart }: Props) {
       <div className="space-y-2 lg:hidden">
         {plan.days.map((day) => (
           <details key={day.date} open={openDay === day.date} onToggle={(event) => (event.currentTarget.open ? setOpenDay(day.date) : null)} className="rounded-xl border border-slate-200 bg-slate-50 p-2">
-            <summary className="cursor-pointer text-sm font-semibold text-slate-900">{day.label} · {day.suggestedActions.length} ações · {day.existingAppointments.length} agendado(s)</summary>
+            <summary className="cursor-pointer text-sm font-semibold text-slate-900">{day.label} {formatDay(day.date)} · {day.suggestedActions.length} ações · {day.existingAppointments.length} agendado(s)</summary>
             <div className="mt-2 space-y-2">
               {day.existingAppointments.map((appointment) => <div key={appointment.id} className="rounded-lg border border-sky-200 bg-sky-50 p-2 text-xs text-sky-900"><strong>Já agendado</strong><br />{formatHour(appointment.startsAt)} · {appointment.title}</div>)}
               {renderActions(day)}
@@ -184,6 +232,7 @@ export default function WeeklyCommercialPlan({ sellerId, weekStart }: Props) {
           </details>
         ))}
       </div>
+      {draft ? <ScheduleDialog draft={draft} saving={schedulingKey === draft.key} onChange={setDraft} onCancel={() => setDraft(null)} onConfirm={() => void schedule(draft)} /> : null}
     </section>
   );
 }
