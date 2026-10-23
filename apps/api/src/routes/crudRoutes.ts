@@ -43,7 +43,7 @@ import { calculatePipelineMetrics, getWeightedValue, isOpportunityOverdue } from
 import { loadEffectiveWonContributions, loadEffectiveWonTotals, withEffectiveWin } from "../services/effectiveWins.js";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { buildTimelineEventWhere } from "./timelineEventWhere.js";
-import { ActivityType, ClientType, ErpOrderSyncStatus, ErpSyncTrigger, OpportunityStage, Prisma, Role, type User } from "@prisma/client";
+import { ActivityType, ClientType, ErpOrderSyncStatus, ErpSyncTrigger, OpportunityStage, Prisma, Role, type AgendaEventType, type User } from "@prisma/client";
 import { z } from "zod";
 import { hashPassword } from "../utils/password.js";
 import { calculateOpportunityRisk } from "../services/opportunityInsight.js";
@@ -1053,21 +1053,26 @@ const mapAgendaStatusFromDb = (status: string): "planned" | "completed" | "cance
   return "planned";
 };
 
-const AGENDA_TIMELINE_LABEL: Record<"reuniao_online" | "reuniao_presencial" | "roteiro_visita" | "followup", string> = {
+const AGENDA_TIMELINE_LABEL: Record<AgendaEventType, string> = {
   reuniao_online: "Reunião online agendada",
   reuniao_presencial: "Reunião presencial agendada",
   roteiro_visita: "Roteiro de visita planejado",
-  followup: "Follow-up agendado"
+  followup: "Follow-up agendado",
+  ligacao: "Ligação agendada",
+  whatsapp: "WhatsApp agendado",
+  visita: "Visita agendada",
+  proposta: "Proposta agendada",
+  fechamento: "Fechamento agendado"
 };
 
-const buildAgendaCreatedDescription = (event: { type: "reuniao_online" | "reuniao_presencial" | "roteiro_visita" | "followup"; title: string }) => {
+const buildAgendaCreatedDescription = (event: { type: AgendaEventType; title: string }) => {
   const baseLabel = AGENDA_TIMELINE_LABEL[event.type] || "Compromisso agendado";
   return `${baseLabel}: ${event.title}`;
 };
 
 const buildAgendaStatusDescription = (
   status: "completed" | "cancelled",
-  event: { type: "reuniao_online" | "reuniao_presencial" | "roteiro_visita" | "followup"; title: string }
+  event: { type: AgendaEventType; title: string }
 ) => {
   const base = status === "completed" ? "Compromisso concluído" : "Compromisso cancelado";
   return `${base}: ${event.title} (${AGENDA_TIMELINE_LABEL[event.type]})`;

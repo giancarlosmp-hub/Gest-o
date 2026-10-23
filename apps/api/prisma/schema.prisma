@@ -52,6 +52,8 @@ enum ActivityType {
   visita_tecnica
   cliente_novo
   follow_up
+  reuniao_online
+  reuniao_presencial
 }
 
 enum EventType {
@@ -70,12 +72,18 @@ enum AgendaEventType {
   reuniao_presencial
   roteiro_visita
   followup
+  ligacao
+  whatsapp
+  visita
+  proposta
+  fechamento
 }
 
 enum AgendaEventStatus {
   agendado
   realizado
   vencido
+  nao_realizado
 }
 
 enum OpportunityItemDiscountType {
@@ -262,6 +270,7 @@ model AgendaEvent {
   endDateTime   DateTime
   status        AgendaEventStatus @default(agendado)
   notes         String?
+  notDoneReason String?
   city          String?
   clientId      String?
   client        Client?           @relation(fields: [clientId], references: [id])
@@ -399,6 +408,7 @@ model Activity {
   notes           String
   description     String?
   result          String?
+  noNextStepReason String?
   dueDate         DateTime
   date            DateTime?
   duration        Int?
