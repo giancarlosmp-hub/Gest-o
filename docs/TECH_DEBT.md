@@ -671,3 +671,24 @@ Fica em aberto:
   faturamento que o sync não grava hoje); decidir se passam a ser só do ERP.
 - `PUT /companies/:id` e `/clients/diagnostics/merge-duplicates` não gravam código novo (o primeiro
   descarta `code` pelo schema; o segundo só marca `__MERGED__` no duplicado arquivado).
+
+### TD-ERP-TABLE2-VARIATION-CATALOG — Tabela 2 sem preço desde 28/09/2026
+
+**Resolvido no código, aguardando deploy.** Desde o `1d7e0e29` (28/09), `resolveErpPriceVariationPercent`
+descartava qualquer regra com `PRAZO_MEDIO` preenchido, e todas as regras da Tabela 2 vêm com 999. As 177 linhas
+`calculated_from_variation` viraram `absent` e a reconciliação da Camada 2 não voltou a gravá-las. Agora
+(`erpPriceVariationPolicy.ts`): prazo médio vazio, 0 ou 999 ou mais = sem restrição, vale no catálogo; prazo menor só
+vale no pedido e fica fora. Regra com produto, filial, parceiro, cidade (`CIDADE`/`CODCIDADE`), UF, forma, condição,
+grupo fiscal, marca, categoria, credencial ou nível de agrupamento preenchidos continua fora. Vigência por
+`DTA_VIGENCIA_INI`/`DTA_VIGENCIA_FIN` (dia de Brasília, último dia incluído; data ilegível descarta a regra).
+`ACRESCIMO_PESO` e `OPERADOR` não são lidos. A base passa a ser a Tabela 1 sem filial e sem legacy com a precedência
+da busca (`resolveVariationBasePrice`); o zero explícito mais novo de `/prices` bloqueia. A linha derivada `absent`
+volta a `available` na próxima sincronização. O log da Camada 2 traz `derivedVariationPricesRestored` e as regras por
+situação (`variationRulesCatalog`, `…Restricted`, `…PaymentTerm`, `…OutOfValidity`, `…Invalid`).
+
+Pendente: o preço do pedido não usa a condição de pagamento (o item leva o preço do catálogo e o pedido só envia
+`CODCONDREC`), então regra com prazo médio menor que 999 não tem efeito no CRM. O significado de `OPERADOR` nas regras
+de variação não está no código; o percentual é aplicado como acréscimo (negativo reduz). Na busca da Tabela 1, um zero
+explícito de `/prices` sem tabela não esconde o produto quando há linha positiva do catálogo na Tabela 1 (a Tabela 2
+já bloqueia). Há linhas duplicadas por produto (legacy, prices e products sem tabela, e linhas de filial); a limpeza
+fica para um script próprio.
