@@ -14,7 +14,7 @@ import { normalizeCnpj, normalizeState, normalizeText } from "../utils/normalize
 import { incrementPartnerMatchCounter, resolvePartnerIdentityMatch } from "./partnerIdentityMatching.js";
 import { recordClientCodeChange } from "./clientCodeAuditService.js";
 import { formatOrderStatusSyncWarning } from "./erpOrderStatusSyncWarning.js";
-import { calculatePriceFromErpVariation, orderPriceAuthoritySteps, resolveErpPriceVariationPercent, shouldSweepAbsentPrices } from "./erpPriceVariationPolicy.js";
+import { calculatePriceFromErpVariation, orderPriceAuthoritySteps, resolveErpPriceVariationPercent, resolveVariationBasePrice, shouldSweepAbsentPrices, summarizeErpPriceVariationRules } from "./erpPriceVariationPolicy.js";
 import { sanitizeUltraFv3PayloadForLog } from "./ultraFv3PayloadSanitization.js";
 import { assertUsefulProductPriceSync, runProductAndPriceRefresh } from "./productPriceSyncOutcome.js";
 import { catalogTenantIdForMode, productCatalogTenantWhere, selectProductCandidateForTenant } from "./productCatalogTenancy.js";
@@ -3322,8 +3322,15 @@ export async function reconcileCalculatedVariationPrices(correlationId: string, 
     derivedVariationPricesCreated: 0,
     derivedVariationPricesUpdated: 0,
     derivedVariationPricesInvalidated: 0,
+    derivedVariationPricesRestored: 0,
     explicitPricesPreserved: 0,
     explicitZerosPreserved: 0,
+    // Regras de variação das tabelas processadas: aplicáveis ao catálogo e fora dele, por motivo.
+    variationRulesCatalog: 0,
+    variationRulesRestricted: 0,
+    variationRulesPaymentTerm: 0,
+    variationRulesOutOfValidity: 0,
+    variationRulesInvalid: 0,
   };
 
   const [tablesConfig, variationsConfig] = await Promise.all([
@@ -3358,35 +3365,20 @@ export async function reconcileCalculatedVariationPrices(correlationId: string, 
 
   for (const targetTableCode of activeTableCodes) {
     diagnostics.tablesProcessed += 1;
+    const rules = summarizeErpPriceVariationRules(priceVariationRows, targetTableCode);
+    diagnostics.variationRulesCatalog += rules.catalog;
+    diagnostics.variationRulesRestricted += rules.restricted;
+    diagnostics.variationRulesPaymentTerm += rules.payment_term;
+    diagnostics.variationRulesOutOfValidity += rules.out_of_validity;
+    diagnostics.variationRulesInvalid += rules.invalid;
     for (const product of products) {
       const existingDerivedRow = product.prices.find((p) =>
         p.erpPriceId === targetTableCode &&
         p.source === "calculated_from_variation"
       );
 
-      const now = Date.now();
-      const commercialVersionOrder = (left: typeof product.prices[number], right: typeof product.prices[number]) => {
-        const validDifference = (right.validFrom?.getTime() ?? 0) - (left.validFrom?.getTime() ?? 0);
-        if (validDifference) return validDifference;
-        return (right.sourceChangedAt?.getTime() ?? 0) - (left.sourceChangedAt?.getTime() ?? 0);
-      };
-      const explicitGlobalBaseRows = product.prices
-        .filter((p) => p.erpPriceId === "1" && !p.branchCode && (!p.validFrom || p.validFrom.getTime() <= now))
-        .sort(commercialVersionOrder);
-      const eligibleGlobalBaseRows = explicitGlobalBaseRows;
-      const newestAuthoritativeBase = eligibleGlobalBaseRows
-        .filter((p) =>
-          p.source === "prices" &&
-          p.availabilityState !== "absent"
-        )
-        .sort(commercialVersionOrder)[0];
-      const baseExplicitlyInvalid = newestAuthoritativeBase?.availabilityState === "explicit_zero"
-        || (Boolean(newestAuthoritativeBase) && Number(newestAuthoritativeBase.price) <= 0);
-      const baseTable1PriceRow = !baseExplicitlyInvalid && eligibleGlobalBaseRows.find((p) =>
-        p.availabilityState === "available" &&
-        Number(p.price) > 0
-      );
-      const basePrice = baseTable1PriceRow ? Number(baseTable1PriceRow.price) : 0;
+      // /prices chega sem código de tabela: a base é a da busca da Tabela 1 (sem filial, sem legacy).
+      const basePrice = resolveVariationBasePrice(product.prices);
       if (basePrice <= 0) {
         if (existingDerivedRow && existingDerivedRow.availabilityState === "available") {
           await prisma.productPrice.update({
@@ -3416,8 +3408,10 @@ export async function reconcileCalculatedVariationPrices(correlationId: string, 
         continue;
       }
 
+      // A própria linha derivada zerada não bloqueia: só o zero explícito de outra fonte para esta tabela.
       const explicitZeroRow = product.prices.find((p) =>
         p.erpPriceId === targetTableCode &&
+        p.source !== "calculated_from_variation" &&
         p.availabilityState === "explicit_zero"
       );
       if (explicitZeroRow) {
@@ -3450,11 +3444,13 @@ export async function reconcileCalculatedVariationPrices(correlationId: string, 
 
         if (calculatedPrice > 0) {
           if (existingDerivedRow) {
+            // Linha ausente ou zerada volta a valer quando há base e regra válidas.
             await prisma.productPrice.update({
               where: { id: existingDerivedRow.id },
               data: { price: calculatedPrice, availabilityState: "available" },
             });
             diagnostics.derivedVariationPricesUpdated += 1;
+            if (existingDerivedRow.availabilityState !== "available") diagnostics.derivedVariationPricesRestored += 1;
           } else {
             await prisma.productPrice.create({
               data: {
