@@ -33,7 +33,9 @@ import {
   COOLING_ACTIVE_MONTHS,
   isPortfolioStatus,
   isVisibleInRanking,
-  rankingSellerName
+  rankingSellerName,
+  computeDisciplineRates,
+  emptyDisciplineTotals
 } from "@salesforce-pro/shared";
 import { authorize } from "../middlewares/authorize.js";
 import { resolveOwnerId, sellerWhere } from "../utils/access.js";
@@ -41,6 +43,7 @@ import { clientReadableForDetailsWhere } from "../utils/clientHistoricalAccess.j
 import { normalizeCnpj, normalizeState, normalizeText } from "../utils/normalize.js";
 import { brazilDayRange, brazilTodayKey, calendarDayRange, monthDayBounds, shiftDayKey } from "../utils/dateRange.js";
 import { closedOpportunityPeriodWhere, opportunityPeriodWhere } from "../utils/periodFilters.js";
+import { loadAgendaDisciplineBySeller } from "../services/agendaDiscipline.js";
 import { calculatePipelineMetrics, getWeightedValue, isOpportunityOverdue } from "../utils/pipelineMetrics.js";
 import { loadEffectiveWonContributions, loadEffectiveWonTotals, withEffectiveWin } from "../services/effectiveWins.js";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
@@ -2875,7 +2878,7 @@ router.get("/reports/planned-vs-realized", async (req, res) => {
 
   const scopedSellerId = req.user?.role === "vendedor" ? req.user.id : sellerIdRaw;
 
-  const [sellers, plannedEvents, executedActivities, followUps] = await Promise.all([
+  const [sellers, disciplineBySeller, executedActivities, followUps] = await Promise.all([
     prisma.user.findMany({
       where: {
         role: "vendedor",
@@ -2884,16 +2887,7 @@ router.get("/reports/planned-vs-realized", async (req, res) => {
       },
       select: { id: true, name: true }
     }),
-    prisma.agendaEvent.findMany({
-      where: {
-        type: "roteiro_visita",
-        startDateTime: { gte: from, lte: to },
-        ...(scopedSellerId ? { sellerId: scopedSellerId } : {})
-      },
-      select: {
-        sellerId: true
-      }
-    }),
+    loadAgendaDisciplineBySeller({ gte: from, lte: to }, scopedSellerId),
     prisma.activity.findMany({
       where: {
         ...(scopedSellerId ? { ownerSellerId: scopedSellerId } : sellerWhere(req)),
@@ -2904,9 +2898,7 @@ router.get("/reports/planned-vs-realized", async (req, res) => {
       select: {
         ownerSellerId: true,
         opportunityId: true,
-        type: true,
-        dueDate: true,
-        createdAt: true
+        agendaEventId: true
       }
     }),
     prisma.activity.findMany({
@@ -2920,12 +2912,9 @@ router.get("/reports/planned-vs-realized", async (req, res) => {
     })
   ]);
 
-  const plannedBySeller = plannedEvents.reduce<Record<string, number>>((acc, item) => {
-    acc[item.sellerId] = (acc[item.sellerId] || 0) + 1;
-    return acc;
-  }, {});
-
-  const executedBySeller = executedActivities.reduce<Record<string, number>>((acc, item) => {
+  // Extra: atividade executada fora da Agenda (sem compromisso vinculado). Não entra na taxa.
+  const extraBySeller = executedActivities.reduce<Record<string, number>>((acc, item) => {
+    if (item.agendaEventId) return acc;
     acc[item.ownerSellerId] = (acc[item.ownerSellerId] || 0) + 1;
     return acc;
   }, {});
@@ -2942,61 +2931,41 @@ router.get("/reports/planned-vs-realized", async (req, res) => {
     return acc;
   }, {});
 
-  const sellerStatsMap = sellers.reduce<
-    Record<
-      string,
-      {
-        sellerId: string;
-        sellerName: string;
-        planned: number;
-        executed: number;
-        punctualCount: number;
-      }
-    >
-  >((acc, seller) => {
-    acc[seller.id] = {
-      sellerId: seller.id,
-      sellerName: seller.name,
-      planned: plannedBySeller[seller.id] || 0,
-      executed: executedBySeller[seller.id] || 0,
-      punctualCount: executedBySeller[seller.id] || 0
-    };
-    return acc;
-  }, {});
-
-  const sellerRows = Object.values(sellerStatsMap).map((stats) => {
-    const notExecuted = Math.max(stats.planned - stats.executed, 0);
-    const followUpsCount = followUpsBySeller[stats.sellerId] || 0;
-    const opportunitiesCount = opportunitiesBySeller[stats.sellerId]?.size || 0;
-    const executionRate = stats.planned ? (stats.executed / stats.planned) * 100 : 0;
-    const punctualRate = stats.executed ? (stats.punctualCount / stats.executed) * 100 : 0;
+  const teamTotals = emptyDisciplineTotals();
+  const sellerRows = sellers.map((seller) => {
+    const totals = disciplineBySeller[seller.id] || emptyDisciplineTotals();
+    for (const key of Object.keys(teamTotals) as (keyof typeof teamTotals)[]) teamTotals[key] += totals[key];
+    const rates = computeDisciplineRates(totals);
 
     return {
-      sellerId: stats.sellerId,
-      sellerName: stats.sellerName,
-      planned: stats.planned,
-      executed: stats.executed,
-      notExecuted,
-      executionRate,
-      punctualRate,
-      followUps: followUpsCount,
-      opportunities: opportunitiesCount
+      sellerId: seller.id,
+      sellerName: seller.name,
+      planned: totals.planned,
+      executed: totals.completed,
+      notDone: totals.notDone,
+      unresolved: totals.unresolved,
+      upcoming: totals.upcoming,
+      extra: extraBySeller[seller.id] || 0,
+      executionRate: rates.executionRate,
+      punctualRate: rates.punctualRate,
+      followUps: followUpsBySeller[seller.id] || 0,
+      opportunities: opportunitiesBySeller[seller.id]?.size || 0
     };
   });
 
-  const totalPlanned = sellerRows.reduce((sum, item) => sum + item.planned, 0);
-  const totalExecuted = sellerRows.reduce((sum, item) => sum + item.executed, 0);
-  const totalNotExecuted = sellerRows.reduce((sum, item) => sum + item.notExecuted, 0);
-  const totalPunctual = sellerRows.reduce((sum, item) => sum + (item.punctualRate / 100) * item.executed, 0);
+  const teamRates = computeDisciplineRates(teamTotals);
   const followUpGenerated = sellerRows.reduce((sum, item) => sum + item.followUps, 0);
   const opportunitiesGenerated = sellerRows.reduce((sum, item) => sum + item.opportunities, 0);
 
   return res.json({
-    totalPlanned,
-    totalExecuted,
-    totalNotExecuted,
-    executionRate: totalPlanned ? (totalExecuted / totalPlanned) * 100 : 0,
-    punctualRate: totalExecuted ? (totalPunctual / totalExecuted) * 100 : 0,
+    totalPlanned: teamTotals.planned,
+    totalExecuted: teamTotals.completed,
+    totalNotDone: teamTotals.notDone,
+    totalUnresolved: teamTotals.unresolved,
+    totalUpcoming: teamTotals.upcoming,
+    totalExtra: sellerRows.reduce((sum, item) => sum + item.extra, 0),
+    executionRate: teamRates.executionRate,
+    punctualRate: teamRates.punctualRate,
     followUpGenerated,
     opportunitiesGenerated,
     sellers: sellerRows.sort((a, b) => b.executionRate - a.executionRate)
@@ -3006,7 +2975,7 @@ router.get("/reports/planned-vs-realized", async (req, res) => {
 router.get("/reports/weekly-discipline", async (req, res) => {
   const range = getCurrentWeekRangeFromBrazilNow();
   const scopedSellerId = req.user?.role === "vendedor" ? req.user.id : undefined;
-  const [minimumRequired, sellers, visitsBySeller] = await Promise.all([
+  const [minimumRequired, sellers, disciplineBySeller, visitsBySeller] = await Promise.all([
     getWeeklyVisitGoal(),
     prisma.user.findMany({
       where: {
@@ -3017,6 +2986,7 @@ router.get("/reports/weekly-discipline", async (req, res) => {
       select: { id: true, name: true },
       orderBy: { name: "asc" }
     }),
+    loadAgendaDisciplineBySeller({ gte: range.start, lte: range.end }, scopedSellerId),
     prisma.activity.groupBy({
       by: ["ownerSellerId"],
       where: {
@@ -3036,14 +3006,21 @@ router.get("/reports/weekly-discipline", async (req, res) => {
 
   return res.json(
     sellers.map((seller) => {
-      const executed = executedMap[seller.id] || 0;
+      const totals = disciplineBySeller[seller.id] || emptyDisciplineTotals();
+      // O mínimo semanal continua contando as visitas feitas.
+      const visitsDone = executedMap[seller.id] || 0;
       return {
         sellerId: seller.id,
         sellerName: seller.name,
-        planned: executed,
-        executed,
+        planned: totals.planned,
+        executed: totals.completed,
+        notDone: totals.notDone,
+        unresolved: totals.unresolved,
+        upcoming: totals.upcoming,
+        executionRate: computeDisciplineRates(totals).executionRate,
+        visitsDone,
         minimumRequired,
-        belowMinimum: executed < minimumRequired
+        belowMinimum: visitsDone < minimumRequired
       };
     })
   );
@@ -3246,7 +3223,7 @@ router.get("/reports/discipline-ranking", async (req, res) => {
   const inactivityWindow = getLastBusinessDaysWindow(3);
   const weeklyVisitGoal = await getWeeklyVisitGoal();
 
-  const [sellers, plannedBySellerRows, executedActivities, recentExecutionRows] = await Promise.all([
+  const [sellers, disciplineBySeller, executedActivities, recentExecutionRows] = await Promise.all([
     prisma.user.findMany({
       where: {
         role: "vendedor",
@@ -3255,15 +3232,7 @@ router.get("/reports/discipline-ranking", async (req, res) => {
       },
       select: { id: true, name: true }
     }),
-    prisma.agendaEvent.groupBy({
-      by: ["sellerId"],
-      where: {
-        type: "roteiro_visita",
-        startDateTime: { gte: from, lte: to },
-        ...(scopedSellerId ? { sellerId: scopedSellerId } : {})
-      },
-      _count: { _all: true }
-    }),
+    loadAgendaDisciplineBySeller({ gte: from, lte: to }, scopedSellerId),
     prisma.activity.findMany({
       where: {
         ...(scopedSellerId ? { ownerSellerId: scopedSellerId } : sellerWhere(req)),
@@ -3274,6 +3243,7 @@ router.get("/reports/discipline-ranking", async (req, res) => {
       select: {
         ownerSellerId: true,
         opportunityId: true,
+        agendaEventId: true,
         type: true,
         date: true
       }
@@ -3289,11 +3259,6 @@ router.get("/reports/discipline-ranking", async (req, res) => {
       _count: { _all: true }
     })
   ]);
-
-  const plannedBySeller = plannedBySellerRows.reduce<Record<string, number>>((acc, item) => {
-    acc[item.sellerId] = item._count._all;
-    return acc;
-  }, {});
 
   const activeSellersInWindow = new Set(recentExecutionRows.filter((item) => item._count._all > 0).map((item) => item.ownerSellerId));
 
@@ -3314,9 +3279,8 @@ router.get("/reports/discipline-ranking", async (req, res) => {
       {
         sellerId: string;
         sellerName: string;
-        planned: number;
-        executed: number;
-        punctual: number;
+        activities: number;
+        extra: number;
         followUpAfterVisit: number;
       }
     >
@@ -3324,9 +3288,8 @@ router.get("/reports/discipline-ranking", async (req, res) => {
     acc[seller.id] = {
       sellerId: seller.id,
       sellerName: seller.name,
-      planned: plannedBySeller[seller.id] || 0,
-      executed: 0,
-      punctual: 0,
+      activities: 0,
+      extra: 0,
       followUpAfterVisit: 0
     };
     return acc;
@@ -3335,8 +3298,8 @@ router.get("/reports/discipline-ranking", async (req, res) => {
   for (const activity of executedActivities) {
     const sellerStats = statsBySeller[activity.ownerSellerId];
     if (!sellerStats) continue;
-    sellerStats.executed += 1;
-    sellerStats.punctual += 1;
+    sellerStats.activities += 1;
+    if (!activity.agendaEventId) sellerStats.extra += 1;
 
     const normalizedType = normalizeActivityType(activity.type);
     if ((normalizedType === "visita" || normalizedType === "visita_tecnica" || normalizedType === "reuniao") && activity.opportunityId) {
@@ -3352,21 +3315,26 @@ router.get("/reports/discipline-ranking", async (req, res) => {
 
   const ranking = Object.values(statsBySeller)
     .map((stats) => {
-      const executionRate = stats.planned ? (stats.executed / stats.planned) * 100 : stats.executed > 0 ? 100 : 0;
-      const punctualRate = stats.executed ? (stats.punctual / stats.executed) * 100 : 0;
-      const followUpRate = stats.executed ? (stats.followUpAfterVisit / stats.executed) * 100 : 0;
+      const totals = disciplineBySeller[stats.sellerId] || emptyDisciplineTotals();
+      const { executionRate, punctualRate } = computeDisciplineRates(totals);
+      // O follow-up depois da visita continua medido sobre as atividades executadas.
+      const followUpRate = stats.activities ? (stats.followUpAfterVisit / stats.activities) * 100 : 0;
       const baseDisciplineScore = executionRate * 0.5 + punctualRate * 0.3 + followUpRate * 0.2;
       const isUnderExecutionThreshold = executionRate < 60;
       const hasInactivityFlag = !activeSellersInWindow.has(stats.sellerId);
       const disciplineScoreBase = isUnderExecutionThreshold ? baseDisciplineScore * 0.9 : baseDisciplineScore;
-      const volumeFactor = stats.planned < weeklyVisitGoal ? stats.planned / weeklyVisitGoal : 1;
+      const volumeFactor = totals.planned < weeklyVisitGoal ? totals.planned / weeklyVisitGoal : 1;
       const disciplineScoreFinal = disciplineScoreBase * volumeFactor;
 
       return {
         sellerId: stats.sellerId,
         sellerName: stats.sellerName,
-        planned: stats.planned,
-        executed: stats.executed,
+        planned: totals.planned,
+        executed: totals.completed,
+        notDone: totals.notDone,
+        unresolved: totals.unresolved,
+        upcoming: totals.upcoming,
+        extra: stats.extra,
         executionRate,
         punctualRate,
         followUpRate,
@@ -3663,7 +3631,7 @@ router.get("/reports/commercial-score", async (req, res) => {
     perdido: 3
   };
 
-  const [sellers, plannedEvents, openOpportunities, createdOpportunitiesInMonth, stageChanges, monthSales, monthGoals] = await Promise.all([
+  const [sellers, agendaDisciplineBySeller, openOpportunities, createdOpportunitiesInMonth, stageChanges, monthSales, monthGoals] = await Promise.all([
     prisma.user.findMany({
       where: {
         role: "vendedor",
@@ -3671,15 +3639,7 @@ router.get("/reports/commercial-score", async (req, res) => {
       },
       select: { id: true, name: true }
     }),
-    prisma.agendaEvent.groupBy({
-      by: ["sellerId"],
-      where: {
-        type: "roteiro_visita",
-        startDateTime: monthInstantRange,
-        ...(scopedSellerId ? { sellerId: scopedSellerId } : {})
-      },
-      _count: { _all: true }
-    }),
+    loadAgendaDisciplineBySeller(monthInstantRange, scopedSellerId),
     prisma.opportunity.findMany({
       where: {
         stage: { notIn: ["ganho", "perdido"] },
@@ -3729,11 +3689,6 @@ router.get("/reports/commercial-score", async (req, res) => {
     })
   ]);
 
-  const plannedBySeller = plannedEvents.reduce<Record<string, number>>((acc, item) => {
-    acc[item.sellerId] = item._count._all;
-    return acc;
-  }, {});
-
   const executionActivities = await prisma.activity.findMany({
     where: {
       ...(scopedSellerId ? { ownerSellerId: scopedSellerId } : sellerWhere(req)),
@@ -3761,9 +3716,10 @@ router.get("/reports/commercial-score", async (req, res) => {
       return acc;
     }, {});
 
-  const disciplineBySeller = sellers.reduce<Record<string, { planned: number; executed: number; punctual: number; followUpAfterVisit: number }>>(
+  // Atividades executadas: base do follow-up depois da visita. Planejado × concluído vem da Agenda.
+  const disciplineBySeller = sellers.reduce<Record<string, { activities: number; followUpAfterVisit: number }>>(
     (acc, seller) => {
-      acc[seller.id] = { planned: plannedBySeller[seller.id] || 0, executed: 0, punctual: 0, followUpAfterVisit: 0 };
+      acc[seller.id] = { activities: 0, followUpAfterVisit: 0 };
       return acc;
     },
     {}
@@ -3771,12 +3727,11 @@ router.get("/reports/commercial-score", async (req, res) => {
 
   for (const activity of executionActivities) {
     if (!disciplineBySeller[activity.ownerSellerId]) {
-      disciplineBySeller[activity.ownerSellerId] = { planned: 0, executed: 0, punctual: 0, followUpAfterVisit: 0 };
+      disciplineBySeller[activity.ownerSellerId] = { activities: 0, followUpAfterVisit: 0 };
     }
 
     const sellerStats = disciplineBySeller[activity.ownerSellerId];
-    sellerStats.executed += 1;
-    sellerStats.punctual += 1;
+    sellerStats.activities += 1;
 
     const normalizedType = normalizeActivityType(activity.type);
     if ((normalizedType === "visita" || normalizedType === "reuniao") && activity.opportunityId) {
@@ -3844,12 +3799,12 @@ router.get("/reports/commercial-score", async (req, res) => {
 
   const baseRows = sellers
     .map((seller) => {
-      const discipline = disciplineBySeller[seller.id] || { planned: 0, executed: 0, punctual: 0, followUpAfterVisit: 0 };
-      const executionRate = discipline.planned ? (discipline.executed / discipline.planned) * 100 : 0;
-      const punctualRate = discipline.executed ? (discipline.punctual / discipline.executed) * 100 : 0;
-      const followUpRate = discipline.executed ? (discipline.followUpAfterVisit / discipline.executed) * 100 : 0;
+      const discipline = disciplineBySeller[seller.id] || { activities: 0, followUpAfterVisit: 0 };
+      const agenda = agendaDisciplineBySeller[seller.id] || emptyDisciplineTotals();
+      const { executionRate, punctualRate } = computeDisciplineRates(agenda);
+      const followUpRate = discipline.activities ? (discipline.followUpAfterVisit / discipline.activities) * 100 : 0;
       const disciplineScoreBase = executionRate * 0.5 + punctualRate * 0.3 + followUpRate * 0.2;
-      const volumeFactor = discipline.planned >= 25 ? 1 : 0.7 + (discipline.planned / 25) * 0.3;
+      const volumeFactor = agenda.planned >= 25 ? 1 : 0.7 + (agenda.planned / 25) * 0.3;
       const disciplineScore = disciplineScoreBase * volumeFactor;
 
       const openOpp = openOppCountBySeller[seller.id] || 0;
@@ -3867,7 +3822,7 @@ router.get("/reports/commercial-score", async (req, res) => {
       const resultScore = Math.min(Math.max(goalAchievementPercent, 0), 110);
 
       const finalScore = resultScore * 0.5 + disciplineScore * 0.3 + pipelineScore * 0.2;
-      const punctualityPerfect = discipline.executed > 0 && punctualRate === 100;
+      const punctualityPerfect = agenda.punctualMeasured > 0 && punctualRate === 100;
 
       return {
         sellerId: seller.id,
