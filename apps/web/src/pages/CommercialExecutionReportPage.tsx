@@ -12,7 +12,10 @@ type ReportSeller = {
   sellerName: string;
   planned: number;
   executed: number;
-  notExecuted: number;
+  notDone: number;
+  unresolved: number;
+  upcoming: number;
+  extra: number;
   executionRate: number;
   punctualRate: number;
   followUps: number;
@@ -22,7 +25,10 @@ type ReportSeller = {
 type PlannedVsRealizedResponse = {
   totalPlanned: number;
   totalExecuted: number;
-  totalNotExecuted: number;
+  totalNotDone: number;
+  totalUnresolved: number;
+  totalUpcoming: number;
+  totalExtra: number;
   executionRate: number;
   punctualRate: number;
   followUpGenerated: number;
@@ -124,7 +130,7 @@ export default function CommercialExecutionReportPage() {
       labels: sellers.map((item) => item.sellerName),
       datasets: [
         { label: "Planejado", data: sellers.map((item) => item.planned), backgroundColor: "#94A3B8", borderRadius: 8 },
-        { label: "Realizado", data: sellers.map((item) => item.executed), backgroundColor: "#0B3C1D", borderRadius: 8 }
+        { label: "Concluído", data: sellers.map((item) => item.executed), backgroundColor: "#0B3C1D", borderRadius: 8 }
       ]
     };
   }, [report]);
@@ -183,10 +189,20 @@ export default function CommercialExecutionReportPage() {
 
       <div className="grid gap-4 md:grid-cols-4">
         <div className={cardClass}><div className="text-sm text-slate-500">Planejadas</div><div className="mt-2 text-2xl font-semibold">{formatNumberBR(report.totalPlanned)}</div></div>
-        <div className={cardClass}><div className="text-sm text-slate-500">Realizadas</div><div className="mt-2 text-2xl font-semibold">{formatNumberBR(report.totalExecuted)}</div></div>
+        <div className={cardClass}><div className="text-sm text-slate-500">Concluídas</div><div className="mt-2 text-2xl font-semibold">{formatNumberBR(report.totalExecuted)}</div></div>
         <div className={cardClass}><div className="text-sm text-slate-500">% Execução</div><div className={`mt-2 text-2xl font-semibold ${getPerformanceClass(report.executionRate)}`}>{formatPercentBR(report.executionRate)}</div></div>
         <div className={cardClass}><div className="text-sm text-slate-500">% Pontualidade</div><div className={`mt-2 text-2xl font-semibold ${getPerformanceClass(report.punctualRate)}`}>{formatPercentBR(report.punctualRate)}</div></div>
       </div>
+
+      <div className="grid gap-4 md:grid-cols-4">
+        <div className={cardClass}><div className="text-sm text-slate-500">Não realizadas (com motivo)</div><div className="mt-2 text-2xl font-semibold">{formatNumberBR(report.totalNotDone)}</div></div>
+        <div className={cardClass}><div className="text-sm text-slate-500">Sem conclusão</div><div className="mt-2 text-2xl font-semibold">{formatNumberBR(report.totalUnresolved)}</div></div>
+        <div className={cardClass}><div className="text-sm text-slate-500">A fazer</div><div className="mt-2 text-2xl font-semibold">{formatNumberBR(report.totalUpcoming)}</div></div>
+        <div className={cardClass}><div className="text-sm text-slate-500">Feitas fora da Agenda</div><div className="mt-2 text-2xl font-semibold">{formatNumberBR(report.totalExtra)}</div></div>
+      </div>
+      <p className="text-xs text-slate-500">
+        Planejado: compromissos da Agenda no período; cada parada de roteiro conta 1. "Não realizado" com motivo fica fora da % de execução até 20% dos itens já vencidos; o excesso conta contra. "A fazer" e "Feitas fora da Agenda" não entram na %.
+      </p>
 
       <section className={cardClass}>
         <h3 className="text-base font-semibold text-slate-900">Planejado vs Realizado por vendedor</h3>
@@ -201,13 +217,15 @@ export default function CommercialExecutionReportPage() {
       <section className={cardClass}>
         <h3 className="mb-4 text-base font-semibold text-slate-900">Detalhamento por vendedor</h3>
         <div className="hidden overflow-x-auto md:block">
-          <table className="min-w-[600px] w-full text-sm">
+          <table className="min-w-[760px] w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200 text-left text-slate-500">
                 <th className="py-2 pr-3 font-medium">Vendedor</th>
                 <th className="py-2 pr-3 font-medium">Planejado</th>
-                <th className="py-2 pr-3 font-medium">Realizado</th>
+                <th className="py-2 pr-3 font-medium">Concluído</th>
                 <th className="py-2 pr-3 font-medium">Não realizado</th>
+                <th className="py-2 pr-3 font-medium">Sem conclusão</th>
+                <th className="py-2 pr-3 font-medium">Fora da Agenda</th>
                 <th className="py-2 pr-3 font-medium">% Execução</th>
                 <th className="py-2 pr-3 font-medium">% Pontualidade</th>
                 <th className="py-2 pr-3 font-medium">Follow-ups</th>
@@ -220,7 +238,9 @@ export default function CommercialExecutionReportPage() {
                   <td className="py-2 pr-3 text-slate-700">{seller.sellerName}</td>
                   <td className="py-2 pr-3 text-slate-700">{formatNumberBR(seller.planned)}</td>
                   <td className="py-2 pr-3 text-slate-700">{formatNumberBR(seller.executed)}</td>
-                  <td className="py-2 pr-3 text-slate-700">{formatNumberBR(seller.notExecuted)}</td>
+                  <td className="py-2 pr-3 text-slate-700">{formatNumberBR(seller.notDone)}</td>
+                  <td className="py-2 pr-3 text-slate-700">{formatNumberBR(seller.unresolved)}</td>
+                  <td className="py-2 pr-3 text-slate-700">{formatNumberBR(seller.extra)}</td>
                   <td className={`py-2 pr-3 font-semibold ${getPerformanceClass(seller.executionRate)}`}>{formatPercentBR(seller.executionRate)}</td>
                   <td className={`py-2 pr-3 font-semibold ${getPerformanceClass(seller.punctualRate)}`}>{formatPercentBR(seller.punctualRate)}</td>
                   <td className="py-2 pr-3 text-slate-700">{formatNumberBR(seller.followUps)}</td>
@@ -236,8 +256,10 @@ export default function CommercialExecutionReportPage() {
               <h4 className="font-semibold text-slate-900">{seller.sellerName}</h4>
               <dl className="mt-2 space-y-1">
                 <div className="flex justify-between gap-3"><dt className="text-slate-500">Planejado</dt><dd className="text-slate-700">{formatNumberBR(seller.planned)}</dd></div>
-                <div className="flex justify-between gap-3"><dt className="text-slate-500">Realizado</dt><dd className="text-slate-700">{formatNumberBR(seller.executed)}</dd></div>
-                <div className="flex justify-between gap-3"><dt className="text-slate-500">Não realizado</dt><dd className="text-slate-700">{formatNumberBR(seller.notExecuted)}</dd></div>
+                <div className="flex justify-between gap-3"><dt className="text-slate-500">Concluído</dt><dd className="text-slate-700">{formatNumberBR(seller.executed)}</dd></div>
+                <div className="flex justify-between gap-3"><dt className="text-slate-500">Não realizado</dt><dd className="text-slate-700">{formatNumberBR(seller.notDone)}</dd></div>
+                <div className="flex justify-between gap-3"><dt className="text-slate-500">Sem conclusão</dt><dd className="text-slate-700">{formatNumberBR(seller.unresolved)}</dd></div>
+                <div className="flex justify-between gap-3"><dt className="text-slate-500">Fora da Agenda</dt><dd className="text-slate-700">{formatNumberBR(seller.extra)}</dd></div>
                 <div className="flex justify-between gap-3"><dt className="text-slate-500">% Execução</dt><dd className={`font-semibold ${getPerformanceClass(seller.executionRate)}`}>{formatPercentBR(seller.executionRate)}</dd></div>
                 <div className="flex justify-between gap-3"><dt className="text-slate-500">% Pontualidade</dt><dd className={`font-semibold ${getPerformanceClass(seller.punctualRate)}`}>{formatPercentBR(seller.punctualRate)}</dd></div>
                 <div className="flex justify-between gap-3"><dt className="text-slate-500">Follow-ups</dt><dd className="text-slate-700">{formatNumberBR(seller.followUps)}</dd></div>
