@@ -170,6 +170,8 @@ export default function ActivitiesPage() {
   // Visita em andamento: só a sessão do formulário que criou ou restaurou o rascunho grava nele, para uma Nova
   // atividade aberta com outro rascunho ativo não sobrescrevê-lo.
   const [canWriteVisitDraft, setCanWriteVisitDraft] = useState(false);
+  // Cliente e notas que vieram preenchidos (Concluir da Agenda): sozinhos não criam o rascunho.
+  const [visitDraftPrefill, setVisitDraftPrefill] = useState<{ clientId?: string; notes?: string }>({});
   const [hasVisitDraft, setHasVisitDraft] = useState(false);
   const [capturingLocation, setCapturingLocation] = useState(false);
   const [pendingEvents, setPendingEvents] = useState<PendingAgendaEvent[]>([]);
@@ -332,6 +334,7 @@ export default function ActivitiesPage() {
       result: draft.result
     });
     setVisitCheckIn(draft.checkIn);
+    setVisitDraftPrefill({});
     setOpportunitySearch("");
     setCanWriteVisitDraft(true);
     setIsModalOpen(true);
@@ -376,8 +379,8 @@ export default function ActivitiesPage() {
       result: form.result,
       checkIn: visitCheckIn
     };
-    if (hasVisitDraftContent(draft)) saveVisitDraft(user?.id, draft);
-  }, [isModalOpen, canWriteVisitDraft, form, visitCheckIn, user?.id]);
+    if (hasVisitDraftContent(draft, visitDraftPrefill)) saveVisitDraft(user?.id, draft);
+  }, [isModalOpen, canWriteVisitDraft, form, visitCheckIn, visitDraftPrefill, user?.id]);
 
   useEffect(() => {
     const openFromAgenda = searchParams.get("open") === "create";
@@ -405,6 +408,7 @@ export default function ActivitiesPage() {
     const city = searchParams.get("city") || "";
     // Data e hora preenchidas (Agenda, Planejamento, barra rápida) em Brasília, nunca depois de agora.
     const prefilled = activityDateTimeDefaults(date);
+    setVisitDraftPrefill({ clientId, notes: notes || title });
 
     setForm((current) => ({
       ...current,
@@ -447,6 +451,7 @@ export default function ActivitiesPage() {
     setForm({ ...initialForm, dueDate: now.day, time: now.time, ownerSellerId: isSeller && user?.id ? user.id : "" });
     setOpportunitySearch("");
     setVisitCheckIn(null);
+    setVisitDraftPrefill({});
     setCanWriteVisitDraft(!loadVisitDraft(user?.id));
     setIsModalOpen(true);
   };

@@ -1168,8 +1168,13 @@ const agendaStopResultSchema = z.object({
   status: z.enum(["realizada", "nao_realizada"]),
   reason: z.enum(["cliente_ausente", "chuva", "estrada", "reagendar", "outro"]).optional(),
   summary: z.string().max(240).optional(),
+  // Legado: a tela "Executar roteiro" não envia mais; registros antigos continuam lidos.
   nextStep: z.enum(["criar_followup", "criar_oportunidade", "reagendar"]).optional(),
-  nextStepDate: z.string().optional()
+  nextStepDate: z.string().optional(),
+  // Mesma regra das atividades: oportunidade aberta do cliente pede o próximo passo ou o motivo de não haver.
+  opportunityId: z.string().optional(),
+  nextStepEvent: activitySchema.shape.nextStep,
+  noNextStepReason: activitySchema.shape.noNextStepReason
 });
 
 const parseClientSort = (sortValue?: string): Prisma.ClientOrderByWithRelationInput => {
@@ -8952,6 +8957,16 @@ const AGENDA_EVENT_LIST_INCLUDE = {
   activities: { select: { id: true }, orderBy: { createdAt: "desc" }, take: 1 }
 } satisfies Prisma.AgendaEventInclude;
 
+// Um compromisso com as paradas, para a tela "Executar roteiro". Vendedor só os próprios.
+router.get("/agenda/events/:id", async (req, res) => {
+  const event = await prisma.agendaEvent.findUnique({ where: { id: req.params.id }, include: AGENDA_EVENT_LIST_INCLUDE });
+  if (!event) return res.status(404).json({ message: "Evento não encontrado." });
+  if (req.user!.role === "vendedor" && event.sellerId !== req.user!.id) {
+    return res.status(403).json({ message: "Acesso negado." });
+  }
+  return res.json(mapAgendaEvent(event));
+});
+
 // Pendências: compromissos passados ainda agendados dos últimos 30 dias (Brasília), no escopo do usuário.
 // Os mais antigos aparecem só como contador, para gerente e diretor.
 router.get("/agenda/pending", async (req, res) => {
@@ -9183,6 +9198,14 @@ router.patch("/agenda/events/:id/stops/reorder", validateBody(agendaStopReorderS
   );
 });
 
+// Hora do check-in/check-out: a do aparelho (enviada depois, sem internet na hora) ou a do servidor; nunca no futuro.
+const agendaStopGeoTime = (timestamp?: string) => {
+  const now = new Date();
+  if (!timestamp) return now;
+  const deviceTime = new Date(timestamp);
+  return deviceTime.getTime() > now.getTime() ? now : deviceTime;
+};
+
 router.patch(["/agenda-events/:id/check-in", "/agenda/events/:id/check-in"], validateBody(agendaStopGeoSchema), async (req, res) => {
   const stop = await prisma.agendaStop.findUnique({ where: { id: req.params.id }, include: { agendaEvent: { select: { sellerId: true } } } });
   if (!stop) return res.status(404).json({ message: "Parada não encontrada." });
@@ -9190,11 +9213,11 @@ router.patch(["/agenda-events/:id/check-in", "/agenda/events/:id/check-in"], val
     return res.status(403).json({ message: "Acesso negado." });
   }
 
-  const checkInAt = req.body.timestamp ? new Date(req.body.timestamp) : new Date();
-  const updated = await prisma.agendaStop.update({
+  // O primeiro check-in vale: reenvios (fila offline do aparelho) não mudam a hora gravada. Sem GPS, lat/lng ficam nulos.
+  const updated = stop.checkInAt ? stop : await prisma.agendaStop.update({
     where: { id: req.params.id },
     data: {
-      checkInAt,
+      checkInAt: agendaStopGeoTime(req.body.timestamp),
       checkInLat: req.body.lat ?? null,
       checkInLng: req.body.lng ?? null,
       checkInAccuracy: req.body.accuracy ?? null
@@ -9215,12 +9238,12 @@ router.patch(["/agenda-events/:id/check-out", "/agenda/events/:id/check-out"], v
   if (req.user!.role === "vendedor" && stop.agendaEvent.sellerId !== req.user!.id) {
     return res.status(403).json({ message: "Acesso negado." });
   }
+  if (!stop.checkInAt) return res.status(400).json({ message: "Faça o check-in na parada antes do check-out." });
 
-  const checkOutAt = req.body.timestamp ? new Date(req.body.timestamp) : new Date();
-  const updated = await prisma.agendaStop.update({
+  const updated = stop.checkOutAt ? stop : await prisma.agendaStop.update({
     where: { id: req.params.id },
     data: {
-      checkOutAt,
+      checkOutAt: agendaStopGeoTime(req.body.timestamp),
       checkOutLat: req.body.lat ?? null,
       checkOutLng: req.body.lng ?? null,
       checkOutAccuracy: req.body.accuracy ?? null
@@ -9256,6 +9279,30 @@ router.patch(["/agenda-events/:id/result", "/agenda/events/:id/result"], validat
     return res.status(400).json({ message: "ownerSellerId é obrigatório para registrar atividade automática da parada." });
   }
 
+  // Realizada: exige o check-in antes e o resumo; a oportunidade escolhida segue a regra das atividades.
+  // Não realizada (cliente ausente, chuva, estrada) é aceita sem check-in.
+  const isDone = req.body.status === "realizada";
+  if (isDone && !stop.checkInAt) {
+    return res.status(400).json({ message: "Faça o check-in na parada antes de registrar a visita como realizada." });
+  }
+  const stopOpportunity = isDone && req.body.opportunityId
+    ? await prisma.opportunity.findFirst({
+      where: { id: req.body.opportunityId, clientId: stop.clientId!, ownerSellerId: ownerSellerIdForAutoActivity },
+      select: { id: true, title: true, stage: true }
+    })
+    : null;
+  if (isDone && req.body.opportunityId && !stopOpportunity) {
+    return res.status(404).json({ message: "Oportunidade não encontrada para o cliente da parada." });
+  }
+  if (isDone) {
+    const validationError = validateExecutedActivity(
+      { description: req.body.summary, nextStep: req.body.nextStepEvent, noNextStepReason: req.body.noNextStepReason },
+      stopOpportunity
+    );
+    if (validationError) return res.status(400).json({ message: validationError });
+  }
+
+  let nextStepAgendaEventId: string | null = null;
   const updated = await prisma.$transaction(async (tx) => {
     const completionAt = req.body.status === "realizada" ? (stop.checkOutAt ?? new Date()) : null;
     const updatedStop = await tx.agendaStop.update({
@@ -9293,7 +9340,9 @@ router.patch(["/agenda-events/:id/result", "/agenda/events/:id/result"], validat
         date: executionDate,
         agendaEventId: updatedStop.agendaEventId,
         ownerSellerId,
-        clientId
+        clientId,
+        opportunityId: stopOpportunity?.id ?? null,
+        noNextStepReason: req.body.nextStepEvent ? null : req.body.noNextStepReason?.trim() || null
       };
 
       const existingAutoActivity = await tx.activity.findFirst({
@@ -9313,6 +9362,16 @@ router.patch(["/agenda-events/:id/result", "/agenda/events/:id/result"], validat
         });
       } else {
         await tx.activity.create({ data: activityData });
+      }
+
+      if (req.body.nextStepEvent) {
+        const nextStepEvent = await createNextStepAgendaEvent(tx, req.body.nextStepEvent, {
+          sellerId: ownerSellerId,
+          clientId,
+          opportunityId: stopOpportunity?.id ?? null,
+          opportunityTitle: stopOpportunity?.title
+        });
+        nextStepAgendaEventId = nextStepEvent.id;
       }
     }
 
@@ -9346,7 +9405,9 @@ router.patch(["/agenda-events/:id/result", "/agenda/events/:id/result"], validat
     resultReason: updated.resultReason,
     resultSummary: updated.resultSummary,
     nextStep: updated.nextStep,
-    nextStepDate: updated.nextStepDate ? updated.nextStepDate.toISOString() : null
+    nextStepDate: updated.nextStepDate ? updated.nextStepDate.toISOString() : null,
+    checkOutAt: updated.checkOutAt ? updated.checkOutAt.toISOString() : null,
+    nextStepAgendaEventId
   });
 });
 

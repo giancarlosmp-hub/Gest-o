@@ -21,6 +21,7 @@
     "test:mobile-visit-action": "npx tsx tests/mobileVisitAction.test.ts",
     "test:visit-draft": "npx tsx tests/visitDraft.test.ts",
     "test:agenda-activity": "npx tsx tests/agendaActivity.test.ts",
+    "test:route-execution": "npx tsx tests/routeExecution.test.ts",
     "test:erp-payment-method-eligibility": "npx tsx tests/erpPaymentMethodEligibility.test.ts",
     "test:whatsapp-link": "npx tsx tests/whatsappLink.test.ts",
     "test:desktop-layout": "node ./scripts/verify-desktop-layout.mjs"

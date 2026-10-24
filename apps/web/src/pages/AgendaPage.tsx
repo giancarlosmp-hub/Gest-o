@@ -558,10 +558,12 @@ export default function AgendaPage() {
   }, [searchParams]);
 
   useEffect(() => {
+    // Links antigos do "Iniciar roteiro" (?execute=1) abrem a tela "Executar roteiro".
     if (searchParams.get("execute") === "1") {
-      setExecutionEventId(searchParams.get("eventId") || "AUTO");
+      const eventId = searchParams.get("eventId");
+      navigate(eventId ? `/agenda/roteiro/${eventId}` : "/agenda/roteiro", { replace: true });
     }
-  }, [searchParams]);
+  }, [searchParams, navigate]);
 
   useEffect(() => {
     let active = true;
@@ -1522,7 +1524,7 @@ export default function AgendaPage() {
                 {selectedEventActions?.notDone ? <button type="button" className="rounded-lg border border-rose-300 px-3 py-2 text-xs font-semibold text-rose-700" onClick={() => setNotDoneTarget(selectedEvent)}>Não realizado</button> : null}
                 {selectedEventActions?.reopen ? <button type="button" className="rounded-lg border border-sky-300 px-3 py-2 text-xs font-semibold text-sky-700" onClick={() => void onReopen(selectedEvent)}>Reabrir</button> : null}
                 {selectedEventActions?.remove ? <button type="button" className="rounded-lg border border-rose-300 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700" onClick={() => void onDeleteAgendaEvent(selectedEvent)}>Excluir</button> : null}
-                {selectedEvent.type === "roteiro_visita" ? <button type="button" className="rounded-lg border border-emerald-300 px-3 py-2 text-xs font-semibold text-emerald-700" onClick={() => setExecutionEventId(selectedEvent.id)}>Iniciar rota</button> : null}
+                {selectedEvent.type === "roteiro_visita" ? <Link to={`/agenda/roteiro/${selectedEvent.id}`} className="rounded-lg border border-emerald-300 px-3 py-2 text-center text-xs font-semibold text-emerald-700">Iniciar rota</Link> : null}
                 {selectedEvent.clientId ? <Link to={`/clientes/${selectedEvent.clientId}`} className="rounded-lg border border-brand-300 px-3 py-2 text-center text-xs font-semibold text-brand-700">Cliente 360</Link> : null}
               </div>
             </section>
@@ -1544,7 +1546,7 @@ export default function AgendaPage() {
                 )) : <p className="text-xs text-slate-500">Sem paradas cadastradas.</p>}
 
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-                  <button type="button" disabled className="rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-500">Iniciar rota</button>
+                  <Link to={`/agenda/roteiro/${selectedEvent.id}`} className="rounded-lg border border-emerald-300 bg-white px-3 py-2 text-center text-xs font-semibold text-emerald-700">Iniciar rota</Link>
                   <button type="button" disabled className="rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-500">Registrar visita</button>
                   <button type="button" disabled className="rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-500">Abrir cliente 360</button>
                 </div>

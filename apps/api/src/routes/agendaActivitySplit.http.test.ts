@@ -37,6 +37,7 @@ const clients: Row[] = [
 const opportunities: Row[] = [
   { id: "opp-open", title: "Oportunidade ficticia aberta", clientId: "cli-a", ownerSellerId: "seller-a", stage: "negociacao" },
   { id: "opp-won", title: "Oportunidade ficticia ganha", clientId: "cli-a", ownerSellerId: "seller-a", stage: "ganho" },
+  { id: "opp-other", title: "Oportunidade ficticia de outro cliente", clientId: "cli-b", ownerSellerId: "seller-b", stage: "negociacao" },
 ];
 const legacyActivity = (id: string, extra: Row): Row => ({
   id, notes: "Nota ficticia", description: null, result: null, noNextStepReason: null, date: null, duration: null, city: null, crop: null,
@@ -62,6 +63,7 @@ const agendaEvents: Row[] = [
   event("evt-no-activity", { type: "whatsapp", startDateTime: daysAgo(2), endDateTime: daysAgo(2) }),
   event("evt-reopen", { type: "visita", status: "realizado" }),
   event("evt-route", { type: "roteiro_visita", title: "Roteiro ficticio" }),
+  event("evt-route-b", { type: "roteiro_visita", title: "Roteiro ficticio B", sellerId: "seller-b", clientId: "cli-b", startDateTime: at("2026-10-26T12:00:00.000Z"), endDateTime: at("2026-10-26T14:00:00.000Z") }),
   // Pendências: dentro dos 30 dias, no limite, fora da janela, já resolvidos, futuros e de outro vendedor.
   event("evt-pending-5", { startDateTime: daysAgo(5), endDateTime: daysAgo(5) }),
   event("evt-pending-edge", { startDateTime: at("2026-09-23T03:30:00.000Z"), endDateTime: at("2026-09-23T04:00:00.000Z") }),
@@ -78,6 +80,8 @@ activities.push(legacyActivity("act-reopen", { type: "visita", done: true, dueDa
 const agendaStops: Row[] = [
   { id: "stop-1", agendaEventId: "evt-route", order: 1, clientId: "cli-a", city: null, address: null, plannedTime: null, notes: null, checkInAt: null, checkOutAt: null, resultStatus: null },
   { id: "stop-2", agendaEventId: "evt-route", order: 2, clientId: "cli-a", city: null, address: null, plannedTime: null, notes: null, checkInAt: null, checkOutAt: null, resultStatus: null },
+  { id: "stop-3", agendaEventId: "evt-route", order: 3, clientId: "cli-a", city: null, address: null, plannedTime: null, notes: null, checkInAt: null, checkOutAt: null, resultStatus: null },
+  { id: "stop-b", agendaEventId: "evt-route-b", order: 1, clientId: "cli-b", city: null, address: null, plannedTime: null, notes: null, checkInAt: null, checkOutAt: null, resultStatus: null },
 ];
 const timelineEvents: Row[] = [];
 
@@ -309,15 +313,79 @@ try {
   assert.equal((await call("PATCH", "/agenda/evt-reopen", "seller-a", { status: "completed" })).status, 200, "com atividade vinculada pode voltar a realizado");
   results.push("reopen_manager_only=PASS");
 
-  // 9. Roteiro: cada parada realizada cria a visita; com todas as paradas resolvidas, o roteiro fica realizado.
-  const stop1 = await call("PATCH", "/agenda-events/stop-1/result", "seller-a", { status: "realizada", summary: "Visita ficticia feita" });
+  // 9. Roteiro: check-in grava hora e GPS; realizada exige check-in e resumo; não realizada exige motivo e dispensa
+  // check-in; oportunidade aberta pede o próximo passo; com todas as paradas resolvidas, o roteiro fica realizado.
+  const routeDetail = await call("GET", "/agenda/events/evt-route", "seller-a");
+  assert.equal(routeDetail.status, 200);
+  assert.deepEqual(routeDetail.json.stops.map((stop: Row) => stop.id), ["stop-1", "stop-2", "stop-3"]);
+  assert.equal((await call("GET", "/agenda/events/evt-route-b", "seller-a")).status, 403, "vendedor não abre roteiro de outro");
+  assert.equal((await call("GET", "/agenda/events/evt-route-b", "manager-a")).status, 200);
+  results.push("route_detail_scoped=PASS");
+
+  const doneWithoutCheckIn = await call("PATCH", "/agenda-events/stop-1/result", "seller-a", { status: "realizada", summary: "Visita ficticia feita" });
+  assert.equal(doneWithoutCheckIn.status, 400);
+  assert.equal(doneWithoutCheckIn.json.message, "Faça o check-in na parada antes de registrar a visita como realizada.");
+  assert.equal((await call("PATCH", "/agenda-events/stop-1/check-out", "seller-a", {})).status, 400, "check-out exige check-in");
+
+  const checkIn = await call("PATCH", "/agenda-events/stop-1/check-in", "seller-a", { lat: -10.5, lng: -50.25, accuracy: 12, timestamp: "2026-10-23T13:05:00.000Z" });
+  assert.equal(checkIn.status, 200);
+  assert.deepEqual(
+    [checkIn.json.checkInAt, checkIn.json.checkInLat, checkIn.json.checkInLng, checkIn.json.checkInAccuracy],
+    ["2026-10-23T13:05:00.000Z", -10.5, -50.25, 12]
+  );
+  assert.equal(byId(agendaStops, "stop-1")!.checkInAt.toISOString(), "2026-10-23T13:05:00.000Z", "hora do aparelho gravada no servidor");
+  const resent = await call("PATCH", "/agenda-events/stop-1/check-in", "seller-a", { timestamp: "2026-10-23T13:40:00.000Z" });
+  assert.equal(resent.json.checkInAt, "2026-10-23T13:05:00.000Z", "reenvio da fila não muda o primeiro check-in");
+  const noGps = await call("PATCH", "/agenda-events/stop-3/check-in", "seller-a", {});
+  assert.equal(noGps.status, 200, "GPS nunca bloqueia o check-in");
+  assert.deepEqual([noGps.json.checkInAt, noGps.json.checkInLat, noGps.json.checkInLng], [new Date(NOW).toISOString(), null, null]);
+  const futureDevice = await call("PATCH", "/agenda-events/stop-2/check-in", "seller-a", { timestamp: "2026-10-23T18:00:00.000Z" });
+  assert.equal(futureDevice.json.checkInAt, new Date(NOW).toISOString(), "relógio adiantado do aparelho vira a hora do servidor");
+  assert.equal((await call("PATCH", "/agenda-events/stop-b/check-in", "seller-a", {})).status, 403, "vendedor não faz check-in em roteiro de outro");
+  assert.equal(byId(agendaStops, "stop-b")!.checkInAt, null);
+  assert.equal((await call("PATCH", "/agenda-events/stop-b/result", "seller-a", { status: "nao_realizada", reason: "chuva" })).status, 403);
+  results.push("check_in_records_time_and_gps=PASS check_in_without_gps=PASS seller_cannot_run_other_route=PASS");
+
+  const checkOut = await call("PATCH", "/agenda-events/stop-1/check-out", "seller-a", { timestamp: "2026-10-23T13:50:00.000Z" });
+  assert.equal(checkOut.status, 200);
+  assert.deepEqual([checkOut.json.checkOutAt, checkOut.json.checkOutLat], ["2026-10-23T13:50:00.000Z", null]);
+  const noSummary = await call("PATCH", "/agenda-events/stop-1/result", "seller-a", { status: "realizada", summary: "  " });
+  assert.equal(noSummary.status, 400);
+  assert.equal(noSummary.json.message, "Informe o resultado (resumo) do que foi feito.");
+  assert.equal(byId(agendaStops, "stop-1")!.resultStatus, null);
+  const openNoNext = await call("PATCH", "/agenda-events/stop-1/result", "seller-a", { status: "realizada", summary: "Visita ficticia feita", opportunityId: "opp-open" });
+  assert.equal(openNoNext.status, 400);
+  assert.equal(openNoNext.json.message, "Oportunidade aberta: informe o próximo passo ou o motivo de não ter próximo passo.");
+  assert.equal(
+    (await call("PATCH", "/agenda-events/stop-1/result", "seller-a", { status: "realizada", summary: "Visita ficticia feita", opportunityId: "opp-other" })).status,
+    404,
+    "oportunidade de outro cliente"
+  );
+  const eventsBeforeStop = agendaEvents.length;
+  const stop1 = await call("PATCH", "/agenda-events/stop-1/result", "seller-a", {
+    status: "realizada",
+    summary: "Visita ficticia feita",
+    opportunityId: "opp-open",
+    nextStepEvent: { type: "ligacao", startsAt: "2026-10-27T13:00:00.000Z" },
+  });
   assert.equal(stop1.status, 200);
-  assert.equal(byId(agendaEvents, "evt-route")!.status, "agendado", "falta uma parada");
-  assert(activities.some((row) => row.agendaEventId === "evt-route" && row.type === "visita" && row.done), "parada realizada cria visita");
-  const stop2 = await call("PATCH", "/agenda-events/stop-2/result", "seller-a", { status: "nao_realizada", reason: "chuva" });
-  assert.equal(stop2.status, 200);
+  assert.equal(agendaEvents.length, eventsBeforeStop + 1, "próximo passo vira compromisso");
+  const stopNextStep = byId(agendaEvents, stop1.json.nextStepAgendaEventId)!;
+  assert.deepEqual([stopNextStep.type, stopNextStep.sellerId, stopNextStep.clientId, stopNextStep.opportunityId], ["ligacao", "seller-a", "cli-a", "opp-open"]);
+  const stopVisit = activities.find((row) => row.agendaEventId === "evt-route" && String(row.description).includes("[AUTO_AGENDA_STOP:stop-1]"))!;
+  assert.deepEqual([stopVisit.type, stopVisit.done, stopVisit.opportunityId, stopVisit.notes], ["visita", true, "opp-open", "Visita ficticia feita"]);
+  assert.equal(stopVisit.date.toISOString(), "2026-10-23T13:50:00.000Z", "visita na hora do check-out");
+  assert.equal(byId(agendaEvents, "evt-route")!.status, "agendado", "faltam paradas");
+  results.push("done_requires_check_in_and_summary=PASS stop_next_step=PASS");
+
+  const notDoneNoReason = await call("PATCH", "/agenda-events/stop-2/result", "seller-a", { status: "nao_realizada" });
+  assert.equal(notDoneNoReason.status, 400);
+  assert.equal(notDoneNoReason.json.message, "Motivo é obrigatório quando a visita não é realizada.");
+  assert.equal((await call("PATCH", "/agenda-events/stop-3/result", "seller-a", { status: "nao_realizada", reason: "cliente_ausente" })).status, 200);
+  assert.equal(byId(agendaEvents, "evt-route")!.status, "agendado");
+  assert.equal((await call("PATCH", "/agenda-events/stop-2/result", "seller-a", { status: "nao_realizada", reason: "chuva" })).status, 200);
   assert.equal(byId(agendaEvents, "evt-route")!.status, "realizado", "todas as paradas resolvidas");
-  results.push("route_done_when_all_stops_resolved=PASS");
+  results.push("stop_not_done_requires_reason=PASS route_done_when_all_stops_resolved=PASS");
 
   // 10. Pendências: passados não concluídos dos últimos 30 dias (Brasília), no escopo; antigos só como contador.
   const sellerPending = await call("GET", "/agenda/pending", "seller-a");
