@@ -479,8 +479,12 @@ sobreposição); a análise de rota fica para gerente e diretor. Sem `weekStart`
 próximos 5 dias úteis a partir de hoje, entrando na semana seguinte, com 8 ações e 3 visitas por dia; vencimento no
 fim de semana vai para o próximo dia útil. Datas do cabeçalho em `dd/mm`.
 
-Pendente: a página da Agenda (`AgendaPage.tsx`: calendário, lista, formulários `datetime-local`, `formatDayKey`) usa
-o fuso do aparelho; certo em aparelho no horário de Brasília, errado em outro fuso. Os encaixes da Agenda Inteligente
+Resolvido no código (PR 3 da separação Agenda × Atividades, aguardando deploy): a página da Agenda (`AgendaPage.tsx`:
+calendário, lista, formulários `datetime-local`, `formatDayKey`) usava o fuso do aparelho e passou a usar sempre o
+horário de Brasília (`lib/brazilDate.ts`). Fora dela, o painel da Agenda Inteligente e o Planejamento semanal não foram
+revisados quanto ao fuso.
+
+Pendente: os encaixes da Agenda Inteligente
 chamam o planejamento com `weekStart` = dia escolhido, então a "semana" começa nesse dia e pode incluir sábado e
 domingo. Compromisso ou atividade desta semana continuam tirando o cliente das sugestões também nos dias da semana
 seguinte. Sugestão por proximidade fica para o PR de proximidade.
