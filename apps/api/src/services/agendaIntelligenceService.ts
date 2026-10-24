@@ -141,7 +141,7 @@ const time = (date: Date | null | undefined) =>
 const minutes = (date: Date | null | undefined) =>
   date ? brazilClock(date).getUTCHours() * 60 + brazilClock(date).getUTCMinutes() : null;
 // Só roteiro e reunião presencial são visita; follow-up e reunião online não contam como visita nem pedem localização.
-const isVisitType = (type: string) => type === "roteiro_visita" || type === "reuniao_presencial";
+const isVisitType = (type: string) => type === "roteiro_visita" || type === "reuniao_presencial" || type === "visita";
 const periodOf = (m: number | null): Period =>
   m == null ? null : m < 12 * 60 ? "morning" : "afternoon";
 const safe = (value: string | null | undefined, max = 160) =>
@@ -398,6 +398,7 @@ export class AgendaIntelligenceService {
           "completed",
           "cancelled",
           "cancelado",
+          "nao_realizado",
           "em_andamento",
         ].includes(status);
         items.push({
