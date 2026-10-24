@@ -223,7 +223,8 @@ try {
   const activitiesSource = readFileSync(new URL("../../../web/src/pages/ActivitiesPage.tsx", import.meta.url), "utf8");
   for (const label of [">{scheduling ? \"Agendando…\" : \"Agendar\"}</button>", ">Registrar</Link>", ">Abrir</Link>"]) assert(weeklySource.includes(label), label);
   assert(!weeklySource.includes("/whatsapp"), "sem botão de WhatsApp");
-  assert(activitiesSource.includes('const executed = searchParams.get("executed") === "true";'));
+  // Nova atividade é sempre realizada (Agenda planeja, Atividades registram o que foi feito).
+  assert(activitiesSource.includes("  executed: true,\n"));
   results.push("screen=PASS");
 
   console.log(`WEEKLY_PLAN_ACTIONS=PASS ${results.join(" ")}`);

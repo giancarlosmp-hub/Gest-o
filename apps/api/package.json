@@ -49,6 +49,7 @@
     "test:opportunity-archived-client": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/routes/opportunityArchivedClient.http.test.ts",
     "test:client-reactivation": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/routes/clientReactivation.http.test.ts",
     "test:commercial-automations": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/routes/commercialAutomations.http.test.ts",
+    "test:agenda-activity-split": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/routes/agendaActivitySplit.http.test.ts",
     "test:client-portfolio-status": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/services/clientPortfolioStatus.test.ts",
     "test:dashboard-portfolio-ranking": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/routes/dashboardPortfolioRanking.http.test.ts",
     "test:seller-score-scope": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/routes/sellerScoreScope.http.test.ts",
