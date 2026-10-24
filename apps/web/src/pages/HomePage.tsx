@@ -229,21 +229,6 @@ export default function HomePage() {
     if (typeof window === "undefined") return false;
     return window.innerWidth < 768;
   });
-  const startRouteSearch = useMemo(() => {
-    const params = new URLSearchParams({
-      date: brazilTodayKey(),
-      view: "hoje",
-      highlight: "next",
-      execute: "1"
-    });
-
-    if (user?.id && user.role === "vendedor") {
-      params.set("sellerId", user.id);
-    }
-
-    return params.toString();
-  }, [user?.id, user?.role]);
-
   const { alerts, reminders, refreshReminders } = useReminders({ autoLoad: false });
   const [activities, setActivities] = useState<Activity[]>([]);
   const [activityKpis, setActivityKpis] = useState<ActivityKpi[]>([]);
@@ -979,7 +964,7 @@ export default function HomePage() {
 
         {showStartRoute && (
           <Link
-            to={`/agenda?${startRouteSearch}`}
+            to="/agenda/roteiro"
             className="rounded-lg bg-brand-700 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-800"
           >
             Iniciar roteiro
