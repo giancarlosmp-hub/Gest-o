@@ -4,14 +4,27 @@ import { toast } from "sonner";
 import { useAuth } from "../context/AuthContext";
 import api from "../lib/apiClient";
 import { AGENDA_EVENT_TYPE_LABELS, AGENDA_EVENT_TYPE_OPTIONS, type AgendaEventType as SharedAgendaEventType } from "@salesforce-pro/shared";
-import { ACTIVITY_TYPE_OPTIONS, type ActivityTypeKey } from "../constants/activityTypes";
 import { getApiErrorMessage } from "../lib/apiError";
 import { triggerDashboardRefresh } from "../lib/dashboardRefresh";
 import type { AgendaEvent, AgendaEventType, AgendaStop } from "../models/agenda";
 import ClientSearchSelect, { type SearchableClientOption } from "../components/clients/ClientSearchSelect";
 import WeeklyCommercialPlan from "../components/planning/WeeklyCommercialPlan";
 import AgendaIntelligencePanel from "../components/agenda/AgendaIntelligencePanel";
-import { brazilMonthKey } from "../lib/brazilDate";
+import {
+  brazilDayEnd,
+  brazilDayKeyOf,
+  brazilDayStart,
+  brazilMinutesOfDay,
+  brazilMonthKey,
+  brazilTodayKey,
+  brazilWeekday,
+  formatBrazil,
+  formatBrazilDay,
+  fromBrazilDateTimeInput,
+  shiftBrazilDayKey
+} from "../lib/brazilDate";
+import { agendaEventActions, completeAgendaEventHref, PENDING_WINDOW_DAYS } from "../lib/agendaActivity";
+import { NotDoneDialog, RescheduleDialog } from "../components/agenda/AgendaEventDialogs";
 
 type Seller = { id: string; name: string };
 
@@ -36,22 +49,6 @@ type DraftStop = {
 };
 
 type ClientOption = SearchableClientOption;
-
-type FollowUpForm = {
-  type: "ligacao";
-  dueDate: string;
-  notes: string;
-  clientId: string;
-  opportunityId: string;
-};
-
-type QuickOpportunityForm = {
-  title: string;
-  value: string;
-  stage: "prospeccao" | "negociacao" | "proposta";
-  followUpDate: string;
-};
-
 
 type VisitResultForm = {
   status: "realizada" | "nao_realizada";
@@ -79,7 +76,10 @@ const UNIQUE_AGENDA_EVENT_TYPE_OPTIONS = Array.from(
   new Map(typedAgendaEventOptions.map((option) => [option.value, option])).values()
 );
 
-const CREATE_AGENDA_TYPE_OPTIONS = UNIQUE_AGENDA_EVENT_TYPE_OPTIONS;
+// Catálogo único; o roteiro de visita planeja várias visitas de uma vez.
+const CREATE_AGENDA_TYPE_OPTIONS = UNIQUE_AGENDA_EVENT_TYPE_OPTIONS.map((option) =>
+  option.value === "roteiro_visita" ? { ...option, label: "Roteiro de visita (várias visitas)" } : option
+);
 
 const STATUS_LABEL: Record<AgendaEvent["status"], string> = {
   planned: "Planejado",
@@ -107,9 +107,12 @@ const DAY_START_HOUR = 7;
 const DAY_END_HOUR = 21;
 const HOUR_HEIGHT_PX = 72;
 
+// Período em dias de Brasília (00:00 a 23:59:59.999 de Brasília), qualquer que seja o fuso do aparelho.
 type DateRange = {
   start: Date;
   end: Date;
+  startKey: string;
+  endKey: string;
 };
 
 type PositionedAgendaEvent = {
@@ -118,81 +121,50 @@ type PositionedAgendaEvent = {
   columns: number;
 };
 
-function startOfDay(date: Date) {
-  const next = new Date(date);
-  next.setHours(0, 0, 0, 0);
-  return next;
-}
+const DAY_MS = 86_400_000;
 
-function endOfDay(date: Date) {
-  const next = new Date(date);
-  next.setHours(23, 59, 59, 999);
-  return next;
+function rangeFromDayKeys(startKey: string, endKey: string): DateRange {
+  return { start: brazilDayStart(startKey), end: brazilDayEnd(endKey), startKey, endKey };
 }
 
 function getRangeFromFilter(periodFilter: PeriodFilter, customFrom: string, customTo: string, anchorDate: Date = new Date()): DateRange {
-  const today = new Date(anchorDate);
-  const dayStart = startOfDay(today);
+  const todayKey = brazilDayKeyOf(anchorDate);
 
   if (periodFilter === "today") {
-    return { start: startOfDay(today), end: endOfDay(today) };
+    return rangeFromDayKeys(todayKey, todayKey);
   }
 
   if (periodFilter === "this_week") {
-    const weekStart = startOfDay(today);
-    const dayOfWeek = weekStart.getDay();
-    const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
-    weekStart.setDate(weekStart.getDate() + diffToMonday);
-    const weekEnd = endOfDay(new Date(weekStart));
-    weekEnd.setDate(weekEnd.getDate() + 6);
-    return { start: weekStart, end: weekEnd };
+    const dayOfWeek = brazilWeekday(todayKey);
+    const monday = shiftBrazilDayKey(todayKey, dayOfWeek === 0 ? -6 : 1 - dayOfWeek);
+    return rangeFromDayKeys(monday, shiftBrazilDayKey(monday, 6));
   }
 
   if (periodFilter === "next_7_days") {
-    const next7Days = endOfDay(new Date(dayStart));
-    next7Days.setDate(next7Days.getDate() + 6);
-    return { start: dayStart, end: next7Days };
+    return rangeFromDayKeys(todayKey, shiftBrazilDayKey(todayKey, 6));
   }
 
   if (periodFilter === "next_30_days") {
-    const next30Days = endOfDay(new Date(dayStart));
-    next30Days.setDate(next30Days.getDate() + 29);
-    return { start: dayStart, end: next30Days };
+    return rangeFromDayKeys(todayKey, shiftBrazilDayKey(todayKey, 29));
   }
 
-  const from = customFrom ? startOfDay(new Date(`${customFrom}T00:00:00`)) : dayStart;
-  const to = customTo ? endOfDay(new Date(`${customTo}T00:00:00`)) : endOfDay(dayStart);
-  return { start: from, end: to };
+  return rangeFromDayKeys(customFrom || todayKey, customTo || todayKey);
 }
 
 function formatDateTime(value: string) {
-  return new Date(value).toLocaleString("pt-BR", {
-    dateStyle: "short",
-    timeStyle: "short"
-  });
+  return formatBrazil(value, { dateStyle: "short", timeStyle: "short" });
 }
 
 function formatDateOnly(value: string) {
-  return new Date(value).toLocaleDateString("pt-BR", {
-    day: "2-digit",
-    month: "2-digit"
-  });
+  return formatBrazil(value, { day: "2-digit", month: "2-digit" });
 }
 
 function formatPeriodLabel(range: DateRange, view: Visualizacao) {
-  const sameDay = range.start.toDateString() === range.end.toDateString();
-  if (sameDay || view === "daily") {
-    return range.start.toLocaleDateString("pt-BR", {
-      weekday: "long",
-      day: "2-digit",
-      month: "long"
-    });
+  if (range.startKey === range.endKey || view === "daily") {
+    return formatBrazilDay(range.startKey, { weekday: "long", day: "2-digit", month: "long" });
   }
 
-  return `${range.start.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })} - ${range.end.toLocaleDateString("pt-BR", {
-    day: "2-digit",
-    month: "short"
-  })}`;
+  return `${formatBrazilDay(range.startKey, { day: "2-digit", month: "short" })} - ${formatBrazilDay(range.endKey, { day: "2-digit", month: "short" })}`;
 }
 
 function isEventOverlappingRange(startsAt: string, endsAt: string, startDate: Date, endDate: Date) {
@@ -201,12 +173,8 @@ function isEventOverlappingRange(startsAt: string, endsAt: string, startDate: Da
   return eventStart <= endDate.getTime() && eventEnd >= startDate.getTime();
 }
 
-function formatDayKey(value: string) {
-  const date = new Date(value);
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-}
-
-
+// Dia de Brasília do compromisso.
+const formatDayKey = brazilDayKeyOf;
 
 function getOwnerId(event: AgendaEvent): string {
   return event.ownerId || event.userId || event.sellerId || "";
@@ -220,15 +188,8 @@ function getEndsAt(event: AgendaEvent): string {
   return event.endsAt || event.endDateTime || getStartsAt(event);
 }
 
-function formatLocalDateParam(value: Date) {
-  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
-}
-
 function formatTime(value: string) {
-  return new Date(value).toLocaleTimeString("pt-BR", {
-    hour: "2-digit",
-    minute: "2-digit"
-  });
+  return formatBrazil(value, { hour: "2-digit", minute: "2-digit" });
 }
 
 function formatHourLabel(hour: number) {
@@ -264,19 +225,9 @@ function createEmptyDraftStop(): DraftStop {
   };
 }
 
-function toIsoStartOfDay(dateValue: string) {
-  return new Date(`${dateValue}T00:00:00`).toISOString();
-}
-
-function toIsoEndOfDay(dateValue: string) {
-  return new Date(`${dateValue}T23:59:59`).toISOString();
-}
-
 function getEventMinutesRange(event: AgendaEvent) {
-  const start = new Date(getStartsAt(event));
-  const end = new Date(getEndsAt(event));
-  const startMinutes = start.getHours() * 60 + start.getMinutes();
-  const endMinutes = Math.max(startMinutes + 30, end.getHours() * 60 + end.getMinutes());
+  const startMinutes = brazilMinutesOfDay(getStartsAt(event));
+  const endMinutes = Math.max(startMinutes + 30, brazilMinutesOfDay(getEndsAt(event)));
   return { startMinutes, endMinutes };
 }
 
@@ -393,6 +344,7 @@ function mapApiAgendaEvent(item: any): AgendaEvent {
     isOverdue: Boolean(item.isOverdue),
     city: item.city ? String(item.city) : mappedStops.find((stop: AgendaStop) => stop.city?.trim())?.city || undefined,
     notes: item.notes ? String(item.notes) : null,
+    notDoneReason: item.notDoneReason ? String(item.notDoneReason) : null,
     linkedActivityId: item.linkedActivityId ? String(item.linkedActivityId) : null,
     hasLinkedActivity: Boolean(item.hasLinkedActivity),
     stops: mappedStops
@@ -420,31 +372,8 @@ export default function AgendaPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [activityClients, setActivityClients] = useState<ClientOption[]>([]);
   const loadedClientIdsRef = useRef<Set<string>>(new Set());
-  const [isFollowUpModalOpen, setIsFollowUpModalOpen] = useState(false);
-  const [isFollowUpSubmitting, setIsFollowUpSubmitting] = useState(false);
-  const [followUpSourceEvent, setFollowUpSourceEvent] = useState<AgendaEvent | null>(null);
-  const [followUpForm, setFollowUpForm] = useState<FollowUpForm>({
-    type: "ligacao",
-    dueDate: "",
-    notes: "",
-    clientId: "",
-    opportunityId: ""
-  });
-  const [isQuickOpportunityModalOpen, setIsQuickOpportunityModalOpen] = useState(false);
-  const [isQuickOpportunitySubmitting, setIsQuickOpportunitySubmitting] = useState(false);
-  const [quickOpportunityAgendaEventId, setQuickOpportunityAgendaEventId] = useState("");
-  const [quickOpportunityForm, setQuickOpportunityForm] = useState<QuickOpportunityForm>({
-    title: "",
-    value: "10000",
-    stage: "negociacao",
-    followUpDate: ""
-  });
-
-  const [isRescheduleOpen, setIsRescheduleOpen] = useState(false);
-  const [isRescheduleSubmitting, setIsRescheduleSubmitting] = useState(false);
-  const [rescheduleEvent, setRescheduleEvent] = useState<AgendaEvent | null>(null);
-  const [rescheduleStartDateTime, setRescheduleStartDateTime] = useState("");
-  const [rescheduleEndDateTime, setRescheduleEndDateTime] = useState("");
+  const [rescheduleTarget, setRescheduleTarget] = useState<AgendaEvent | null>(null);
+  const [notDoneTarget, setNotDoneTarget] = useState<AgendaEvent | null>(null);
 
   const [isSellersLoading, setIsSellersLoading] = useState(false);
   const [sellerOptions, setSellerOptions] = useState<Seller[]>([]);
@@ -485,8 +414,8 @@ export default function AgendaPage() {
 
   const eventsQuery = useMemo(() => {
     const params: Record<string, string> = {
-      from: formatLocalDateParam(dateRange.start),
-      to: formatLocalDateParam(dateRange.end)
+      from: dateRange.startKey,
+      to: dateRange.endKey
     };
 
     if (user?.role === "vendedor" && user.id) {
@@ -499,7 +428,7 @@ export default function AgendaPage() {
   }, [dateRange, canFilterBySeller, selectedSellerId, user?.id, user?.role]);
 
   const eventsQueryKey = useMemo(() => JSON.stringify(eventsQuery), [eventsQuery]);
-  const agendaIntelligenceDate = useMemo(() => formatDayKey(dateRange.start.toISOString()), [dateRange]);
+  const agendaIntelligenceDate = dateRange.startKey;
 
   useEffect(() => {
     const mediaQuery = window.matchMedia("(max-width: 767px)");
@@ -618,6 +547,17 @@ export default function AgendaPage() {
 
 
   useEffect(() => {
+    if (searchParams.get("pendentes") !== "antigos") return;
+    const windowStartKey = shiftBrazilDayKey(brazilTodayKey(), -PENDING_WINDOW_DAYS);
+    setView("list");
+    setPeriodFilter("custom_range");
+    setCustomFrom(shiftBrazilDayKey(windowStartKey, -365));
+    setCustomTo(shiftBrazilDayKey(windowStartKey, -1));
+    setOverdueOnly(true);
+    setIsMoreFiltersOpen(true);
+  }, [searchParams]);
+
+  useEffect(() => {
     if (searchParams.get("execute") === "1") {
       setExecutionEventId(searchParams.get("eventId") || "AUTO");
     }
@@ -701,10 +641,10 @@ export default function AgendaPage() {
     });
 
     return Array.from(grouped.entries())
-      .sort((a, b) => new Date(a[0]).getTime() - new Date(b[0]).getTime())
+      .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([day, dayEvents]) => ({
         day,
-        label: new Date(`${day}T00:00:00`).toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "2-digit" }),
+        label: formatBrazilDay(day, { weekday: "long", day: "2-digit", month: "2-digit" }),
         events: dayEvents.sort((a, b) => new Date(getStartsAt(a)).getTime() - new Date(getStartsAt(b)).getTime())
       }));
   }, [filteredEvents]);
@@ -715,26 +655,20 @@ export default function AgendaPage() {
   );
 
   const selectedDayEvents = useMemo(() => {
-    const selectedDayKey = formatDayKey(dateRange.start.toISOString());
+    const selectedDayKey = dateRange.startKey;
     return filteredEvents.filter((event) => formatDayKey(getStartsAt(event)) === selectedDayKey);
   }, [filteredEvents, dateRange]);
 
   const positionedSelectedDayEvents = useMemo(() => buildPositionedAgendaEvents(selectedDayEvents), [selectedDayEvents]);
 
   const weeklyCalendarDays = useMemo(() => {
-    const start = startOfDay(dateRange.start);
-    const dayOfWeek = start.getDay();
-    const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
-    const monday = new Date(start);
-    monday.setDate(monday.getDate() + diffToMonday);
+    const dayOfWeek = brazilWeekday(dateRange.startKey);
+    const monday = shiftBrazilDayKey(dateRange.startKey, dayOfWeek === 0 ? -6 : 1 - dayOfWeek);
 
     return Array.from({ length: 7 }).map((_, index) => {
-      const day = new Date(monday);
-      day.setDate(monday.getDate() + index);
-      const key = formatDayKey(day.toISOString());
+      const key = shiftBrazilDayKey(monday, index);
       return {
         key,
-        date: day,
         events: filteredEvents.filter((event) => formatDayKey(getStartsAt(event)) === key)
       };
     });
@@ -746,25 +680,20 @@ export default function AgendaPage() {
   );
 
   const monthlyCalendarDays = useMemo(() => {
-    const monthAnchor = new Date(periodAnchorDate);
-    const monthStart = new Date(monthAnchor.getFullYear(), monthAnchor.getMonth(), 1);
-    const monthEnd = new Date(monthAnchor.getFullYear(), monthAnchor.getMonth() + 1, 0);
-    const gridStart = new Date(monthStart);
-    gridStart.setDate(monthStart.getDate() - monthStart.getDay());
-    const gridEnd = new Date(monthEnd);
-    gridEnd.setDate(monthEnd.getDate() + (6 - monthEnd.getDay()));
+    const monthKey = brazilDayKeyOf(periodAnchorDate).slice(0, 7);
+    const monthStartKey = `${monthKey}-01`;
+    const [year, month] = monthKey.split("-").map(Number);
+    const monthEndKey = `${monthKey}-${String(new Date(Date.UTC(year, month, 0)).getUTCDate()).padStart(2, "0")}`;
+    const gridStartKey = shiftBrazilDayKey(monthStartKey, -brazilWeekday(monthStartKey));
+    const gridEndKey = shiftBrazilDayKey(monthEndKey, 6 - brazilWeekday(monthEndKey));
 
-    const days: Array<{ key: string; date: Date; isCurrentMonth: boolean; events: AgendaEvent[] }> = [];
-    const cursor = new Date(gridStart);
-    while (cursor <= gridEnd) {
-      const key = formatDayKey(cursor.toISOString());
+    const days: Array<{ key: string; isCurrentMonth: boolean; events: AgendaEvent[] }> = [];
+    for (let key = gridStartKey; key <= gridEndKey; key = shiftBrazilDayKey(key, 1)) {
       days.push({
         key,
-        date: new Date(cursor),
-        isCurrentMonth: cursor.getMonth() === monthAnchor.getMonth(),
+        isCurrentMonth: key.startsWith(monthKey),
         events: filteredEvents.filter((event) => formatDayKey(getStartsAt(event)) === key)
       });
-      cursor.setDate(cursor.getDate() + 1);
     }
     return days;
   }, [periodAnchorDate, filteredEvents]);
@@ -976,7 +905,7 @@ export default function AgendaPage() {
   };
 
   // Só reabre (gerente/diretor): concluir passa pela atividade vinculada.
-  const onSetAsDone = async (agendaEvent: AgendaEvent) => {
+  const onReopen = async (agendaEvent: AgendaEvent) => {
     const nextStatus = "planned" as const;
     try {
       await api.patch(`/agenda/${agendaEvent.id}`, { status: nextStatus });
@@ -1000,248 +929,41 @@ export default function AgendaPage() {
       )
     );
     setEventsRefreshToken((current) => current + 1);
-    toast.success("Agenda reaberta com sucesso.");
-  };
-
-  const openFollowUpModal = (agendaEvent: AgendaEvent) => {
-    const dueDate = new Date(getEndsAt(agendaEvent));
-    dueDate.setDate(dueDate.getDate() + 2);
-    setFollowUpSourceEvent(agendaEvent);
-    setFollowUpForm({
-      type: "ligacao",
-      dueDate: toDateTimeInputValue(dueDate.toISOString()),
-      notes: `Follow-up do evento: ${agendaEvent.title}`,
-      clientId: agendaEvent.clientId || "",
-      opportunityId: agendaEvent.opportunityId || ""
-    });
-    setIsFollowUpModalOpen(true);
-  };
-
-  const closeFollowUpModal = () => {
-    setIsFollowUpModalOpen(false);
-    setFollowUpSourceEvent(null);
-  };
-
-  const onSubmitFollowUp = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!followUpSourceEvent || !followUpForm.dueDate) {
-      toast.error("Defina a data do follow-up.");
-      return;
-    }
-
-    const start = new Date(followUpForm.dueDate);
-    const end = new Date(start.getTime() + 30 * 60000);
-
-    setIsFollowUpSubmitting(true);
-    try {
-      const response = await api.post("/agenda/events", {
-        title: `Follow-up: ${followUpSourceEvent.title}`,
-        type: followUpForm.type,
-        startDateTime: start.toISOString(),
-        endDateTime: end.toISOString(),
-        sellerId: followUpSourceEvent.userId,
-        clientId: followUpForm.clientId || undefined,
-        opportunityId: followUpForm.opportunityId || undefined,
-        notes: followUpForm.notes
-      });
-      const created = response.data;
-      setEvents((current) =>
-        [...current, { ...followUpSourceEvent, ...created, id: created.id, title: created.title }].sort(
-          (a, b) => new Date(getStartsAt(a)).getTime() - new Date(getStartsAt(b)).getTime()
-        )
-      );
-      setEventsRefreshToken((current) => current + 1);
-      toast.success("Follow-up criado");
-      closeFollowUpModal();
-    } catch (error) {
-      toast.error(getApiErrorMessage(error, "Não foi possível criar follow-up."));
-    } finally {
-      setIsFollowUpSubmitting(false);
-    }
-  };
-
-  const openQuickOpportunityModal = (agendaEvent: AgendaEvent, stopClientName?: string | null) => {
-    const due = new Date();
-    due.setDate(due.getDate() + 2);
-    const clientLabel = stopClientName || agendaEvent.title;
-    setQuickOpportunityAgendaEventId(agendaEvent.id);
-    setQuickOpportunityForm({
-      title: `Negociação pós-visita — ${clientLabel}`,
-      value: "10000",
-      stage: "negociacao",
-      followUpDate: due.toISOString().slice(0, 10)
-    });
-    setIsQuickOpportunityModalOpen(true);
-  };
-
-  const onSubmitQuickOpportunity = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!executionEvent?.clientId || !quickOpportunityForm.title.trim() || !quickOpportunityForm.followUpDate) {
-      toast.error("Preencha os dados mínimos da oportunidade.");
-      return;
-    }
-
-    setIsQuickOpportunitySubmitting(true);
-    try {
-      const today = new Date().toISOString().slice(0, 10);
-      const opportunityResponse = await api.post("/opportunities", {
-        title: quickOpportunityForm.title.trim(),
-        value: Number(quickOpportunityForm.value || "0"),
-        stage: quickOpportunityForm.stage,
-        proposalDate: today,
-        followUpDate: quickOpportunityForm.followUpDate,
-        expectedCloseDate: quickOpportunityForm.followUpDate,
-        probability: quickOpportunityForm.stage === "prospeccao" ? 20 : quickOpportunityForm.stage === "negociacao" ? 40 : 70,
-        clientId: executionEvent.clientId,
-        ownerSellerId: executionEvent.userId
-      });
-
-      const opportunityId = String(opportunityResponse.data?.id || "");
-      if (quickOpportunityAgendaEventId && opportunityId) {
-        await api.patch(`/agenda/${quickOpportunityAgendaEventId}`, { opportunityId });
-        setEvents((current) =>
-          current.map((item) => (item.id === quickOpportunityAgendaEventId ? { ...item, opportunityId } : item))
-        );
-      }
-
-      toast.success("Oportunidade criada com sucesso");
-      setIsQuickOpportunityModalOpen(false);
-    } catch (error) {
-      toast.error(getApiErrorMessage(error, "Não foi possível criar oportunidade."));
-    } finally {
-      setIsQuickOpportunitySubmitting(false);
-    }
-  };
-
-  const onDuplicateForNextDay = async (agendaEvent: AgendaEvent) => {
-    const start = new Date(getStartsAt(agendaEvent));
-    const end = new Date(getEndsAt(agendaEvent));
-    start.setDate(start.getDate() + 1);
-    end.setDate(end.getDate() + 1);
-
-    try {
-      const response = await api.post("/agenda/events", {
-        title: `${agendaEvent.title} (cópia)`,
-        // followup é legado e não é aceito em compromisso novo.
-        type: agendaEvent.type === "followup" ? "ligacao" : agendaEvent.type,
-        startDateTime: start.toISOString(),
-        endDateTime: end.toISOString(),
-        sellerId: agendaEvent.userId,
-        clientId: agendaEvent.clientId,
-        notes: agendaEvent.notes || agendaEvent.description
-      });
-      const created = response.data;
-      setEvents((current) =>
-        [...current, { ...agendaEvent, ...created, id: created.id, title: created.title }].sort(
-          (a, b) => new Date(getStartsAt(a)).getTime() - new Date(getStartsAt(b)).getTime()
-        )
-      );
-      setEventsRefreshToken((current) => current + 1);
-      toast.success(response.data?.message || "Evento duplicado para o dia seguinte.");
-    } catch (error) {
-      toast.error(getApiErrorMessage(error, "Não foi possível duplicar evento."));
-    }
+    setSelectedEvent(null);
+    toast.success("Compromisso reaberto.");
   };
 
   const onDeleteAgendaEvent = async (agendaEvent: AgendaEvent) => {
-    const shouldDelete = window.confirm(`Excluir a agenda "${agendaEvent.title}"?`);
+    const shouldDelete = window.confirm(`Excluir o compromisso "${agendaEvent.title}"?`);
     if (!shouldDelete) return;
 
     try {
       await api.delete(`/events/${agendaEvent.id}`);
       setEvents((current) => current.filter((item) => item.id !== agendaEvent.id));
       setEventsRefreshToken((current) => current + 1);
-      toast.success("Agenda excluída com sucesso.");
+      setSelectedEvent(null);
+      toast.success("Compromisso excluído.");
     } catch (error) {
-      toast.error(getApiErrorMessage(error, "Não foi possível excluir a agenda."));
+      toast.error(getApiErrorMessage(error, "Não foi possível excluir o compromisso."));
     }
   };
 
-  const toDateTimeInputValue = (value: string) => {
-    const date = new Date(value);
-    const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
-    return local.toISOString().slice(0, 16);
-  };
-
-  const getSuggestedActivityType = (agendaType: AgendaEventType): ActivityTypeKey => {
-    if (agendaType === "roteiro_visita") return "visita";
-    if (agendaType === "proposta") return "proposta_enviada";
-    return agendaType;
-  };
-
-  const openActivityModal = async (agendaEvent: AgendaEvent) => {
+  // "Concluir" abre a Nova atividade preenchida e vinculada; salvar conclui o compromisso.
+  const openActivityModal = (agendaEvent: AgendaEvent) => {
     if (agendaEvent.hasLinkedActivity || agendaEvent.linkedActivityId) {
       toast.info("Este compromisso já possui atividade vinculada.");
       navigate("/atividades");
       return;
     }
-
-    const params = new URLSearchParams();
-    params.set("open", "create");
-    params.set("date", getEndsAt(agendaEvent));
-    params.set("type", getSuggestedActivityType(agendaEvent.type));
-    params.set("ownerSellerId", getOwnerId(agendaEvent));
-    params.set("notes", agendaEvent.notes || agendaEvent.description || agendaEvent.title);
-    params.set("title", agendaEvent.title);
-    if (agendaEvent.clientId) params.set("clientId", agendaEvent.clientId);
-    if (agendaEvent.opportunityId) params.set("opportunityId", agendaEvent.opportunityId);
-    if (agendaEvent.city) params.set("city", agendaEvent.city);
-    if (agendaEvent.id) params.set("agendaEventId", agendaEvent.id);
-    navigate(`/atividades?${params.toString()}`);
+    navigate(completeAgendaEventHref({ ...agendaEvent, startsAt: getStartsAt(agendaEvent), ownerId: getOwnerId(agendaEvent), notes: agendaEvent.notes || agendaEvent.description }));
   };
 
-  const openRescheduleModal = (agendaEvent: AgendaEvent) => {
-    setRescheduleEvent(agendaEvent);
-    setRescheduleStartDateTime(toDateTimeInputValue(getStartsAt(agendaEvent)));
-    setRescheduleEndDateTime(toDateTimeInputValue(getEndsAt(agendaEvent)));
-    setIsRescheduleOpen(true);
-  };
-
-  const closeRescheduleModal = () => {
-    setIsRescheduleOpen(false);
-    setRescheduleEvent(null);
-    setRescheduleStartDateTime("");
-    setRescheduleEndDateTime("");
-  };
-
-  const onSubmitReschedule = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!rescheduleEvent || !rescheduleStartDateTime || !rescheduleEndDateTime) {
-      toast.error("Preencha início e fim para reagendar.");
-      return;
-    }
-
-    if (new Date(rescheduleStartDateTime).getTime() >= new Date(rescheduleEndDateTime).getTime()) {
-      toast.error("A data de fim deve ser maior que a data de início.");
-      return;
-    }
-
-    setIsRescheduleSubmitting(true);
-    try {
-      await api.patch(`/agenda/${rescheduleEvent.id}`, {
-        startDateTime: new Date(rescheduleStartDateTime).toISOString(),
-        endDateTime: new Date(rescheduleEndDateTime).toISOString()
-      });
-
-      setEvents((current) =>
-        current.map((item) =>
-          item.id === rescheduleEvent.id
-            ? {
-                ...item,
-                startsAt: new Date(rescheduleStartDateTime).toISOString(),
-                endsAt: new Date(rescheduleEndDateTime).toISOString()
-              }
-            : item
-        )
-      );
-      setEventsRefreshToken((current) => current + 1);
-      toast.success("Compromisso reagendado com sucesso.");
-      closeRescheduleModal();
-    } catch {
-      toast.error("Não foi possível reagendar este compromisso.");
-    } finally {
-      setIsRescheduleSubmitting(false);
-    }
+  // Depois de reagendar ou marcar não realizado: fecha os detalhes e recarrega o período.
+  const onEventChanged = () => {
+    setRescheduleTarget(null);
+    setNotDoneTarget(null);
+    setSelectedEvent(null);
+    setEventsRefreshToken((current) => current + 1);
   };
 
   const openCreate = (initialType: AgendaEventType = "reuniao_online") => {
@@ -1307,8 +1029,9 @@ export default function AgendaPage() {
     }
 
     const isRoute = createForm.type === "roteiro_visita";
-    const startDateTimeIso = isRoute ? toIsoStartOfDay(createForm.startDateTime) : new Date(createForm.startDateTime).toISOString();
-    const endDateTimeIso = isRoute ? toIsoEndOfDay(createForm.endDateTime) : new Date(createForm.endDateTime).toISOString();
+    // Datas e horários do formulário são de Brasília, qualquer que seja o fuso do aparelho.
+    const startDateTimeIso = isRoute ? brazilDayStart(createForm.startDateTime).toISOString() : fromBrazilDateTimeInput(createForm.startDateTime).toISOString();
+    const endDateTimeIso = isRoute ? brazilDayEnd(createForm.endDateTime).toISOString() : fromBrazilDateTimeInput(createForm.endDateTime).toISOString();
 
     if (new Date(startDateTimeIso).getTime() >= new Date(endDateTimeIso).getTime()) {
       toast.error("A data de fim deve ser maior que a data de início.");
@@ -1421,17 +1144,8 @@ export default function AgendaPage() {
 
   const navigatePeriod = (direction: -1 | 1) => {
     setPeriodAnchorDate((current) => {
-      const next = new Date(current);
-      if (periodFilter === "today" || view === "daily") {
-        next.setDate(next.getDate() + direction);
-      } else if (periodFilter === "this_week" || view === "weekly") {
-        next.setDate(next.getDate() + direction * 7);
-      } else if (periodFilter === "next_30_days" || view === "monthly") {
-        next.setDate(next.getDate() + direction * 30);
-      } else {
-        next.setDate(next.getDate() + direction * 7);
-      }
-      return next;
+      const days = periodFilter === "today" || view === "daily" ? 1 : periodFilter === "next_30_days" || view === "monthly" ? 30 : 7;
+      return new Date(current.getTime() + direction * days * DAY_MS);
     });
   };
 
@@ -1444,6 +1158,8 @@ export default function AgendaPage() {
   const openAgendaDetails = (event: AgendaEvent) => {
     setSelectedEvent(event);
   };
+
+  const selectedEventActions = selectedEvent ? agendaEventActions(selectedEvent, user?.role) : null;
 
   return (
     <section className="flex min-h-[calc(100dvh-9rem)] flex-col gap-3 overflow-hidden">
@@ -1580,10 +1296,8 @@ export default function AgendaPage() {
                   </div>
                 ))}
                 {positionedSelectedDayEvents.map(({ event, column, columns }) => {
-                  const start = new Date(getStartsAt(event));
-                  const end = new Date(getEndsAt(event));
-                  const startsAtMinutes = start.getHours() * 60 + start.getMinutes();
-                  const endsAtMinutes = end.getHours() * 60 + end.getMinutes();
+                  const startsAtMinutes = brazilMinutesOfDay(getStartsAt(event));
+                  const endsAtMinutes = brazilMinutesOfDay(getEndsAt(event));
                   const minMinutes = DAY_START_HOUR * 60;
                   const maxMinutes = DAY_END_HOUR * 60;
                   const clampedStart = Math.max(minMinutes, Math.min(startsAtMinutes, maxMinutes));
@@ -1654,8 +1368,8 @@ export default function AgendaPage() {
               <div className="sticky top-0 z-10 grid grid-cols-[72px_repeat(7,minmax(140px,1fr))] border-b bg-white">
                 <div />
                 {weeklyCalendarDaysWithLayout.map((day) => (
-                  <div key={day.key} className={`border-l px-2 py-2 text-xs font-semibold ${formatDayKey(new Date().toISOString()) === day.key ? "bg-brand-100 text-brand-800 ring-1 ring-inset ring-brand-200" : "text-slate-600"}`}>
-                    {day.date.toLocaleDateString("pt-BR", { weekday: "short", day: "2-digit", month: "2-digit" })}
+                  <div key={day.key} className={`border-l px-2 py-2 text-xs font-semibold ${brazilTodayKey() === day.key ? "bg-brand-100 text-brand-800 ring-1 ring-inset ring-brand-200" : "text-slate-600"}`}>
+                    {formatBrazilDay(day.key, { weekday: "short", day: "2-digit", month: "2-digit" })}
                   </div>
                 ))}
               </div>
@@ -1673,10 +1387,10 @@ export default function AgendaPage() {
                       <div key={`${day.key}-${hour}`} className="absolute inset-x-0 border-t border-slate-100" style={{ top: `${index * HOUR_HEIGHT_PX}px` }} />
                     ))}
                     {day.positionedEvents.map(({ event, column, columns }) => {
-                      const start = new Date(getStartsAt(event));
-                      const end = new Date(getEndsAt(event));
-                      const top = (((start.getHours() * 60 + start.getMinutes()) - DAY_START_HOUR * 60) / 60) * HOUR_HEIGHT_PX;
-                      const height = Math.max(44, ((((end.getHours() * 60 + end.getMinutes()) - (start.getHours() * 60 + start.getMinutes())) / 60) * HOUR_HEIGHT_PX) - 4);
+                      const startMinutes = brazilMinutesOfDay(getStartsAt(event));
+                      const endMinutes = brazilMinutesOfDay(getEndsAt(event));
+                      const top = ((startMinutes - DAY_START_HOUR * 60) / 60) * HOUR_HEIGHT_PX;
+                      const height = Math.max(44, (((endMinutes - startMinutes) / 60) * HOUR_HEIGHT_PX) - 4);
                       const width = `calc(${100 / columns}% - 6px)`;
                       const left = `calc(${(100 / columns) * column}% + 3px)`;
                       return (
@@ -1705,10 +1419,10 @@ export default function AgendaPage() {
               style={{ gridTemplateRows: `repeat(${Math.ceil(monthlyCalendarDays.length / 7)}, minmax(0, 1fr))` }}
             >
               {monthlyCalendarDays.map((day) => {
-                const isToday = day.key === formatDayKey(new Date().toISOString());
+                const isToday = day.key === brazilTodayKey();
                 return (
                 <button key={day.key} type="button" onClick={() => setSelectedMonthDayKey(day.key)} className={`h-full min-h-[104px] overflow-hidden rounded-xl border p-1.5 text-left shadow-sm transition hover:shadow ${day.isCurrentMonth ? "bg-white" : "bg-slate-100 text-slate-400"} ${isToday ? "border-brand-300 ring-2 ring-brand-100" : "border-slate-200"}`}>
-                  <p className={`text-[11px] font-semibold ${isToday ? "text-brand-800" : ""}`}>{day.date.getDate()}</p>
+                  <p className={`text-[11px] font-semibold ${isToday ? "text-brand-800" : ""}`}>{Number(day.key.slice(8, 10))}</p>
                   <div className="mt-1 space-y-1">
                     {day.events.slice(0, 2).map((event) => (
                       <p key={event.id} className={`truncate rounded-md border px-1.5 py-0.5 text-[10px] ${TYPE_COLOR_CLASS[event.type]}`}>{formatTime(getStartsAt(event))} {event.title}{event.type === "roteiro_visita" ? ` · ${event.stops?.length || 0} paradas` : ""}</p>
@@ -1759,7 +1473,7 @@ export default function AgendaPage() {
       {selectedMonthDayKey ? (
         <aside className={`fixed inset-y-0 right-0 z-40 w-full max-w-sm border-l border-slate-200 bg-white shadow-2xl ${isMobile ? "bottom-0 top-auto h-[72vh] max-w-none rounded-t-2xl border-t border-l-0" : ""}`}>
           <div className="flex items-center justify-between border-b px-4 py-3">
-            <h3 className="text-sm font-semibold text-slate-900">Agenda do dia {new Date(`${selectedMonthDayKey}T00:00:00`).toLocaleDateString("pt-BR")}</h3>
+            <h3 className="text-sm font-semibold text-slate-900">Agenda do dia {formatBrazilDay(selectedMonthDayKey, { dateStyle: "short" })}</h3>
             <button type="button" className="text-sm text-slate-500" onClick={() => setSelectedMonthDayKey("")}>Fechar</button>
           </div>
           <div className="max-h-[calc(100%-56px)] space-y-2 overflow-y-auto p-3">
@@ -1789,6 +1503,7 @@ export default function AgendaPage() {
               <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Dados do compromisso</p>
               <p className="text-sm text-slate-700"><strong>Tipo:</strong> {TYPE_LABEL[selectedEvent.type]}</p>
               <p className="text-sm text-slate-700"><strong>Status:</strong> {STATUS_LABEL[selectedEvent.status]}</p>
+              {selectedEvent.status === "not_done" && selectedEvent.notDoneReason ? <p className="text-sm text-slate-700"><strong>Motivo:</strong> {selectedEvent.notDoneReason}</p> : null}
               <p className="text-sm text-slate-700"><strong>Observações:</strong> {selectedEvent.notes || "Sem observações."}</p>
             </section>
 
@@ -1801,10 +1516,12 @@ export default function AgendaPage() {
             <section className="space-y-2 rounded-xl border border-slate-200 bg-white p-3">
               <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Ações rápidas</p>
               <div className="grid grid-cols-2 gap-2">
-                {/* Concluir registra a atividade vinculada; o roteiro é concluído pelas paradas. Reabrir é de gerente/diretor. */}
-                {selectedEvent.status === "planned" && selectedEvent.type !== "roteiro_visita" ? <button type="button" className="rounded-lg border border-green-300 px-3 py-2 text-xs font-semibold text-green-700" onClick={() => void openActivityModal(selectedEvent)}>Concluir</button> : null}
-                {selectedEvent.status !== "planned" && canFilterBySeller ? <button type="button" className="rounded-lg border border-green-300 px-3 py-2 text-xs font-semibold text-green-700" onClick={() => void onSetAsDone(selectedEvent)}>Reabrir</button> : null}
-                <button type="button" className="rounded-lg border border-amber-300 px-3 py-2 text-xs font-semibold text-amber-700" onClick={() => openRescheduleModal(selectedEvent)}>Reagendar</button>
+                {/* Concluir registra a atividade vinculada; o roteiro é concluído pelas paradas. Reabrir e Excluir são de gerente/diretor. */}
+                {selectedEventActions?.complete ? <button type="button" className="rounded-lg border border-green-300 px-3 py-2 text-xs font-semibold text-green-700" onClick={() => openActivityModal(selectedEvent)}>Concluir</button> : null}
+                {selectedEventActions?.reschedule ? <button type="button" className="rounded-lg border border-amber-300 px-3 py-2 text-xs font-semibold text-amber-700" onClick={() => setRescheduleTarget(selectedEvent)}>Reagendar</button> : null}
+                {selectedEventActions?.notDone ? <button type="button" className="rounded-lg border border-rose-300 px-3 py-2 text-xs font-semibold text-rose-700" onClick={() => setNotDoneTarget(selectedEvent)}>Não realizado</button> : null}
+                {selectedEventActions?.reopen ? <button type="button" className="rounded-lg border border-sky-300 px-3 py-2 text-xs font-semibold text-sky-700" onClick={() => void onReopen(selectedEvent)}>Reabrir</button> : null}
+                {selectedEventActions?.remove ? <button type="button" className="rounded-lg border border-rose-300 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700" onClick={() => void onDeleteAgendaEvent(selectedEvent)}>Excluir</button> : null}
                 {selectedEvent.type === "roteiro_visita" ? <button type="button" className="rounded-lg border border-emerald-300 px-3 py-2 text-xs font-semibold text-emerald-700" onClick={() => setExecutionEventId(selectedEvent.id)}>Iniciar rota</button> : null}
                 {selectedEvent.clientId ? <Link to={`/clientes/${selectedEvent.clientId}`} className="rounded-lg border border-brand-300 px-3 py-2 text-center text-xs font-semibold text-brand-700">Cliente 360</Link> : null}
               </div>
@@ -1860,7 +1577,7 @@ export default function AgendaPage() {
             <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 bg-white px-4 py-4 sm:px-6">
               <div>
                 <h3 className="text-lg font-semibold text-slate-900">Nova agenda</h3>
-                <p className="text-sm text-slate-500">Crie compromissos e roteiros no mesmo fluxo de Agenda.</p>
+                <p className="text-sm text-slate-500">Planeje um compromisso ou um roteiro com várias visitas.</p>
               </div>
               <button type="button" onClick={closeCreate} className="rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-600 hover:bg-slate-50">
                 ✕
@@ -1920,7 +1637,7 @@ export default function AgendaPage() {
 
               <div className="grid gap-3 md:grid-cols-2">
                 <div>
-                  <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Início</label>
+                  <label className="mb-1 block text-xs font-medium uppercase text-slate-500">{createForm.type === "roteiro_visita" ? "Início" : "Início (Brasília)"}</label>
                   <input
                     type={createForm.type === "roteiro_visita" ? "date" : "datetime-local"}
                     value={createForm.startDateTime}
@@ -1929,7 +1646,7 @@ export default function AgendaPage() {
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Fim</label>
+                  <label className="mb-1 block text-xs font-medium uppercase text-slate-500">{createForm.type === "roteiro_visita" ? "Fim" : "Fim (Brasília)"}</label>
                   <input
                     type={createForm.type === "roteiro_visita" ? "date" : "datetime-local"}
                     value={createForm.endDateTime}
@@ -2107,170 +1824,8 @@ export default function AgendaPage() {
         </div>
       ) : null}
 
-      {isFollowUpModalOpen ? (
-        <div className="mobile-modal-shell" onClick={closeFollowUpModal}>
-          <div className="mobile-modal-panel" onClick={(e) => e.stopPropagation()}>
-            <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 bg-white px-4 py-4 sm:px-6">
-              <div>
-                <h3 className="text-lg font-semibold text-slate-900">Criar follow-up</h3>
-                <p className="text-sm text-slate-500">Dados pré-preenchidos a partir do evento selecionado.</p>
-              </div>
-              <button type="button" onClick={closeFollowUpModal} className="rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-600 hover:bg-slate-50">✕</button>
-            </div>
-
-            <form className="flex min-h-0 flex-1 flex-col" onSubmit={onSubmitFollowUp}>
-              <div className="mobile-modal-body space-y-3">
-              <div>
-                <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Tipo</label>
-                <input value="Follow-up" readOnly className="w-full min-w-0 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm" />
-              </div>
-
-              <div>
-                <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Vencimento</label>
-                <input
-                  type="datetime-local"
-                  value={followUpForm.dueDate}
-                  onChange={(event) => setFollowUpForm((current) => ({ ...current, dueDate: event.target.value }))}
-                  className="w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                />
-              </div>
-
-              <div>
-                <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Cliente</label>
-                <ClientSearchSelect
-                  clients={activityClients}
-                  value={followUpForm.clientId}
-                  onChange={(clientId) =>
-                    setFollowUpForm((current) => ({
-                      ...current,
-                      clientId
-                    }))
-                  }
-                  required
-                  emptyLabel="Nenhum cliente encontrado."
-                />
-              </div>
-
-              <div>
-                <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Oportunidade (opcional)</label>
-                <input
-                  value={followUpForm.opportunityId}
-                  onChange={(event) => setFollowUpForm((current) => ({ ...current, opportunityId: event.target.value }))}
-                  placeholder="ID da oportunidade"
-                  className="w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                />
-              </div>
-
-              <div>
-                <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Notas</label>
-                <textarea
-                  value={followUpForm.notes}
-                  onChange={(event) => setFollowUpForm((current) => ({ ...current, notes: event.target.value }))}
-                  className="min-h-20 w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                />
-              </div>
-
-              </div>
-
-              <div className="mobile-modal-footer">
-                <button type="button" onClick={closeFollowUpModal} className="mobile-secondary-half rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">Cancelar</button>
-                <button type="submit" disabled={isFollowUpSubmitting} className="mobile-primary-button rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800 disabled:opacity-70">
-                  {isFollowUpSubmitting ? "Criando..." : "Criar follow-up"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      ) : null}
-
-      {isQuickOpportunityModalOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setIsQuickOpportunityModalOpen(false)}>
-          <div className="bg-white w-full max-w-lg rounded-lg shadow max-h-[90vh] overflow-y-auto px-4 py-4 md:px-6" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-lg font-semibold text-slate-900">Criar oportunidade pós-visita</h3>
-            <p className="mt-1 text-sm text-slate-500">Pré-preenchida para salvar em poucos segundos.</p>
-            <form className="mt-4 space-y-3" onSubmit={onSubmitQuickOpportunity}>
-              <label className="block text-sm font-medium text-slate-700">Título
-                <input value={quickOpportunityForm.title} onChange={(event) => setQuickOpportunityForm((current) => ({ ...current, title: event.target.value }))} className="mt-1 w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-              </label>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                <label className="block text-sm font-medium text-slate-700">Valor
-                  <input inputMode="decimal" value={quickOpportunityForm.value} onChange={(event) => setQuickOpportunityForm((current) => ({ ...current, value: event.target.value.replace(/,/g, ".").replace(/[^\d.]/g, "") }))} className="mt-1 w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-                </label>
-                <label className="block text-sm font-medium text-slate-700">Etapa
-                  <select value={quickOpportunityForm.stage} onChange={(event) => setQuickOpportunityForm((current) => ({ ...current, stage: event.target.value as QuickOpportunityForm["stage"] }))} className="mt-1 w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm">
-                    <option value="prospeccao">Prospecção</option>
-                    <option value="negociacao">Negociação</option>
-                    <option value="proposta">Proposta</option>
-                  </select>
-                </label>
-                <label className="block text-sm font-medium text-slate-700">Follow-up
-                  <input type="date" value={quickOpportunityForm.followUpDate} onChange={(event) => setQuickOpportunityForm((current) => ({ ...current, followUpDate: event.target.value }))} className="mt-1 w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-                </label>
-              </div>
-              <div className="mobile-action-stack justify-end pt-2">
-                <button type="button" onClick={() => setIsQuickOpportunityModalOpen(false)} className="mobile-secondary-half rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">Cancelar</button>
-                <button type="submit" disabled={isQuickOpportunitySubmitting} className="mobile-primary-button rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800 disabled:opacity-70">
-                  {isQuickOpportunitySubmitting ? "Salvando..." : "Salvar oportunidade"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      ) : null}
-
-      {isRescheduleOpen ? (
-        <div className="mobile-modal-shell" onClick={closeRescheduleModal}>
-          <div className="mobile-modal-panel" onClick={(e) => e.stopPropagation()}>
-            <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 bg-white px-4 py-4 sm:px-6">
-              <div>
-                <h3 className="text-lg font-semibold text-slate-900">Reagendar compromisso</h3>
-                <p className="text-sm text-slate-500">Ajuste início e fim do evento selecionado.</p>
-              </div>
-              <button type="button" onClick={closeRescheduleModal} className="rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-600 hover:bg-slate-50">
-                ✕
-              </button>
-            </div>
-
-            <form className="flex min-h-0 flex-1 flex-col" onSubmit={onSubmitReschedule}>
-              <div className="mobile-modal-body space-y-3">
-              <div>
-                <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Início</label>
-                <input
-                  type="datetime-local"
-                  value={rescheduleStartDateTime}
-                  onChange={(event) => setRescheduleStartDateTime(event.target.value)}
-                  className="w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                />
-              </div>
-
-              <div>
-                <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Fim</label>
-                <input
-                  type="datetime-local"
-                  value={rescheduleEndDateTime}
-                  onChange={(event) => setRescheduleEndDateTime(event.target.value)}
-                  className="w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                />
-              </div>
-
-              </div>
-
-              <div className="mobile-modal-footer">
-                <button type="button" onClick={closeRescheduleModal} className="mobile-secondary-half rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={isRescheduleSubmitting}
-                  className="mobile-primary-button rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-70"
-                >
-                  {isRescheduleSubmitting ? "Salvando..." : "Salvar reagendamento"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      ) : null}
+      {rescheduleTarget ? <RescheduleDialog event={rescheduleTarget} onClose={() => setRescheduleTarget(null)} onDone={onEventChanged} /> : null}
+      {notDoneTarget ? <NotDoneDialog event={notDoneTarget} onClose={() => setNotDoneTarget(null)} onDone={onEventChanged} /> : null}
     </section>
   );
 }
