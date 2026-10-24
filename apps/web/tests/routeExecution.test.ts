@@ -153,6 +153,7 @@ assert.match(page, /Aguardando conexão/);
 assert.match(page, /Roteiro concluído/);
 assert.match(page, /sem localização/);
 assert.match(page, /\(\) => resolve\(\{\}\)/, "GPS negado ou sem sinal segue sem localização");
+assert.match(page, /window\.setTimeout\(\(\) => resolve\(\{\}\), timeoutMs \+ 2000\)/, "pedido de permissão sem resposta não trava o check-in");
 assert.match(page, /window\.addEventListener\("online", goOnline\)/);
 
 console.log("route execution tests passed");

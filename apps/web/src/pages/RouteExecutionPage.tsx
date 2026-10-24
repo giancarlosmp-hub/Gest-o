@@ -67,10 +67,12 @@ const formatTime = (value: string) => formatBrazil(value, { hour: "2-digit", min
 
 const isOpenStage = (stage: string) => stage !== "ganho" && stage !== "perdido";
 
-// GPS do aparelho; sem permissão, sem sinal ou demorando, segue sem localização (nunca bloqueia).
+// GPS do aparelho; sem permissão, sem sinal ou demorando, segue sem localização (nunca bloqueia). O limite próprio
+// cobre o pedido de permissão sem resposta, em que o timeout do navegador nem começa a contar.
 const captureStopPosition = (timeoutMs = 8000): Promise<Omit<RouteStopGeo, "timestamp">> => {
   if (typeof navigator === "undefined" || !navigator.geolocation) return Promise.resolve({});
   return new Promise((resolve) => {
+    window.setTimeout(() => resolve({}), timeoutMs + 2000);
     navigator.geolocation.getCurrentPosition(
       (position) =>
         resolve({
