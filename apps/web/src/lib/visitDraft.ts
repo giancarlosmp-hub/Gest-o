@@ -109,9 +109,19 @@ export const saveVisitDraft = (
   return value;
 };
 
-// A visita só vira rascunho depois do check-in ou de algo preenchido além do tipo e da data.
-export const hasVisitDraftContent = (draft: Pick<VisitDraft, "checkIn" | "clientId" | "notes" | "observations" | "result">) =>
-  Boolean(draft.checkIn || draft.clientId || draft.notes.trim() || draft.observations.trim() || draft.result.trim());
+// A visita só vira rascunho depois do check-in ou de algo preenchido além do tipo e da data. O que já veio
+// preenchido (o "Concluir" da Agenda traz cliente e notas) não conta: só o que o vendedor capturou ou mudou.
+export const hasVisitDraftContent = (
+  draft: Pick<VisitDraft, "checkIn" | "clientId" | "notes" | "observations" | "result">,
+  prefilled: Partial<Pick<VisitDraft, "clientId" | "notes">> = {}
+) =>
+  Boolean(
+    draft.checkIn ||
+      (draft.clientId && draft.clientId !== (prefilled.clientId || "")) ||
+      (draft.notes.trim() && draft.notes.trim() !== (prefilled.notes || "").trim()) ||
+      draft.observations.trim() ||
+      draft.result.trim()
+  );
 
 // HH:MM em Brasília, para o aviso "Visita em andamento desde HH:MM".
 export const formatVisitDraftStart = (draft: Pick<VisitDraft, "startedAt">) =>

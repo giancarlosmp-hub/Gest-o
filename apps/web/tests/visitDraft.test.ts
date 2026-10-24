@@ -100,4 +100,17 @@ assert.equal(hasVisitDraftContent(empty), false);
 assert.equal(hasVisitDraftContent({ ...empty, checkIn: visit.checkIn }), true);
 assert.equal(hasVisitDraftContent({ ...empty, observations: "Texto ficticio" }), true);
 
+// "Concluir" de uma visita da Agenda: cliente e notas vêm preenchidos; sem GPS nem nada digitado, não há rascunho.
+const fromAgenda = { clientId: "cli-ficticio", notes: "Visita ficticia agendada" };
+const openedFromAgenda = { ...empty, ...fromAgenda };
+assert.equal(hasVisitDraftContent(openedFromAgenda, fromAgenda), false, "abrir o Concluir não cria o rascunho");
+assert.equal(hasVisitDraftContent({ ...openedFromAgenda, notes: "Visita ficticia agendada " }, fromAgenda), false);
+assert.equal(hasVisitDraftContent({ ...openedFromAgenda, checkIn: visit.checkIn }, fromAgenda), true, "o check-in cria");
+assert.equal(hasVisitDraftContent({ ...openedFromAgenda, observations: "Resumo ficticio" }, fromAgenda), true, "digitar cria");
+assert.equal(hasVisitDraftContent({ ...openedFromAgenda, notes: "Notas ficticias novas" }, fromAgenda), true);
+assert.equal(hasVisitDraftContent({ ...openedFromAgenda, clientId: "cli-outro" }, fromAgenda), true, "trocar o cliente cria");
+assert.equal(hasVisitDraftContent(openedFromAgenda), true, "sem o preenchido, cliente conta como conteúdo");
+assert.match(page, /setVisitDraftPrefill\(\{ clientId, notes: notes \|\| title \}\)/, "o Concluir guarda o que veio preenchido");
+assert.match(page, /hasVisitDraftContent\(draft, visitDraftPrefill\)/);
+
 console.log("visit draft tests passed");
