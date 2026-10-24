@@ -110,13 +110,19 @@ export const activityFormError = (form: ActivityFormCheck, now = new Date()) => 
     return "A data da atividade não pode ser futura. Para planejar, use o próximo passo ou a Agenda.";
   }
   if (!form.summary.trim()) return "Preencha o resumo do que foi feito.";
-  if (form.nextStep.mode === "schedule") {
-    const { type, day, time, durationMinutes } = form.nextStep;
+  return nextStepError(form.nextStep, form.opportunityOpen, now);
+};
+
+// Problema do próximo passo (agendado incompleto, ou oportunidade aberta sem decisão), ou null. Usado também pelas
+// paradas do roteiro.
+export const nextStepError = (nextStep: NextStepForm, opportunityOpen: boolean, now = new Date()) => {
+  if (nextStep.mode === "schedule") {
+    const { type, day, time, durationMinutes } = nextStep;
     if (!type || !day || !time) return "Para o próximo passo, informe o tipo, o dia e o horário.";
     if (day < brazilTodayKey(now)) return "O próximo passo não pode ficar em dia passado.";
     if (!(Number(durationMinutes) > 0)) return "Informe a duração do próximo passo em minutos.";
   }
-  if (needsNextStepDecision(form.nextStep, form.opportunityOpen)) return NEXT_STEP_REQUIRED_MESSAGE;
+  if (needsNextStepDecision(nextStep, opportunityOpen)) return NEXT_STEP_REQUIRED_MESSAGE;
   return null;
 };
 

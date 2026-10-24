@@ -19,6 +19,7 @@ import TeamPage from "./pages/TeamPage";
 import SettingsPage from "./pages/SettingsPage";
 import ActivitiesPage from "./pages/ActivitiesPage";
 import AgendaPage from "./pages/AgendaPage";
+import RouteExecutionPage from "./pages/RouteExecutionPage";
 import CommercialExecutionReportPage from "./pages/CommercialExecutionReportPage";
 import CommercialScorePage from "./pages/CommercialScorePage";
 import RouteErrorBoundary from "./components/RouteErrorBoundary";
@@ -111,6 +112,8 @@ export default function App() {
 
         <Route path="atividades" element={<ActivitiesPage />} />
         <Route path="agenda" element={<AgendaPage />} />
+        <Route path="agenda/roteiro" element={<RouteExecutionPage />} />
+        <Route path="agenda/roteiro/:eventId" element={<RouteExecutionPage />} />
         <Route path="whatsapp" element={<WhatsAppPage />} />
         <Route path="territorios" element={<TerritoriosPage />} />
         <Route path="territórios" element={<TerritoriosPage />} />
