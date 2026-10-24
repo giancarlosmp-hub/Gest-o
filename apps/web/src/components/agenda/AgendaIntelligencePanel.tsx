@@ -67,6 +67,11 @@ const typeLabel: Record<string, string> = {
   reuniao_presencial: "Visita",
   reuniao_online: "Reunião online",
   followup: "Follow-up",
+  ligacao: "Ligação",
+  whatsapp: "WhatsApp",
+  visita: "Visita",
+  proposta: "Proposta",
+  fechamento: "Fechamento",
 };
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 

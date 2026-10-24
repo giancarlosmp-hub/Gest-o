@@ -9,11 +9,15 @@ export type ActivityTypeKey =
   | "followup"
   | "proposta_enviada"
   | "proposta_negociacao"
-  | "fechamento";
+  | "fechamento"
+  | "reuniao_online"
+  | "reuniao_presencial";
 
 export const ACTIVITY_TYPE_OPTIONS: Array<{ value: ActivityTypeKey; label: string }> = [
   { value: "ligacao", label: "Ligação" },
   { value: "whatsapp", label: "WhatsApp" },
+  { value: "reuniao_online", label: "Reunião online" },
+  { value: "reuniao_presencial", label: "Reunião presencial" },
   { value: "reuniao", label: "Reunião" },
   { value: "visita", label: "Visita" },
   { value: "followup", label: "Follow-up" },

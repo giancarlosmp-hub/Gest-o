@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useAuth } from "../context/AuthContext";
 import api from "../lib/apiClient";
-import { AGENDA_EVENT_TYPE_OPTIONS, type AgendaEventType as SharedAgendaEventType } from "@salesforce-pro/shared";
+import { AGENDA_EVENT_TYPE_LABELS, AGENDA_EVENT_TYPE_OPTIONS, type AgendaEventType as SharedAgendaEventType } from "@salesforce-pro/shared";
 import { ACTIVITY_TYPE_OPTIONS, type ActivityTypeKey } from "../constants/activityTypes";
 import { getApiErrorMessage } from "../lib/apiError";
 import { triggerDashboardRefresh } from "../lib/dashboardRefresh";
@@ -38,7 +38,7 @@ type DraftStop = {
 type ClientOption = SearchableClientOption;
 
 type FollowUpForm = {
-  type: "followup";
+  type: "ligacao";
   dueDate: string;
   notes: string;
   clientId: string;
@@ -60,16 +60,19 @@ type VisitResultForm = {
 
 const typedAgendaEventOptions = AGENDA_EVENT_TYPE_OPTIONS as readonly { id: string; value: SharedAgendaEventType; label: string }[];
 
-const TYPE_LABEL: Record<SharedAgendaEventType, string> = typedAgendaEventOptions.reduce<Record<SharedAgendaEventType, string>>((acc, option) => {
-  acc[option.value] = option.label;
-  return acc;
-}, {} as Record<SharedAgendaEventType, string>);
+// Inclui o rótulo de tipos legados (followup) dos compromissos antigos.
+const TYPE_LABEL: Record<SharedAgendaEventType, string> = AGENDA_EVENT_TYPE_LABELS;
 
 const TYPE_COLOR_CLASS: Record<SharedAgendaEventType, string> = {
   reuniao_online: "bg-blue-100 text-blue-800 border-blue-200",
   reuniao_presencial: "bg-green-100 text-green-800 border-green-200",
   roteiro_visita: "bg-emerald-100 text-emerald-800 border-emerald-200",
-  followup: "bg-amber-100 text-amber-800 border-amber-200"
+  followup: "bg-amber-100 text-amber-800 border-amber-200",
+  ligacao: "bg-amber-100 text-amber-800 border-amber-200",
+  whatsapp: "bg-amber-100 text-amber-800 border-amber-200",
+  visita: "bg-green-100 text-green-800 border-green-200",
+  proposta: "bg-violet-100 text-violet-800 border-violet-200",
+  fechamento: "bg-violet-100 text-violet-800 border-violet-200"
 };
 
 const UNIQUE_AGENDA_EVENT_TYPE_OPTIONS = Array.from(
@@ -81,13 +84,15 @@ const CREATE_AGENDA_TYPE_OPTIONS = UNIQUE_AGENDA_EVENT_TYPE_OPTIONS;
 const STATUS_LABEL: Record<AgendaEvent["status"], string> = {
   planned: "Planejado",
   completed: "Concluído",
-  cancelled: "Cancelado"
+  cancelled: "Cancelado",
+  not_done: "Não realizado"
 };
 
 const STATUS_COLOR_CLASS: Record<AgendaEvent["status"], string> = {
   planned: "border-sky-200 bg-sky-100 text-sky-700",
   completed: "border-green-200 bg-green-100 text-green-700",
-  cancelled: "border-slate-200 bg-slate-100 text-slate-700"
+  cancelled: "border-slate-200 bg-slate-100 text-slate-700",
+  not_done: "border-rose-200 bg-rose-100 text-rose-700"
 };
 
 const PERIOD_FILTER_LABEL: Record<PeriodFilter, string> = {
@@ -231,11 +236,11 @@ function formatHourLabel(hour: number) {
 }
 
 function getEventVisualType(event: AgendaEvent) {
-  if (event.status === "cancelled") return "cancelled";
+  if (event.status === "cancelled" || event.status === "not_done") return "cancelled";
   if (event.status === "completed") return "completed";
   if (new Date(getEndsAt(event)).getTime() < Date.now() && event.status === "planned") return "overdue";
   if (event.type === "roteiro_visita") return "route";
-  if (event.type === "followup") return "followup";
+  if (event.type === "followup" || event.type === "ligacao" || event.type === "whatsapp") return "followup";
   if (event.type === "reuniao_online" || event.type === "reuniao_presencial") return "meeting";
   return "visit";
 }
@@ -419,7 +424,7 @@ export default function AgendaPage() {
   const [isFollowUpSubmitting, setIsFollowUpSubmitting] = useState(false);
   const [followUpSourceEvent, setFollowUpSourceEvent] = useState<AgendaEvent | null>(null);
   const [followUpForm, setFollowUpForm] = useState<FollowUpForm>({
-    type: "followup",
+    type: "ligacao",
     dueDate: "",
     notes: "",
     clientId: "",
@@ -970,8 +975,9 @@ export default function AgendaPage() {
     });
   };
 
+  // Só reabre (gerente/diretor): concluir passa pela atividade vinculada.
   const onSetAsDone = async (agendaEvent: AgendaEvent) => {
-    const nextStatus = agendaEvent.status === "completed" ? "planned" : "completed";
+    const nextStatus = "planned" as const;
     try {
       await api.patch(`/agenda/${agendaEvent.id}`, { status: nextStatus });
     } catch {
@@ -994,7 +1000,7 @@ export default function AgendaPage() {
       )
     );
     setEventsRefreshToken((current) => current + 1);
-    toast.success(nextStatus === "completed" ? "Agenda marcada como concluída." : "Agenda reaberta com sucesso.");
+    toast.success("Agenda reaberta com sucesso.");
   };
 
   const openFollowUpModal = (agendaEvent: AgendaEvent) => {
@@ -1002,7 +1008,7 @@ export default function AgendaPage() {
     dueDate.setDate(dueDate.getDate() + 2);
     setFollowUpSourceEvent(agendaEvent);
     setFollowUpForm({
-      type: "followup",
+      type: "ligacao",
       dueDate: toDateTimeInputValue(dueDate.toISOString()),
       notes: `Follow-up do evento: ${agendaEvent.title}`,
       clientId: agendaEvent.clientId || "",
@@ -1116,7 +1122,8 @@ export default function AgendaPage() {
     try {
       const response = await api.post("/agenda/events", {
         title: `${agendaEvent.title} (cópia)`,
-        type: agendaEvent.type,
+        // followup é legado e não é aceito em compromisso novo.
+        type: agendaEvent.type === "followup" ? "ligacao" : agendaEvent.type,
         startDateTime: start.toISOString(),
         endDateTime: end.toISOString(),
         sellerId: agendaEvent.userId,
@@ -1157,10 +1164,9 @@ export default function AgendaPage() {
   };
 
   const getSuggestedActivityType = (agendaType: AgendaEventType): ActivityTypeKey => {
-    if (agendaType === "reuniao_online" || agendaType === "reuniao_presencial") return "reuniao";
     if (agendaType === "roteiro_visita") return "visita";
-    if (agendaType === "followup") return "followup";
-    return "reuniao";
+    if (agendaType === "proposta") return "proposta_enviada";
+    return agendaType;
   };
 
   const openActivityModal = async (agendaEvent: AgendaEvent) => {
@@ -1795,7 +1801,9 @@ export default function AgendaPage() {
             <section className="space-y-2 rounded-xl border border-slate-200 bg-white p-3">
               <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Ações rápidas</p>
               <div className="grid grid-cols-2 gap-2">
-                <button type="button" className="rounded-lg border border-green-300 px-3 py-2 text-xs font-semibold text-green-700" onClick={() => void onSetAsDone(selectedEvent)}>Concluir</button>
+                {/* Concluir registra a atividade vinculada; o roteiro é concluído pelas paradas. Reabrir é de gerente/diretor. */}
+                {selectedEvent.status === "planned" && selectedEvent.type !== "roteiro_visita" ? <button type="button" className="rounded-lg border border-green-300 px-3 py-2 text-xs font-semibold text-green-700" onClick={() => void openActivityModal(selectedEvent)}>Concluir</button> : null}
+                {selectedEvent.status !== "planned" && canFilterBySeller ? <button type="button" className="rounded-lg border border-green-300 px-3 py-2 text-xs font-semibold text-green-700" onClick={() => void onSetAsDone(selectedEvent)}>Reabrir</button> : null}
                 <button type="button" className="rounded-lg border border-amber-300 px-3 py-2 text-xs font-semibold text-amber-700" onClick={() => openRescheduleModal(selectedEvent)}>Reagendar</button>
                 {selectedEvent.type === "roteiro_visita" ? <button type="button" className="rounded-lg border border-emerald-300 px-3 py-2 text-xs font-semibold text-emerald-700" onClick={() => setExecutionEventId(selectedEvent.id)}>Iniciar rota</button> : null}
                 {selectedEvent.clientId ? <Link to={`/clientes/${selectedEvent.clientId}`} className="rounded-lg border border-brand-300 px-3 py-2 text-center text-xs font-semibold text-brand-700">Cliente 360</Link> : null}

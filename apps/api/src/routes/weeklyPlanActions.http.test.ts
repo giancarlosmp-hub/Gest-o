@@ -156,10 +156,10 @@ try {
   // 2. Agendar: compromisso no dia da sugestão em Brasília (manhã 9h, tarde 14h); a sugestão sai do planejamento.
   assert.equal(toAgendaEvent({ ...withOpportunity.action, suggestedPeriod: "afternoon" }, "2026-10-23", "seller-a").startDateTime, "2026-10-23T17:00:00.000Z");
   assert.equal(toAgendaEvent({ ...withOpportunity.action, suggestedPeriod: null }, "2026-10-23", "seller-a").startDateTime, "2026-10-23T12:00:00.000Z");
-  assert.equal(toAgendaEvent({ ...withOpportunity.action, type: "visit" }, "2026-10-23", "seller-a").type, "reuniao_presencial", "visita entra como compromisso presencial");
+  assert.equal(toAgendaEvent({ ...withOpportunity.action, type: "visit" }, "2026-10-23", "seller-a").type, "visita", "visita entra como compromisso de Visita");
   const payload = toAgendaEvent(withOpportunity.action, withOpportunity.day.date, plan.sellerId);
   assert.equal(brazilDateOf(payload.startDateTime), withOpportunity.day.date, "início no dia da sugestão em Brasília");
-  assert.equal(payload.type, "followup");
+  assert.equal(payload.type, "ligacao", "follow-up entra como Ligação (followup é legado)");
   const created = await call("POST", "/agenda/events", "seller-a", payload);
   assert.equal(created.status, 201);
   assert.equal(brazilDateOf(created.json.startsAt), withOpportunity.day.date);
@@ -182,10 +182,11 @@ try {
   assert.equal(reactivationHref.searchParams.get("opportunityId"), null);
   assert.equal(reactivationHref.searchParams.get("type"), "ligacao");
   assert.equal(openHref(reactivation.action), "/clientes/cli-reativar");
-  // O que a tela de Atividades envia ao salvar a atividade realizada.
+  // O que a tela de Atividades envia ao salvar a atividade realizada: a data preenchida nunca passa de hoje (Brasília),
+  // porque a atividade registra o que já foi feito.
   const saved = await call("POST", "/activities", "seller-a", {
     type: reactivationHref.searchParams.get("type"), notes: reactivationHref.searchParams.get("notes"), description: "Resultado ficticio da ligação",
-    dueDate: new Date(reactivationHref.searchParams.get("date")!).toISOString(), date: new Date().toISOString(), done: true,
+    dueDate: new Date().toISOString(), date: new Date().toISOString(), done: true,
     clientId: reactivationHref.searchParams.get("clientId"), ownerSellerId: reactivationHref.searchParams.get("ownerSellerId"),
   });
   assert.equal(saved.status, 201);

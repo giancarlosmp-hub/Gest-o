@@ -26,13 +26,22 @@ const activityTypeFor: Record<PlanningAction["type"], string> = {
 // Horário que a janela do "Agendar" traz preenchido: tarde às 14h; manhã e período flexível às 9h.
 export const defaultScheduleTime = (action: PlanningAction) => (action.suggestedPeriod === "afternoon" ? "14:00" : "09:00");
 
+// Tipo do compromisso no catálogo único da Agenda; follow-up e revisão viram ligação (followup é legado).
+const agendaTypeFor: Record<PlanningAction["type"], string> = {
+  visit: "visita",
+  call: "ligacao",
+  proposal: "proposta",
+  follow_up: "ligacao",
+  whatsapp: "whatsapp",
+  review: "ligacao"
+};
+
 // "Agendar" vira compromisso da Agenda no dia e horário confirmados na janela, sempre em horário de Brasília.
-// Só a visita é presencial; ligação, WhatsApp, follow-up, proposta e revisão entram como follow-up.
 export const toAgendaEvent = (action: PlanningAction, date: string, sellerId: string, time = defaultScheduleTime(action), durationMinutes = action.estimatedDurationMinutes) => {
   const startsAt = new Date(`${date}T${time}:00-03:00`);
   return {
     title: action.title,
-    type: action.type === "visit" ? "reuniao_presencial" : "followup",
+    type: agendaTypeFor[action.type],
     startDateTime: startsAt.toISOString(),
     endDateTime: new Date(startsAt.getTime() + durationMinutes * 60_000).toISOString(),
     ...(action.clientId ? { clientId: action.clientId } : {}),
