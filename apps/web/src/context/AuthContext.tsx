@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import api, { clearSession, setAccessToken } from "../lib/apiClient";
 import { clearCurrentDailyQuoteIndex, selectNewDailyQuoteForLogin } from "../lib/dailyQuote";
+import { clearVisitDraft } from "../lib/visitDraft";
 
 export type UserRole = "diretor" | "gerente" | "vendedor";
 
@@ -53,6 +54,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } finally {
       clearSession();
       clearCurrentDailyQuoteIndex();
+      // A visita em andamento fica no aparelho só enquanto o usuário está logado.
+      clearVisitDraft(user?.id);
       setUser(null);
     }
   };

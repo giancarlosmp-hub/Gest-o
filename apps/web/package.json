@@ -19,6 +19,7 @@
     "test:client-select-search": "npx tsx tests/clientSelectSearch.test.ts",
     "test:brazil-date": "npx tsx tests/brazilDate.test.ts",
     "test:mobile-visit-action": "npx tsx tests/mobileVisitAction.test.ts",
+    "test:visit-draft": "npx tsx tests/visitDraft.test.ts",
     "test:erp-payment-method-eligibility": "npx tsx tests/erpPaymentMethodEligibility.test.ts",
     "test:whatsapp-link": "npx tsx tests/whatsappLink.test.ts",
     "test:desktop-layout": "node ./scripts/verify-desktop-layout.mjs"

@@ -28,6 +28,7 @@ import BrandLogo from "../components/BrandLogo";
 import { canAccessRoute, type AppRoute } from "../lib/authorization";
 import { useReminders } from "../hooks/useReminders";
 import MobileActionBar from "../components/mobile/MobileActionBar";
+import VisitDraftBanner from "../components/visit/VisitDraftBanner";
 import SidebarItem from "../components/sidebar/SidebarItem";
 import SidebarBrand from "../components/sidebar/SidebarBrand";
 import { SidebarProvider, useSidebar } from "../context/SidebarContext";
@@ -298,6 +299,7 @@ function AppLayoutShell() {
 
         <section className="pt-[calc(76px+env(safe-area-inset-top))] md:pt-0">
           <div className="crm-page-shell min-w-0 px-4 py-4 pb-[calc(var(--mobile-action-bar-height)+env(safe-area-inset-bottom)+1rem)] md:px-6 md:pb-4">
+            <VisitDraftBanner />
             <Outlet />
           </div>
         </section>

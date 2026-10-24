@@ -11,6 +11,15 @@ import ClientSearchSelect, { type SearchableClientOption } from "../components/c
 import QuickCreateClientSection from "../components/clients/QuickCreateClientSection";
 import { brazilMonthKey, brazilTodayKey } from "../lib/brazilDate";
 import { AGENDA_EVENT_TYPE_OPTIONS } from "@salesforce-pro/shared";
+import {
+  clearVisitDraft,
+  hasVisitDraftContent,
+  loadVisitDraft,
+  saveVisitDraft,
+  VISIT_DRAFT_CHANGE_EVENT,
+  VISIT_DRAFT_RESUME_PARAM,
+  type VisitDraft
+} from "../lib/visitDraft";
 
 // Próximo passo vira compromisso na Agenda (catálogo único, sem roteiro).
 const NEXT_STEP_TYPE_OPTIONS = AGENDA_EVENT_TYPE_OPTIONS.filter((option) => option.value !== "roteiro_visita");
@@ -132,6 +141,10 @@ export default function ActivitiesPage() {
   const [editForm, setEditForm] = useState({ type: "ligacao", notes: "", dueDate: "", duration: "" });
   const [isMobile, setIsMobile] = useState(() => window.matchMedia("(max-width: 767px)").matches);
   const [visitCheckIn, setVisitCheckIn] = useState<VisitCheckIn | null>(null);
+  // Visita em andamento: só a sessão do formulário que criou ou restaurou o rascunho grava nele, para uma Nova
+  // atividade aberta com outro rascunho ativo não sobrescrevê-lo.
+  const [canWriteVisitDraft, setCanWriteVisitDraft] = useState(false);
+  const [hasVisitDraft, setHasVisitDraft] = useState(false);
   const [capturingLocation, setCapturingLocation] = useState(false);
 
   const opportunitiesByClient = useMemo(
@@ -251,9 +264,81 @@ export default function ActivitiesPage() {
     void loadActivities();
   }, [debouncedSearch, filters.type, filters.done, filters.month, filters.clientId, filters.sellerId, filters.overdueOnly, canChooseSeller]);
 
+  const restoreVisitDraft = (draft: VisitDraft) => {
+    setForm({
+      ...initialForm,
+      type: draft.type,
+      dueDate: draft.dueDate,
+      clientId: draft.clientId,
+      opportunityId: draft.opportunityId,
+      agendaEventId: draft.agendaEventId,
+      ownerSellerId: draft.ownerSellerId || (isSeller && user?.id ? user.id : ""),
+      city: draft.city,
+      notes: draft.notes,
+      observations: draft.observations,
+      result: draft.result
+    });
+    setVisitCheckIn(draft.checkIn);
+    setOpportunitySearch("");
+    setCanWriteVisitDraft(true);
+    setIsModalOpen(true);
+  };
+
+  useEffect(() => {
+    const refresh = () => setHasVisitDraft(Boolean(loadVisitDraft(user?.id)));
+    refresh();
+    window.addEventListener(VISIT_DRAFT_CHANGE_EVENT, refresh);
+    window.addEventListener("storage", refresh);
+    return () => {
+      window.removeEventListener(VISIT_DRAFT_CHANGE_EVENT, refresh);
+      window.removeEventListener("storage", refresh);
+    };
+  }, [user?.id]);
+
+  // "Continuar" do aviso de visita em andamento.
+  useEffect(() => {
+    if (searchParams.get(VISIT_DRAFT_RESUME_PARAM) !== "1") return;
+    const draft = loadVisitDraft(user?.id);
+    if (draft) restoreVisitDraft(draft);
+    else toast.info("A visita em andamento expirou ou foi descartada.");
+    const params = new URLSearchParams(searchParams);
+    params.delete(VISIT_DRAFT_RESUME_PARAM);
+    setSearchParams(params, { replace: true });
+  }, [searchParams, setSearchParams, user?.id]);
+
+  // Grava o rascunho da visita a cada mudança, depois do check-in ou de algo preenchido.
+  useEffect(() => {
+    if (!isModalOpen || !canWriteVisitDraft || form.type !== "visita") return;
+    const draft = {
+      type: form.type,
+      dueDate: form.dueDate,
+      clientId: form.clientId,
+      opportunityId: form.opportunityId,
+      agendaEventId: form.agendaEventId,
+      ownerSellerId: form.ownerSellerId,
+      city: form.city,
+      notes: form.notes,
+      observations: form.observations,
+      result: form.result,
+      checkIn: visitCheckIn
+    };
+    if (hasVisitDraftContent(draft)) saveVisitDraft(user?.id, draft);
+  }, [isModalOpen, canWriteVisitDraft, form, visitCheckIn, user?.id]);
+
   useEffect(() => {
     const openFromAgenda = searchParams.get("open") === "create";
     if (!openFromAgenda) return;
+
+    // O botão "Visita" com uma visita em andamento continua o rascunho em vez de começar outra.
+    const activeDraft = loadVisitDraft(user?.id);
+    if (searchParams.get("type") === "visita" && activeDraft) {
+      restoreVisitDraft(activeDraft);
+      const params = new URLSearchParams(searchParams);
+      for (const key of ["open", "date", "type", "clientId", "opportunityId", "agendaEventId", "ownerSellerId", "notes", "title", "city", "executed"]) params.delete(key);
+      setSearchParams(params, { replace: true });
+      return;
+    }
+    setCanWriteVisitDraft(!activeDraft);
 
     const date = searchParams.get("date") || "";
     const type = searchParams.get("type") || "ligacao";
@@ -295,7 +380,7 @@ export default function ActivitiesPage() {
     params.delete("city");
     params.delete("executed");
     setSearchParams(params, { replace: true });
-  }, [searchParams, setSearchParams]);
+  }, [searchParams, setSearchParams, user?.id]);
 
   const clearFilters = () => {
     setFilters(initialFilters);
@@ -306,14 +391,22 @@ export default function ActivitiesPage() {
     setForm({ ...initialForm, ownerSellerId: isSeller && user?.id ? user.id : "" });
     setOpportunitySearch("");
     setVisitCheckIn(null);
+    setCanWriteVisitDraft(!loadVisitDraft(user?.id));
     setIsModalOpen(true);
   };
 
+  // Fechar sem salvar mantém o rascunho: a visita continua em andamento.
   const closeCreateModal = () => {
     setIsModalOpen(false);
     setForm(initialForm);
     setOpportunitySearch("");
     setVisitCheckIn(null);
+    setCanWriteVisitDraft(false);
+  };
+
+  const discardVisitDraft = () => {
+    clearVisitDraft(user?.id);
+    closeCreateModal();
   };
 
   const captureVisitCheckIn = async () => {
@@ -443,6 +536,7 @@ export default function ActivitiesPage() {
       }
 
       await api.post("/activities", payload);
+      if (form.type === "visita" && canWriteVisitDraft) clearVisitDraft(user?.id);
       toast.success("Atividade criada");
       if (form.agendaEventId) {
         toast.success("Compromisso concluído automaticamente");
@@ -971,6 +1065,11 @@ export default function ActivitiesPage() {
               <div>
                 <h3 className="text-xl font-semibold">Nova atividade</h3>
                 <p className="text-sm text-slate-500">Registre o que foi feito. O próximo passo vira compromisso na Agenda.</p>
+                {hasVisitDraft && canWriteVisitDraft ? (
+                  <button type="button" className="mt-2 rounded-md border border-rose-200 px-2 py-1 text-xs font-medium text-rose-700 hover:bg-rose-50" onClick={discardVisitDraft}>
+                    Descartar visita em andamento
+                  </button>
+                ) : null}
               </div>
               <button type="button" className="rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-500 hover:bg-slate-50" onClick={closeCreateModal} aria-label="Fechar modal">
                 ✕
