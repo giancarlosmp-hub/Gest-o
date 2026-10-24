@@ -1,16 +1,29 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useAuth } from "../context/AuthContext";
 import api from "../lib/apiClient";
-import { ACTIVITY_TYPE_OPTIONS, toLabel } from "../constants/activityTypes";
+import { ACTIVITY_CATALOG_OPTIONS, ACTIVITY_TYPE_OPTIONS, isActivityCatalogType, toLabel } from "../constants/activityTypes";
 import { getApiErrorMessage } from "../lib/apiError";
 import { triggerDashboardRefresh } from "../lib/dashboardRefresh";
 import ClientSelect from "../components/ClientSelect";
 import ClientSearchSelect, { type SearchableClientOption } from "../components/clients/ClientSearchSelect";
 import QuickCreateClientSection from "../components/clients/QuickCreateClientSection";
-import { brazilMonthKey, brazilTodayKey } from "../lib/brazilDate";
-import { AGENDA_EVENT_TYPE_OPTIONS } from "@salesforce-pro/shared";
+import { brazilDateTime, brazilDayKeyOf, brazilMonthKey, brazilTimeKey, brazilTodayKey, formatBrazil, shiftBrazilDayKey } from "../lib/brazilDate";
+import { AGENDA_EVENT_TYPE_LABELS, AGENDA_EVENT_TYPE_OPTIONS, type AgendaEventType } from "@salesforce-pro/shared";
+import {
+  activityDateTimeDefaults,
+  activityFormError,
+  activityTypeForAgendaType,
+  agendaEventActions,
+  completeAgendaEventHref,
+  needsNextStepDecision,
+  NEXT_STEP_DEFAULT_DURATION,
+  NEXT_STEP_REQUIRED_MESSAGE,
+  nextStepPayload,
+  type NextStepMode
+} from "../lib/agendaActivity";
+import { NotDoneDialog, RescheduleDialog } from "../components/agenda/AgendaEventDialogs";
 import {
   clearVisitDraft,
   hasVisitDraftContent,
@@ -24,7 +37,22 @@ import {
 // Próximo passo vira compromisso na Agenda (catálogo único, sem roteiro).
 const NEXT_STEP_TYPE_OPTIONS = AGENDA_EVENT_TYPE_OPTIONS.filter((option) => option.value !== "roteiro_visita");
 
-type Opportunity = { id: string; title: string; clientId: string };
+type Opportunity = { id: string; title: string; clientId: string; stage: string };
+
+// Compromisso pendente (GET /agenda/pending): passado e ainda agendado.
+type PendingAgendaEvent = {
+  id: string;
+  ownerId: string;
+  type: AgendaEventType;
+  title: string;
+  startsAt: string;
+  endsAt: string;
+  status: "planned";
+  notes?: string | null;
+  clientId?: string | null;
+  opportunityId?: string | null;
+  city?: string | null;
+};
 type Seller = { id: string; name: string; role?: string };
 type ClientOption = SearchableClientOption;
 
@@ -71,7 +99,9 @@ const initialForm = {
   type: "ligacao",
   notes: "",
   observations: "",
+  // Dia (YYYY-MM-DD) e horário (HH:MM) de Brasília em que a atividade foi feita.
   dueDate: "",
+  time: "",
   city: "",
   clientId: "",
   opportunityId: "",
@@ -82,10 +112,11 @@ const initialForm = {
   crop: "",
   areaEstimated: "",
   product: "",
-  // Atividade registra o que já foi feito: sempre realizada.
-  executed: true,
+  nextStepMode: "" as NextStepMode,
   nextStepType: "",
-  nextStepAt: "",
+  nextStepDay: "",
+  nextStepTime: "",
+  nextStepDuration: NEXT_STEP_DEFAULT_DURATION,
   noNextStepReason: ""
 };
 const initialFilters: ActivityFilters = { q: "", type: "", done: "", month: "", clientId: "", sellerId: "", overdueOnly: false };
@@ -129,15 +160,10 @@ export default function ActivitiesPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedActivity, setSelectedActivity] = useState<Activity | null>(null);
   const [executionActivity, setExecutionActivity] = useState<Activity | null>(null);
-  const [rescheduleActivity, setRescheduleActivity] = useState<Activity | null>(null);
-  const [duplicateActivity, setDuplicateActivity] = useState<Activity | null>(null);
   const [editActivity, setEditActivity] = useState<Activity | null>(null);
   const [filters, setFilters] = useState<ActivityFilters>(initialFilters);
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [executionForm, setExecutionForm] = useState({ result: "", observations: "", duration: "" });
-  const [rescheduleDate, setRescheduleDate] = useState("");
-  const [duplicateDate, setDuplicateDate] = useState("");
-  const [duplicateNoNextStepReason, setDuplicateNoNextStepReason] = useState("");
   const [editForm, setEditForm] = useState({ type: "ligacao", notes: "", dueDate: "", duration: "" });
   const [isMobile, setIsMobile] = useState(() => window.matchMedia("(max-width: 767px)").matches);
   const [visitCheckIn, setVisitCheckIn] = useState<VisitCheckIn | null>(null);
@@ -146,6 +172,11 @@ export default function ActivitiesPage() {
   const [canWriteVisitDraft, setCanWriteVisitDraft] = useState(false);
   const [hasVisitDraft, setHasVisitDraft] = useState(false);
   const [capturingLocation, setCapturingLocation] = useState(false);
+  const [pendingEvents, setPendingEvents] = useState<PendingAgendaEvent[]>([]);
+  const [pendingOlderCount, setPendingOlderCount] = useState<number | null>(null);
+  const [pendingLoading, setPendingLoading] = useState(true);
+  const [rescheduleTarget, setRescheduleTarget] = useState<PendingAgendaEvent | null>(null);
+  const [notDoneTarget, setNotDoneTarget] = useState<PendingAgendaEvent | null>(null);
 
   const opportunitiesByClient = useMemo(
     () => (form.clientId ? opportunities.filter((item) => item.clientId === form.clientId) : []),
@@ -195,7 +226,7 @@ export default function ActivitiesPage() {
 
       setOpportunities(
         Array.isArray(opportunitiesRes.data)
-          ? opportunitiesRes.data.map((item: any) => ({ id: String(item.id), title: String(item.title || ""), clientId: String(item.clientId || "") }))
+          ? opportunitiesRes.data.map((item: any) => ({ id: String(item.id), title: String(item.title || ""), clientId: String(item.clientId || ""), stage: String(item.stage || "") }))
           : []
       );
 
@@ -251,8 +282,25 @@ export default function ActivitiesPage() {
     }
   };
 
+  // Pendências: compromissos passados ainda agendados dos últimos 30 dias. Gerente e diretor recebem também o
+  // contador dos mais antigos; o filtro de vendedor da lista vale aqui.
+  const loadPending = async () => {
+    setPendingLoading(true);
+    try {
+      const response = await api.get("/agenda/pending", { params: canChooseSeller && filters.sellerId ? { sellerId: filters.sellerId } : {} });
+      setPendingEvents(Array.isArray(response.data?.items) ? response.data.items : []);
+      setPendingOlderCount(typeof response.data?.olderCount === "number" ? response.data.olderCount : null);
+    } catch (error) {
+      setPendingEvents([]);
+      setPendingOlderCount(null);
+      toast.error(getApiErrorMessage(error, "Não foi possível carregar as pendências."));
+    } finally {
+      setPendingLoading(false);
+    }
+  };
+
   const refreshAfterMutation = async () => {
-    await loadActivities();
+    await Promise.all([loadActivities(), loadPending()]);
     triggerDashboardRefresh({ month: brazilMonthKey() });
   };
 
@@ -264,11 +312,16 @@ export default function ActivitiesPage() {
     void loadActivities();
   }, [debouncedSearch, filters.type, filters.done, filters.month, filters.clientId, filters.sellerId, filters.overdueOnly, canChooseSeller]);
 
+  useEffect(() => {
+    void loadPending();
+  }, [filters.sellerId, canChooseSeller]);
+
   const restoreVisitDraft = (draft: VisitDraft) => {
     setForm({
       ...initialForm,
       type: draft.type,
       dueDate: draft.dueDate,
+      time: draft.time || activityDateTimeDefaults(draft.dueDate).time,
       clientId: draft.clientId,
       opportunityId: draft.opportunityId,
       agendaEventId: draft.agendaEventId,
@@ -312,6 +365,7 @@ export default function ActivitiesPage() {
     const draft = {
       type: form.type,
       dueDate: form.dueDate,
+      time: form.time,
       clientId: form.clientId,
       opportunityId: form.opportunityId,
       agendaEventId: form.agendaEventId,
@@ -349,14 +403,15 @@ export default function ActivitiesPage() {
     const notes = searchParams.get("notes") || "";
     const title = searchParams.get("title") || "";
     const city = searchParams.get("city") || "";
-    // A data preenchida (Agenda, Planejamento) nunca passa de hoje em Brasília.
-    const prefilledDate = date ? new Date(date).toISOString().slice(0, 10) : "";
-    const today = brazilTodayKey();
+    // Data e hora preenchidas (Agenda, Planejamento, barra rápida) em Brasília, nunca depois de agora.
+    const prefilled = activityDateTimeDefaults(date);
 
     setForm((current) => ({
       ...current,
-      type: ACTIVITY_TYPE_OPTIONS.some((option) => option.value === type) ? type : current.type,
-      dueDate: prefilledDate ? (prefilledDate > today ? today : prefilledDate) : current.dueDate,
+      // Tipo fora do catálogo (followup do Planejamento, legados) entra como o equivalente do catálogo.
+      type: activityTypeForAgendaType(type),
+      dueDate: prefilled.day,
+      time: prefilled.time,
       clientId,
       opportunityId,
       agendaEventId,
@@ -388,7 +443,8 @@ export default function ActivitiesPage() {
   };
 
   const openCreateModal = () => {
-    setForm({ ...initialForm, ownerSellerId: isSeller && user?.id ? user.id : "" });
+    const now = activityDateTimeDefaults();
+    setForm({ ...initialForm, dueDate: now.day, time: now.time, ownerSellerId: isSeller && user?.id ? user.id : "" });
     setOpportunitySearch("");
     setVisitCheckIn(null);
     setCanWriteVisitDraft(!loadVisitDraft(user?.id));
@@ -479,23 +535,40 @@ export default function ActivitiesPage() {
     return clientOption;
   };
 
+  // Oportunidade aberta (não ganha nem perdida) pede o próximo passo ou o motivo de não haver um.
+  const selectedOpportunity = opportunities.find((item) => item.id === form.opportunityId);
+  const opportunityOpen = Boolean(selectedOpportunity && selectedOpportunity.stage !== "ganho" && selectedOpportunity.stage !== "perdido");
+  const nextStepForm = {
+    mode: form.nextStepMode,
+    type: form.nextStepType,
+    day: form.nextStepDay,
+    time: form.nextStepTime,
+    durationMinutes: form.nextStepDuration,
+    reason: form.noNextStepReason
+  };
+  const showNextStepWarning = needsNextStepDecision(nextStepForm, opportunityOpen);
+  // Registro aberto pelo "Concluir" de um compromisso: cliente e oportunidade são os do compromisso.
+  const isLinkedToAgendaEvent = Boolean(form.agendaEventId);
+
+  const chooseNextStepMode = (mode: NextStepMode) => {
+    setForm((previous) => ({
+      ...previous,
+      nextStepMode: mode,
+      // Sugestão: amanhã às 9h; o vendedor ajusta.
+      nextStepDay: mode === "schedule" && !previous.nextStepDay ? shiftBrazilDayKey(brazilTodayKey(), 1) : previous.nextStepDay,
+      nextStepTime: mode === "schedule" && !previous.nextStepTime ? "09:00" : previous.nextStepTime
+    }));
+  };
+
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
-    const requiresExecutionFields = form.executed;
-    if (!form.clientId || !form.dueDate || (canChooseSeller && !form.ownerSellerId)) {
-      toast.error(canChooseSeller ? "Preencha vendedor, cliente e data." : "Preencha cliente e data.");
+    if ((!isLinkedToAgendaEvent && !form.clientId) || (canChooseSeller && !isLinkedToAgendaEvent && !form.ownerSellerId)) {
+      toast.error(canChooseSeller ? "Preencha vendedor e cliente." : "Preencha o cliente.");
       return;
     }
-    if (form.dueDate > brazilTodayKey()) {
-      toast.error("A data da atividade não pode ser futura. Para planejar, use o próximo passo ou a Agenda.");
-      return;
-    }
-    if (requiresExecutionFields && !form.observations.trim()) {
-      toast.error("Preencha o resumo do que foi feito.");
-      return;
-    }
-    if (Boolean(form.nextStepType) !== Boolean(form.nextStepAt)) {
-      toast.error("Para o próximo passo, informe o tipo e a data/hora.");
+    const formError = activityFormError({ day: form.dueDate, time: form.time, summary: form.observations, opportunityOpen, nextStep: nextStepForm });
+    if (formError) {
+      toast.error(formError);
       return;
     }
     if (form.type === "visita" && !visitCheckIn) {
@@ -504,14 +577,15 @@ export default function ActivitiesPage() {
 
     setSaving(true);
     try {
+      // A data e a hora escolhidas (Brasília) são gravadas como o momento da atividade.
+      const activityAt = brazilDateTime(form.dueDate, form.time).toISOString();
       const payload: any = {
         type: form.type,
         notes: form.notes.trim() || undefined,
-        description: requiresExecutionFields ? form.observations.trim() : form.notes.trim() || undefined,
-        dueDate: new Date(form.dueDate).toISOString(),
-        date: requiresExecutionFields ? new Date().toISOString() : new Date(form.dueDate).toISOString(),
-        duration: requiresExecutionFields && form.duration ? Number(form.duration) : undefined,
-        done: requiresExecutionFields,
+        description: form.observations.trim(),
+        dueDate: activityAt,
+        date: activityAt,
+        duration: form.duration ? Number(form.duration) : undefined,
         city: form.city || undefined,
         crop: form.crop.trim() || undefined,
         areaEstimated: form.areaEstimated ? Number(form.areaEstimated) : undefined,
@@ -519,32 +593,37 @@ export default function ActivitiesPage() {
         checkInAt: form.type === "visita" ? visitCheckIn?.checkInAt : undefined,
         checkInLat: form.type === "visita" ? visitCheckIn?.checkInLat : undefined,
         checkInLng: form.type === "visita" ? visitCheckIn?.checkInLng : undefined,
-        checkInAccuracy: form.type === "visita" ? visitCheckIn?.checkInAccuracy : undefined,
-        clientId: form.clientId,
-        opportunityId: form.opportunityId || undefined,
-        agendaEventId: form.agendaEventId || undefined,
-        ownerSellerId: isSeller && user?.id ? user.id : form.ownerSellerId || undefined
+        checkInAccuracy: form.type === "visita" ? visitCheckIn?.checkInAccuracy : undefined
       };
 
-      if (requiresExecutionFields && form.result.trim().length > 0) {
+      if (form.result.trim().length > 0) {
         payload.result = form.result.trim();
       }
-      if (form.nextStepType && form.nextStepAt) {
-        payload.nextStep = { type: form.nextStepType, startsAt: new Date(form.nextStepAt).toISOString() };
-      } else if (form.noNextStepReason.trim()) {
+      if (form.nextStepMode === "schedule") {
+        payload.nextStep = nextStepPayload(nextStepForm);
+      } else if (form.nextStepMode === "none" && form.noNextStepReason.trim()) {
         payload.noNextStepReason = form.noNextStepReason.trim();
       }
 
-      await api.post("/activities", payload);
-      if (form.type === "visita" && canWriteVisitDraft) clearVisitDraft(user?.id);
-      toast.success("Atividade criada");
-      if (form.agendaEventId) {
-        toast.success("Compromisso concluído automaticamente");
+      if (isLinkedToAgendaEvent) {
+        // "Concluir": cria a atividade com cliente, oportunidade e vendedor do compromisso e o marca como realizado.
+        await api.post(`/agenda/events/${form.agendaEventId}/complete`, payload);
+      } else {
+        await api.post("/activities", {
+          ...payload,
+          done: true,
+          clientId: form.clientId,
+          opportunityId: form.opportunityId || undefined,
+          ownerSellerId: isSeller && user?.id ? user.id : form.ownerSellerId || undefined
+        });
       }
+      if (form.type === "visita" && canWriteVisitDraft) clearVisitDraft(user?.id);
+      toast.success(isLinkedToAgendaEvent ? "Atividade registrada e compromisso concluído." : "Atividade registrada.");
+      if (payload.nextStep) toast.success("Próximo passo agendado na Agenda.");
       closeCreateModal();
       await refreshAfterMutation();
     } catch (error) {
-      toast.error(getApiErrorMessage(error, "Não foi possível criar a atividade."));
+      toast.error(getApiErrorMessage(error, "Não foi possível registrar a atividade."));
     } finally {
       setSaving(false);
     }
@@ -592,75 +671,11 @@ export default function ActivitiesPage() {
       }
 
       await api.put(`/activities/${executionActivity.id}`, payload);
-      toast.success("Atividade executada com sucesso.");
+      toast.success("Atividade concluída.");
       setExecutionActivity(null);
       await refreshAfterMutation();
     } catch (error) {
-      toast.error(getApiErrorMessage(error, "Não foi possível executar a atividade."));
-    } finally {
-      setSavingAction(false);
-    }
-  };
-
-  const openRescheduleModal = (activity: Activity) => {
-    setRescheduleActivity(activity);
-    setRescheduleDate(new Date(activity.dueDate).toISOString().slice(0, 10));
-  };
-
-  const reschedule = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!rescheduleActivity || !rescheduleDate) return;
-    setSavingAction(true);
-    try {
-      await api.put(`/activities/${rescheduleActivity.id}`, {
-        dueDate: new Date(rescheduleDate).toISOString()
-      });
-      toast.success("Atividade reagendada.");
-      setRescheduleActivity(null);
-      await refreshAfterMutation();
-    } catch (error) {
-      toast.error(getApiErrorMessage(error, "Não foi possível reagendar a atividade."));
-    } finally {
-      setSavingAction(false);
-    }
-  };
-
-  const openDuplicateModal = (activity: Activity) => {
-    setDuplicateActivity(activity);
-    setDuplicateDate("");
-    setDuplicateNoNextStepReason("");
-  };
-
-  const duplicate = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!duplicateActivity || !duplicateDate) return;
-    if (duplicateDate > brazilTodayKey()) {
-      toast.error("A data da atividade não pode ser futura.");
-      return;
-    }
-    setSavingAction(true);
-    try {
-      await api.post("/activities", {
-        type: duplicateActivity.type,
-        notes: duplicateActivity.notes,
-        description: duplicateActivity.description || duplicateActivity.notes,
-        dueDate: new Date(duplicateDate).toISOString(),
-        date: new Date(duplicateDate).toISOString(),
-        duration: duplicateActivity.duration || undefined,
-        city: duplicateActivity.city || undefined,
-        crop: duplicateActivity.crop || undefined,
-        areaEstimated: duplicateActivity.areaEstimated || undefined,
-        product: duplicateActivity.product || undefined,
-        clientId: duplicateActivity.client?.id || duplicateActivity.opportunity?.client?.id,
-        opportunityId: duplicateActivity.opportunity?.id || undefined,
-        noNextStepReason: duplicateNoNextStepReason.trim() || undefined,
-        ownerSellerId: duplicateActivity.ownerSellerId
-      });
-      toast.success("Atividade duplicada com sucesso.");
-      setDuplicateActivity(null);
-      await refreshAfterMutation();
-    } catch (error) {
-      toast.error(getApiErrorMessage(error, "Não foi possível duplicar a atividade."));
+      toast.error(getApiErrorMessage(error, "Não foi possível concluir a atividade."));
     } finally {
       setSavingAction(false);
     }
@@ -671,7 +686,7 @@ export default function ActivitiesPage() {
     setEditForm({
       type: activity.type,
       notes: activity.notes,
-      dueDate: new Date(activity.dueDate).toISOString().slice(0, 10),
+      dueDate: brazilDayKeyOf(activity.dueDate),
       duration: activity.duration ? String(activity.duration) : ""
     });
   };
@@ -684,7 +699,8 @@ export default function ActivitiesPage() {
       await api.put(`/activities/${editActivity.id}`, {
         type: editForm.type,
         notes: editForm.notes.trim(),
-        dueDate: new Date(editForm.dueDate).toISOString(),
+        // Muda o dia (Brasília) e mantém o horário.
+        dueDate: brazilDateTime(editForm.dueDate, brazilTimeKey(editActivity.dueDate)).toISOString(),
         duration: editForm.duration ? Number(editForm.duration) : null
       });
       toast.success("Atividade atualizada com sucesso.");
@@ -702,12 +718,71 @@ export default function ActivitiesPage() {
       <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <h2 className="text-2xl font-bold text-slate-900">Atividades</h2>
-          <p className="text-sm text-slate-500">Acompanhe pendências e registre execuções com mais conforto no mobile.</p>
+          <p className="text-sm text-slate-500">Histórico do que foi feito. Para planejar, use o próximo passo ou a Agenda.</p>
         </div>
         <button type="button" onClick={openCreateModal} className="w-full rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800 sm:w-auto">
           Nova atividade
         </button>
       </div>
+
+      <section className="rounded-xl border border-amber-200 bg-white p-4 shadow-sm" aria-labelledby="pending-title">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div className="min-w-0">
+            <h3 id="pending-title" className="text-base font-semibold text-slate-900">Pendências</h3>
+            <p className="text-sm text-slate-500">Compromissos dos últimos 30 dias que já passaram e ainda não foram concluídos.</p>
+          </div>
+          {pendingOlderCount ? (
+            <Link to="/agenda?pendentes=antigos" className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-100">
+              {pendingOlderCount === 1 ? "1 compromisso antigo sem conclusão" : `${pendingOlderCount} compromissos antigos sem conclusão`}
+            </Link>
+          ) : null}
+        </div>
+        {pendingLoading ? (
+          <p className="mt-3 text-sm text-slate-500">Carregando...</p>
+        ) : !pendingEvents.length ? (
+          <p className="mt-3 text-sm text-slate-500">Nenhuma pendência. Tudo em dia.</p>
+        ) : (
+          <ul className="mt-3 divide-y divide-slate-100 rounded-lg border border-slate-200">
+            {pendingEvents.map((item) => {
+              const actions = agendaEventActions(item, user?.role);
+              const clientName = item.clientId ? clients.find((client) => client.id === item.clientId)?.name || "Cliente" : "Sem cliente";
+              const sellerName = canChooseSeller ? sellers.find((seller) => seller.id === item.ownerId)?.name : null;
+              return (
+                <li key={item.id} className="flex flex-col gap-2 p-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-slate-900">{item.title}</p>
+                    <p className="text-xs text-slate-500">
+                      {AGENDA_EVENT_TYPE_LABELS[item.type] || item.type} • {formatBrazil(item.startsAt, { dateStyle: "short", timeStyle: "short" })} • {clientName}
+                      {sellerName ? ` • ${sellerName}` : ""}
+                    </p>
+                  </div>
+                  <div className="grid shrink-0 grid-cols-3 gap-2 sm:flex">
+                    {actions.complete ? (
+                      <button type="button" className="rounded-md border border-green-300 px-3 py-2 text-xs font-semibold text-green-700 hover:bg-green-50" onClick={() => setSearchParams(new URLSearchParams(completeAgendaEventHref(item).split("?")[1]))}>
+                        Concluir
+                      </button>
+                    ) : (
+                      <Link to="/agenda" className="rounded-md border border-emerald-300 px-3 py-2 text-center text-xs font-semibold text-emerald-700 hover:bg-emerald-50" title="O roteiro é concluído pelas paradas">
+                        Ver roteiro
+                      </Link>
+                    )}
+                    {actions.reschedule ? (
+                      <button type="button" className="rounded-md border border-amber-300 px-3 py-2 text-xs font-semibold text-amber-700 hover:bg-amber-50" onClick={() => setRescheduleTarget(item)}>
+                        Reagendar
+                      </button>
+                    ) : null}
+                    {actions.notDone ? (
+                      <button type="button" className="rounded-md border border-rose-300 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-50" onClick={() => setNotDoneTarget(item)}>
+                        Não realizado
+                      </button>
+                    ) : null}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
 
       <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-7">
@@ -804,7 +879,7 @@ export default function ActivitiesPage() {
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-semibold text-slate-900">{item.opportunity?.client?.name || item.client?.name || "Cliente não informado"}</p>
-                        <p className="mt-1 text-xs text-slate-500">{toLabel(item.type)} • {new Date(item.dueDate).toLocaleDateString("pt-BR")}</p>
+                        <p className="mt-1 text-xs text-slate-500">{toLabel(item.type)} • {formatBrazil(item.date || item.dueDate, { dateStyle: "short", timeStyle: "short" })}</p>
                         {item.type === "visita" && item.checkInAt ? <p className="mt-1 inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-700">Check-in realizado</p> : null}
                       </div>
                       <span className={`rounded-full border px-2 py-1 text-center text-xs font-medium leading-5 ${STATUS_CLASS[status]}`}>{STATUS_LABEL[status]}</span>
@@ -822,24 +897,23 @@ export default function ActivitiesPage() {
                     </dl>
 
                     <div className="mobile-action-stack mt-4" onClick={(event) => event.stopPropagation()}>
+                      {/* Atividade é o que já foi feito: sem reagendar nem duplicar. Pendente só existe em registro antigo. */}
                       {status === "agendado" ? (
                         <>
-                          <button type="button" className="rounded-md border border-brand-200 px-3 py-2 text-center text-xs font-medium text-brand-700" onClick={() => openExecutionModal(item)}>Executar</button>
+                          <button type="button" className="rounded-md border border-brand-200 px-3 py-2 text-center text-xs font-medium text-brand-700" onClick={() => openExecutionModal(item)}>Concluir</button>
                           <button type="button" className="rounded-md border border-slate-300 px-3 py-2 text-center text-xs font-medium text-slate-700" onClick={() => openEditModal(item)}>Editar</button>
                           {canChooseSeller ? <button type="button" className="rounded-md border border-rose-200 px-3 py-2 text-center text-xs font-medium text-rose-700" disabled={removingId === item.id} onClick={() => void deleteActivity(item.id)}>Excluir</button> : null}
                         </>
                       ) : null}
                       {status === "vencido" ? (
                         <>
-                          <button type="button" className="rounded-md border border-brand-200 px-3 py-2 text-center text-xs font-medium text-brand-700" onClick={() => openExecutionModal(item)}>Executar</button>
-                          <button type="button" className="rounded-md border border-amber-200 px-3 py-2 text-center text-xs font-medium text-amber-700" onClick={() => openRescheduleModal(item)}>Reagendar</button>
+                          <button type="button" className="rounded-md border border-brand-200 px-3 py-2 text-center text-xs font-medium text-brand-700" onClick={() => openExecutionModal(item)}>Concluir</button>
                           {canChooseSeller ? <button type="button" className="rounded-md border border-rose-200 px-3 py-2 text-center text-xs font-medium text-rose-700" disabled={removingId === item.id} onClick={() => void deleteActivity(item.id)}>Excluir</button> : null}
                         </>
                       ) : null}
                       {status === "realizado" ? (
                         <>
                           <button type="button" className="rounded-md border border-slate-300 px-3 py-2 text-center text-xs font-medium text-slate-700" onClick={() => setSelectedActivity(item)}>Visualizar</button>
-                          <button type="button" className="rounded-md border border-emerald-200 px-3 py-2 text-center text-xs font-medium text-emerald-700" onClick={() => openDuplicateModal(item)}>Duplicar</button>
                         </>
                       ) : null}
                     </div>
@@ -855,7 +929,7 @@ export default function ActivitiesPage() {
                     <th className="p-2">Tipo</th>
                     <th className="p-2">Cliente</th>
                     <th className="p-2">Oportunidade</th>
-                    <th className="p-2">Vencimento</th>
+                    <th className="p-2">Data</th>
                     <th className="p-2">Status</th>
                     <th className="p-2">Notas</th>
                     <th className="p-2 text-right">Ações</th>
@@ -869,7 +943,7 @@ export default function ActivitiesPage() {
                         <td className="p-2">{toLabel(item.type)}</td>
                         <td className="p-2">{item.opportunity?.client?.name || item.client?.name || "—"}</td>
                         <td className="p-2">{item.opportunity?.title || "—"}</td>
-                        <td className="p-2">{new Date(item.dueDate).toLocaleDateString("pt-BR")}</td>
+                        <td className="p-2">{formatBrazil(item.date || item.dueDate, { dateStyle: "short", timeStyle: "short" })}</td>
                         <td className="p-2">
                           {item.type === "visita" && item.checkInAt ? <span className="mr-2 rounded-full bg-emerald-100 px-2 py-1 text-[11px] font-medium text-emerald-700">Check-in realizado</span> : null}
                           <span className={`rounded-full border px-2 py-1 text-xs font-medium ${STATUS_CLASS[status]}`}>{STATUS_LABEL[status]}</span>
@@ -879,22 +953,20 @@ export default function ActivitiesPage() {
                           <div className="flex justify-end gap-1" onClick={(event) => event.stopPropagation()}>
                             {status === "agendado" ? (
                               <>
-                                <button type="button" className="rounded-md border border-brand-200 px-2 py-1 text-xs text-brand-700" onClick={() => openExecutionModal(item)}>Executar</button>
+                                <button type="button" className="rounded-md border border-brand-200 px-2 py-1 text-xs text-brand-700" onClick={() => openExecutionModal(item)}>Concluir</button>
                                 <button type="button" className="rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700" onClick={() => openEditModal(item)}>Editar</button>
                                 {canChooseSeller ? <button type="button" className="rounded-md border border-rose-200 px-2 py-1 text-xs text-rose-700" disabled={removingId === item.id} onClick={() => void deleteActivity(item.id)}>Excluir</button> : null}
                               </>
                             ) : null}
                             {status === "vencido" ? (
                               <>
-                                <button type="button" className="rounded-md border border-brand-200 px-2 py-1 text-xs text-brand-700" onClick={() => openExecutionModal(item)}>Executar</button>
-                                <button type="button" className="rounded-md border border-amber-200 px-2 py-1 text-xs text-amber-700" onClick={() => openRescheduleModal(item)}>Reagendar</button>
+                                <button type="button" className="rounded-md border border-brand-200 px-2 py-1 text-xs text-brand-700" onClick={() => openExecutionModal(item)}>Concluir</button>
                                 {canChooseSeller ? <button type="button" className="rounded-md border border-rose-200 px-2 py-1 text-xs text-rose-700" disabled={removingId === item.id} onClick={() => void deleteActivity(item.id)}>Excluir</button> : null}
                               </>
                             ) : null}
                             {status === "realizado" ? (
                               <>
                                 <button type="button" className="rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700" onClick={() => setSelectedActivity(item)}>Visualizar</button>
-                                <button type="button" className="rounded-md border border-emerald-200 px-2 py-1 text-xs text-emerald-700" onClick={() => openDuplicateModal(item)}>Duplicar</button>
                               </>
                             ) : null}
                           </div>
@@ -921,13 +993,13 @@ export default function ActivitiesPage() {
               <p><strong>Status:</strong> {STATUS_LABEL[selectedActivity.status || (selectedActivity.done ? "realizado" : "agendado")]}</p>
               <p><strong>Cliente:</strong> {selectedActivity.opportunity?.client?.name || selectedActivity.client?.name || "—"}</p>
               <p><strong>Oportunidade:</strong> {selectedActivity.opportunity?.title || "—"}</p>
-              <p><strong>Vencimento:</strong> {new Date(selectedActivity.dueDate).toLocaleString("pt-BR")}</p>
-              <p><strong>Executada em:</strong> {selectedActivity.date ? new Date(selectedActivity.date).toLocaleString("pt-BR") : "—"}</p>
-              <p><strong>Check-in:</strong> {selectedActivity.checkInAt ? new Date(selectedActivity.checkInAt).toLocaleString("pt-BR") : "—"}</p>
+              <p><strong>Data:</strong> {formatBrazil(selectedActivity.date || selectedActivity.dueDate, { dateStyle: "short", timeStyle: "short" })}</p>
+              <p><strong>Vendedor:</strong> {selectedActivity.ownerSeller?.name || "—"}</p>
+              <p><strong>Check-in:</strong> {selectedActivity.checkInAt ? formatBrazil(selectedActivity.checkInAt, { dateStyle: "short", timeStyle: "short" }) : "—"}</p>
               <p><strong>Precisão GPS:</strong> {selectedActivity.checkInAccuracy != null ? `${Math.round(selectedActivity.checkInAccuracy)} m` : "—"}</p>
               <p className="md:col-span-2"><strong>Notas:</strong> {selectedActivity.notes || "—"}</p>
+              <p className="md:col-span-2"><strong>Resumo:</strong> {selectedActivity.description || "—"}</p>
               <p className="md:col-span-2"><strong>Resultado:</strong> {selectedActivity.result || "—"}</p>
-              <p className="md:col-span-2"><strong>Observações:</strong> {selectedActivity.description || "—"}</p>
             </div>
           </div>
         </div>
@@ -937,13 +1009,13 @@ export default function ActivitiesPage() {
         <div className="mobile-modal-shell" onClick={() => setExecutionActivity(null)}>
           <div className="mobile-modal-panel" onClick={(event) => event.stopPropagation()}>
             <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 bg-white px-4 py-4 sm:px-6">
-              <h3 className="text-xl font-semibold">Executar atividade</h3>
+              <h3 className="text-xl font-semibold">Concluir atividade</h3>
               <button type="button" className="rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-500" onClick={() => setExecutionActivity(null)}>✕</button>
             </div>
             <form className="flex min-h-0 flex-1 flex-col" onSubmit={executeActivity}>
               <div className="mobile-modal-body space-y-3">
               <div>
-                <label className="text-sm font-semibold text-slate-900">Resumo da visita (obrigatório)</label>
+                <label className="text-sm font-semibold text-slate-900">Resumo do que foi feito (obrigatório)</label>
                 <textarea
                   required
                   className="min-h-24 w-full min-w-0 rounded-lg border-2 border-brand-200 bg-brand-50 p-2 focus:border-brand-500 focus:outline-none"
@@ -963,58 +1035,33 @@ export default function ActivitiesPage() {
               </div>
               <div className="mobile-modal-footer">
                 <button type="button" className="mobile-secondary-half rounded-lg border border-slate-300 px-4 py-2" onClick={() => setExecutionActivity(null)}>Cancelar</button>
-                <button type="submit" disabled={savingAction} className="mobile-primary-button rounded-lg bg-brand-700 px-4 py-2 text-white">{savingAction ? "Salvando..." : "Concluir execução"}</button>
+                <button type="submit" disabled={savingAction} className="mobile-primary-button rounded-lg bg-brand-700 px-4 py-2 text-white">{savingAction ? "Salvando..." : "Concluir"}</button>
               </div>
             </form>
           </div>
         </div>
       ) : null}
 
-      {rescheduleActivity ? (
-        <div className="mobile-modal-shell" onClick={() => setRescheduleActivity(null)}>
-          <div className="mobile-modal-panel" onClick={(event) => event.stopPropagation()}>
-            <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 bg-white px-4 py-4 sm:px-6">
-              <h3 className="text-xl font-semibold">Reagendar atividade</h3>
-              <button type="button" className="rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-500" onClick={() => setRescheduleActivity(null)}>✕</button>
-            </div>
-            <form className="flex min-h-0 flex-1 flex-col" onSubmit={reschedule}>
-              <div className="mobile-modal-body space-y-3">
-              <input type="date" required className="w-full min-w-0 rounded-lg border border-slate-300 p-2" value={rescheduleDate} onChange={(event) => setRescheduleDate(event.target.value)} />
-              </div>
-              <div className="mobile-modal-footer">
-                <button type="button" className="mobile-secondary-half rounded-lg border border-slate-300 px-4 py-2" onClick={() => setRescheduleActivity(null)}>Cancelar</button>
-                <button type="submit" disabled={savingAction} className="mobile-primary-button rounded-lg bg-brand-700 px-4 py-2 text-white">Salvar</button>
-              </div>
-            </form>
-          </div>
-        </div>
+      {rescheduleTarget ? (
+        <RescheduleDialog
+          event={rescheduleTarget}
+          onClose={() => setRescheduleTarget(null)}
+          onDone={() => {
+            setRescheduleTarget(null);
+            void loadPending();
+          }}
+        />
       ) : null}
 
-      {duplicateActivity ? (
-        <div className="mobile-modal-shell" onClick={() => setDuplicateActivity(null)}>
-          <div className="mobile-modal-panel" onClick={(event) => event.stopPropagation()}>
-            <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 bg-white px-4 py-4 sm:px-6">
-              <h3 className="text-xl font-semibold">Duplicar atividade</h3>
-              <button type="button" className="rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-500" onClick={() => setDuplicateActivity(null)}>✕</button>
-            </div>
-            <form className="flex min-h-0 flex-1 flex-col" onSubmit={duplicate}>
-              <div className="mobile-modal-body space-y-3">
-              <label className="text-sm">Data da atividade</label>
-              <input type="date" required max={brazilTodayKey()} className="w-full min-w-0 rounded-lg border border-slate-300 p-2" value={duplicateDate} onChange={(event) => setDuplicateDate(event.target.value)} />
-              {duplicateActivity.opportunity ? (
-                <>
-                  <label className="text-sm">Motivo de não ter próximo passo (obrigatório com oportunidade aberta)</label>
-                  <textarea className="w-full min-w-0 rounded-lg border border-slate-300 p-2" value={duplicateNoNextStepReason} onChange={(event) => setDuplicateNoNextStepReason(event.target.value)} />
-                </>
-              ) : null}
-              </div>
-              <div className="mobile-modal-footer">
-                <button type="button" className="mobile-secondary-half rounded-lg border border-slate-300 px-4 py-2" onClick={() => setDuplicateActivity(null)}>Cancelar</button>
-                <button type="submit" disabled={savingAction} className="mobile-primary-button rounded-lg bg-brand-700 px-4 py-2 text-white">Duplicar</button>
-              </div>
-            </form>
-          </div>
-        </div>
+      {notDoneTarget ? (
+        <NotDoneDialog
+          event={notDoneTarget}
+          onClose={() => setNotDoneTarget(null)}
+          onDone={() => {
+            setNotDoneTarget(null);
+            void loadPending();
+          }}
+        />
       ) : null}
 
       {editActivity ? (
@@ -1029,7 +1076,9 @@ export default function ActivitiesPage() {
               <div>
                 <label className="text-sm">Tipo</label>
                 <select className="w-full min-w-0 rounded-lg border border-slate-300 p-2" value={editForm.type} onChange={(event) => setEditForm((previous) => ({ ...previous, type: event.target.value }))}>
-                  {ACTIVITY_TYPE_OPTIONS.map((activityType) => (
+                  {/* Tipo legado do registro antigo continua na lista para não ser trocado sem querer. */}
+                  {isActivityCatalogType(editForm.type) ? null : <option value={editForm.type}>{toLabel(editForm.type)}</option>}
+                  {ACTIVITY_CATALOG_OPTIONS.map((activityType) => (
                     <option key={activityType.value} value={activityType.value}>{activityType.label}</option>
                   ))}
                 </select>
@@ -1040,7 +1089,7 @@ export default function ActivitiesPage() {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="text-sm">Vencimento</label>
+                  <label className="text-sm">Data</label>
                   <input type="date" required className="w-full min-w-0 rounded-lg border border-slate-300 p-2" value={editForm.dueDate} onChange={(event) => setEditForm((previous) => ({ ...previous, dueDate: event.target.value }))} />
                 </div>
                 <div>
@@ -1098,15 +1147,16 @@ export default function ActivitiesPage() {
                     </button>
                     <div className="mt-3 space-y-1 text-xs text-emerald-800">
                       <p>Status: {visitCheckIn ? "Check-in realizado" : "Aguardando captura"}</p>
-                      <p>Horário: {visitCheckIn ? new Date(visitCheckIn.checkInAt).toLocaleTimeString("pt-BR") : "—"}</p>
+                      <p>Horário: {visitCheckIn ? formatBrazil(visitCheckIn.checkInAt, { hour: "2-digit", minute: "2-digit" }) : "—"}</p>
                       <p>Precisão do GPS: {visitCheckIn?.checkInAccuracy != null ? `${Math.round(visitCheckIn.checkInAccuracy)} m` : "—"}</p>
                     </div>
                   </section>
                 ) : null}
                 <div className="grid gap-3 md:grid-cols-2">
-                <div>
-                  <label className="text-sm">Tipo</label>
+                <div className="md:col-span-2">
+                  <label className="text-sm" htmlFor="activity-type">Tipo</label>
                   <select
+                    id="activity-type"
                     className="w-full min-w-0 rounded-lg border border-slate-300 p-2"
                     value={form.type}
                     onChange={(event) => {
@@ -1117,7 +1167,7 @@ export default function ActivitiesPage() {
                       }
                     }}
                   >
-                    {ACTIVITY_TYPE_OPTIONS.map((activityType) => (
+                    {ACTIVITY_CATALOG_OPTIONS.map((activityType) => (
                       <option key={activityType.value} value={activityType.value}>
                         {activityType.label}
                       </option>
@@ -1125,9 +1175,23 @@ export default function ActivitiesPage() {
                   </select>
                 </div>
                 <div>
-                  <label className="text-sm">Data</label>
-                  <input type="date" required max={brazilTodayKey()} className="w-full min-w-0 rounded-lg border border-slate-300 p-2" value={form.dueDate} onChange={(event) => setForm((previous) => ({ ...previous, dueDate: event.target.value }))} />
+                  <label className="text-sm" htmlFor="activity-day">Data</label>
+                  <input id="activity-day" type="date" required max={brazilTodayKey()} className="w-full min-w-0 rounded-lg border border-slate-300 p-2" value={form.dueDate} onChange={(event) => setForm((previous) => ({ ...previous, dueDate: event.target.value }))} />
                 </div>
+                <div>
+                  <label className="text-sm" htmlFor="activity-time">Horário (Brasília)</label>
+                  <input id="activity-time" type="time" required className="w-full min-w-0 rounded-lg border border-slate-300 p-2" value={form.time} onChange={(event) => setForm((previous) => ({ ...previous, time: event.target.value }))} />
+                </div>
+                <p className="-mt-1 text-xs text-slate-500 md:col-span-2">Quando foi feito. Pode ser hoje ou um dia anterior, nunca no futuro.</p>
+                {isLinkedToAgendaEvent ? (
+                  <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-900 md:col-span-2">
+                    <p className="font-semibold">Registro do compromisso da Agenda</p>
+                    <p className="mt-1">Cliente: {clients.find((client) => client.id === form.clientId)?.name || (form.clientId ? "Cliente do compromisso" : "Sem cliente")}</p>
+                    <p>Oportunidade: {selectedOpportunity?.title || (form.opportunityId ? "Oportunidade do compromisso" : "Sem oportunidade")}</p>
+                    <p className="mt-1 text-xs text-green-800">Ao salvar, o compromisso fica concluído.</p>
+                  </div>
+                ) : (
+                  <>
                 {canChooseSeller ? (
                   <div className="md:col-span-2">
                     <label className="text-sm">Vendedor responsável</label>
@@ -1182,13 +1246,26 @@ export default function ActivitiesPage() {
                     ))}
                   </select>
                 </div>
+                  </>
+                )}
+                <div className="md:col-span-2">
+                  <label className="text-sm font-semibold text-slate-900" htmlFor="activity-summary">Resumo do que foi feito (obrigatório)</label>
+                  <textarea
+                    id="activity-summary"
+                    required
+                    className="min-h-24 w-full rounded-lg border-2 border-brand-200 bg-brand-50 p-2 focus:border-brand-500 focus:outline-none"
+                    value={form.observations}
+                    onChange={(event) => setForm((previous) => ({ ...previous, observations: event.target.value }))}
+                    placeholder={"Ex: cliente interessado, pediu proposta\nEx: não vai plantar agora\nEx: fechamos pedido de 50 ha"}
+                  />
+                </div>
                 <div>
-                  <label className="text-sm">Resultado (opcional)</label>
-                  <input disabled={!form.executed} className="w-full rounded-lg border border-slate-300 p-2 disabled:bg-slate-100" value={form.result} onChange={(event) => setForm((previous) => ({ ...previous, result: event.target.value }))} />
+                  <label className="text-sm" htmlFor="activity-result">Resultado (opcional)</label>
+                  <input id="activity-result" className="w-full rounded-lg border border-slate-300 p-2" value={form.result} onChange={(event) => setForm((previous) => ({ ...previous, result: event.target.value }))} />
                 </div>
                 <div>
                   <label className="text-sm">Duração em minutos (opcional)</label>
-                  <input type="number" min={0} disabled={!form.executed} className="w-full rounded-lg border border-slate-300 p-2 disabled:bg-slate-100" value={form.duration} onChange={(event) => setForm((previous) => ({ ...previous, duration: event.target.value }))} />
+                  <input type="number" min={0} className="w-full rounded-lg border border-slate-300 p-2" value={form.duration} onChange={(event) => setForm((previous) => ({ ...previous, duration: event.target.value }))} />
                 </div>
                 <div>
                   <label className="text-sm">Cultura (opcional)</label>
@@ -1203,39 +1280,66 @@ export default function ActivitiesPage() {
                   <input className="w-full min-w-0 rounded-lg border border-slate-300 p-2" value={form.product} onChange={(event) => setForm((previous) => ({ ...previous, product: event.target.value }))} />
                 </div>
                 <div className="md:col-span-2">
-                  <label className="text-sm font-semibold text-slate-900">Resumo do que foi feito (obrigatório)</label>
-                  <textarea
-                    required={form.executed}
-                    disabled={!form.executed}
-                    className="min-h-24 w-full rounded-lg border-2 border-brand-200 bg-brand-50 p-2 focus:border-brand-500 focus:outline-none disabled:bg-slate-100"
-                    value={form.observations}
-                    onChange={(event) => setForm((previous) => ({ ...previous, observations: event.target.value }))}
-                    placeholder={"Ex: cliente interessado, pediu proposta\nEx: não vai plantar agora\nEx: fechamos pedido de 50 ha"}
-                  />
-                </div>
-                <div className="md:col-span-2">
                   <label className="text-sm">Notas (opcional)</label>
                   <textarea className="min-h-24 w-full rounded-lg border border-slate-300 p-2" value={form.notes} onChange={(event) => setForm((previous) => ({ ...previous, notes: event.target.value }))} />
                 </div>
-                <div>
-                  <label className="text-sm">Próximo passo (opcional)</label>
-                  <select className="w-full min-w-0 rounded-lg border border-slate-300 p-2" value={form.nextStepType} onChange={(event) => setForm((previous) => ({ ...previous, nextStepType: event.target.value }))}>
-                    <option value="">Sem próximo passo</option>
-                    {NEXT_STEP_TYPE_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>{option.label}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-sm">Data e hora do próximo passo</label>
-                  <input type="datetime-local" disabled={!form.nextStepType} className="w-full min-w-0 rounded-lg border border-slate-300 p-2 disabled:bg-slate-100" value={form.nextStepAt} onChange={(event) => setForm((previous) => ({ ...previous, nextStepAt: event.target.value }))} />
-                </div>
-                {form.opportunityId && !form.nextStepType ? (
-                  <div className="md:col-span-2">
-                    <label className="text-sm">Motivo de não ter próximo passo (obrigatório com oportunidade aberta)</label>
-                    <textarea className="w-full min-w-0 rounded-lg border border-slate-300 p-2" value={form.noNextStepReason} onChange={(event) => setForm((previous) => ({ ...previous, noNextStepReason: event.target.value }))} />
+                <fieldset className="space-y-3 rounded-xl border border-sky-200 bg-sky-50 p-3 md:col-span-2" aria-labelledby="next-step-title">
+                  <div>
+                    <legend id="next-step-title" className="text-sm font-semibold text-sky-900">Próximo passo</legend>
+                    <p className="text-xs text-sky-800">O próximo passo vira compromisso na Agenda.{opportunityOpen ? " Obrigatório para oportunidade aberta." : ""}</p>
                   </div>
-                ) : null}
+                  <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Próximo passo">
+                    {[
+                      { mode: "schedule" as const, label: "Agendar próximo passo" },
+                      { mode: "none" as const, label: "Sem próximo passo" }
+                    ].map((option) => (
+                      <button
+                        key={option.mode}
+                        type="button"
+                        role="radio"
+                        aria-checked={form.nextStepMode === option.mode}
+                        onClick={() => chooseNextStepMode(option.mode)}
+                        className={`rounded-lg border px-3 py-2 text-sm font-medium ${form.nextStepMode === option.mode ? "border-sky-600 bg-sky-600 text-white" : "border-sky-200 bg-white text-sky-900 hover:bg-sky-100"}`}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                  {form.nextStepMode === "schedule" ? (
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="sm:col-span-2">
+                        <label className="text-sm" htmlFor="next-step-type">Tipo</label>
+                        <select id="next-step-type" required className="w-full min-w-0 rounded-lg border border-slate-300 bg-white p-2" value={form.nextStepType} onChange={(event) => setForm((previous) => ({ ...previous, nextStepType: event.target.value }))}>
+                          <option value="">Selecione</option>
+                          {NEXT_STEP_TYPE_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-sm" htmlFor="next-step-day">Dia</label>
+                        <input id="next-step-day" type="date" required min={brazilTodayKey()} className="w-full min-w-0 rounded-lg border border-slate-300 bg-white p-2" value={form.nextStepDay} onChange={(event) => setForm((previous) => ({ ...previous, nextStepDay: event.target.value }))} />
+                      </div>
+                      <div>
+                        <label className="text-sm" htmlFor="next-step-time">Horário (Brasília)</label>
+                        <input id="next-step-time" type="time" required className="w-full min-w-0 rounded-lg border border-slate-300 bg-white p-2" value={form.nextStepTime} onChange={(event) => setForm((previous) => ({ ...previous, nextStepTime: event.target.value }))} />
+                      </div>
+                      <div>
+                        <label className="text-sm" htmlFor="next-step-duration">Duração (min)</label>
+                        <input id="next-step-duration" type="number" min={1} required className="w-full min-w-0 rounded-lg border border-slate-300 bg-white p-2" value={form.nextStepDuration} onChange={(event) => setForm((previous) => ({ ...previous, nextStepDuration: event.target.value }))} />
+                      </div>
+                    </div>
+                  ) : null}
+                  {form.nextStepMode === "none" ? (
+                    <div>
+                      <label className="text-sm" htmlFor="no-next-step-reason">Por que não há próximo passo?{opportunityOpen ? " (obrigatório)" : " (opcional)"}</label>
+                      <textarea id="no-next-step-reason" required={opportunityOpen} className="w-full min-w-0 rounded-lg border border-slate-300 bg-white p-2" value={form.noNextStepReason} onChange={(event) => setForm((previous) => ({ ...previous, noNextStepReason: event.target.value }))} placeholder="Ex.: cliente só decide na próxima safra" />
+                    </div>
+                  ) : null}
+                  {showNextStepWarning ? (
+                    <p role="alert" className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900">{NEXT_STEP_REQUIRED_MESSAGE}</p>
+                  ) : null}
+                </fieldset>
                 </div>
               </div>
               <div className="mobile-modal-footer">
