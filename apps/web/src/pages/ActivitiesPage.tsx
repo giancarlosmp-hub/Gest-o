@@ -9,7 +9,20 @@ import { triggerDashboardRefresh } from "../lib/dashboardRefresh";
 import ClientSelect from "../components/ClientSelect";
 import ClientSearchSelect, { type SearchableClientOption } from "../components/clients/ClientSearchSelect";
 import QuickCreateClientSection from "../components/clients/QuickCreateClientSection";
-import { brazilMonthKey } from "../lib/brazilDate";
+import { brazilMonthKey, brazilTodayKey } from "../lib/brazilDate";
+import { AGENDA_EVENT_TYPE_OPTIONS } from "@salesforce-pro/shared";
+import {
+  clearVisitDraft,
+  hasVisitDraftContent,
+  loadVisitDraft,
+  saveVisitDraft,
+  VISIT_DRAFT_CHANGE_EVENT,
+  VISIT_DRAFT_RESUME_PARAM,
+  type VisitDraft
+} from "../lib/visitDraft";
+
+// Próximo passo vira compromisso na Agenda (catálogo único, sem roteiro).
+const NEXT_STEP_TYPE_OPTIONS = AGENDA_EVENT_TYPE_OPTIONS.filter((option) => option.value !== "roteiro_visita");
 
 type Opportunity = { id: string; title: string; clientId: string };
 type Seller = { id: string; name: string; role?: string };
@@ -69,7 +82,11 @@ const initialForm = {
   crop: "",
   areaEstimated: "",
   product: "",
-  executed: false
+  // Atividade registra o que já foi feito: sempre realizada.
+  executed: true,
+  nextStepType: "",
+  nextStepAt: "",
+  noNextStepReason: ""
 };
 const initialFilters: ActivityFilters = { q: "", type: "", done: "", month: "", clientId: "", sellerId: "", overdueOnly: false };
 
@@ -120,9 +137,14 @@ export default function ActivitiesPage() {
   const [executionForm, setExecutionForm] = useState({ result: "", observations: "", duration: "" });
   const [rescheduleDate, setRescheduleDate] = useState("");
   const [duplicateDate, setDuplicateDate] = useState("");
+  const [duplicateNoNextStepReason, setDuplicateNoNextStepReason] = useState("");
   const [editForm, setEditForm] = useState({ type: "ligacao", notes: "", dueDate: "", duration: "" });
   const [isMobile, setIsMobile] = useState(() => window.matchMedia("(max-width: 767px)").matches);
   const [visitCheckIn, setVisitCheckIn] = useState<VisitCheckIn | null>(null);
+  // Visita em andamento: só a sessão do formulário que criou ou restaurou o rascunho grava nele, para uma Nova
+  // atividade aberta com outro rascunho ativo não sobrescrevê-lo.
+  const [canWriteVisitDraft, setCanWriteVisitDraft] = useState(false);
+  const [hasVisitDraft, setHasVisitDraft] = useState(false);
   const [capturingLocation, setCapturingLocation] = useState(false);
 
   const opportunitiesByClient = useMemo(
@@ -242,9 +264,81 @@ export default function ActivitiesPage() {
     void loadActivities();
   }, [debouncedSearch, filters.type, filters.done, filters.month, filters.clientId, filters.sellerId, filters.overdueOnly, canChooseSeller]);
 
+  const restoreVisitDraft = (draft: VisitDraft) => {
+    setForm({
+      ...initialForm,
+      type: draft.type,
+      dueDate: draft.dueDate,
+      clientId: draft.clientId,
+      opportunityId: draft.opportunityId,
+      agendaEventId: draft.agendaEventId,
+      ownerSellerId: draft.ownerSellerId || (isSeller && user?.id ? user.id : ""),
+      city: draft.city,
+      notes: draft.notes,
+      observations: draft.observations,
+      result: draft.result
+    });
+    setVisitCheckIn(draft.checkIn);
+    setOpportunitySearch("");
+    setCanWriteVisitDraft(true);
+    setIsModalOpen(true);
+  };
+
+  useEffect(() => {
+    const refresh = () => setHasVisitDraft(Boolean(loadVisitDraft(user?.id)));
+    refresh();
+    window.addEventListener(VISIT_DRAFT_CHANGE_EVENT, refresh);
+    window.addEventListener("storage", refresh);
+    return () => {
+      window.removeEventListener(VISIT_DRAFT_CHANGE_EVENT, refresh);
+      window.removeEventListener("storage", refresh);
+    };
+  }, [user?.id]);
+
+  // "Continuar" do aviso de visita em andamento.
+  useEffect(() => {
+    if (searchParams.get(VISIT_DRAFT_RESUME_PARAM) !== "1") return;
+    const draft = loadVisitDraft(user?.id);
+    if (draft) restoreVisitDraft(draft);
+    else toast.info("A visita em andamento expirou ou foi descartada.");
+    const params = new URLSearchParams(searchParams);
+    params.delete(VISIT_DRAFT_RESUME_PARAM);
+    setSearchParams(params, { replace: true });
+  }, [searchParams, setSearchParams, user?.id]);
+
+  // Grava o rascunho da visita a cada mudança, depois do check-in ou de algo preenchido.
+  useEffect(() => {
+    if (!isModalOpen || !canWriteVisitDraft || form.type !== "visita") return;
+    const draft = {
+      type: form.type,
+      dueDate: form.dueDate,
+      clientId: form.clientId,
+      opportunityId: form.opportunityId,
+      agendaEventId: form.agendaEventId,
+      ownerSellerId: form.ownerSellerId,
+      city: form.city,
+      notes: form.notes,
+      observations: form.observations,
+      result: form.result,
+      checkIn: visitCheckIn
+    };
+    if (hasVisitDraftContent(draft)) saveVisitDraft(user?.id, draft);
+  }, [isModalOpen, canWriteVisitDraft, form, visitCheckIn, user?.id]);
+
   useEffect(() => {
     const openFromAgenda = searchParams.get("open") === "create";
     if (!openFromAgenda) return;
+
+    // O botão "Visita" com uma visita em andamento continua o rascunho em vez de começar outra.
+    const activeDraft = loadVisitDraft(user?.id);
+    if (searchParams.get("type") === "visita" && activeDraft) {
+      restoreVisitDraft(activeDraft);
+      const params = new URLSearchParams(searchParams);
+      for (const key of ["open", "date", "type", "clientId", "opportunityId", "agendaEventId", "ownerSellerId", "notes", "title", "city", "executed"]) params.delete(key);
+      setSearchParams(params, { replace: true });
+      return;
+    }
+    setCanWriteVisitDraft(!activeDraft);
 
     const date = searchParams.get("date") || "";
     const type = searchParams.get("type") || "ligacao";
@@ -255,19 +349,20 @@ export default function ActivitiesPage() {
     const notes = searchParams.get("notes") || "";
     const title = searchParams.get("title") || "";
     const city = searchParams.get("city") || "";
-    const executed = searchParams.get("executed") === "true";
+    // A data preenchida (Agenda, Planejamento) nunca passa de hoje em Brasília.
+    const prefilledDate = date ? new Date(date).toISOString().slice(0, 10) : "";
+    const today = brazilTodayKey();
 
     setForm((current) => ({
       ...current,
       type: ACTIVITY_TYPE_OPTIONS.some((option) => option.value === type) ? type : current.type,
-      dueDate: date ? new Date(date).toISOString().slice(0, 10) : current.dueDate,
+      dueDate: prefilledDate ? (prefilledDate > today ? today : prefilledDate) : current.dueDate,
       clientId,
       opportunityId,
       agendaEventId,
       ownerSellerId: ownerSellerId || current.ownerSellerId,
       notes: notes || title || current.notes,
-      city: city || current.city,
-      executed
+      city: city || current.city
     }));
     setVisitCheckIn(null);
     setIsModalOpen(true);
@@ -285,7 +380,7 @@ export default function ActivitiesPage() {
     params.delete("city");
     params.delete("executed");
     setSearchParams(params, { replace: true });
-  }, [searchParams, setSearchParams]);
+  }, [searchParams, setSearchParams, user?.id]);
 
   const clearFilters = () => {
     setFilters(initialFilters);
@@ -296,14 +391,22 @@ export default function ActivitiesPage() {
     setForm({ ...initialForm, ownerSellerId: isSeller && user?.id ? user.id : "" });
     setOpportunitySearch("");
     setVisitCheckIn(null);
+    setCanWriteVisitDraft(!loadVisitDraft(user?.id));
     setIsModalOpen(true);
   };
 
+  // Fechar sem salvar mantém o rascunho: a visita continua em andamento.
   const closeCreateModal = () => {
     setIsModalOpen(false);
     setForm(initialForm);
     setOpportunitySearch("");
     setVisitCheckIn(null);
+    setCanWriteVisitDraft(false);
+  };
+
+  const discardVisitDraft = () => {
+    clearVisitDraft(user?.id);
+    closeCreateModal();
   };
 
   const captureVisitCheckIn = async () => {
@@ -380,11 +483,19 @@ export default function ActivitiesPage() {
     event.preventDefault();
     const requiresExecutionFields = form.executed;
     if (!form.clientId || !form.dueDate || (canChooseSeller && !form.ownerSellerId)) {
-      toast.error(canChooseSeller ? "Preencha vendedor, cliente e vencimento." : "Preencha cliente e vencimento.");
+      toast.error(canChooseSeller ? "Preencha vendedor, cliente e data." : "Preencha cliente e data.");
+      return;
+    }
+    if (form.dueDate > brazilTodayKey()) {
+      toast.error("A data da atividade não pode ser futura. Para planejar, use o próximo passo ou a Agenda.");
       return;
     }
     if (requiresExecutionFields && !form.observations.trim()) {
-      toast.error("Para atividades já realizadas, preencha o resumo da visita.");
+      toast.error("Preencha o resumo do que foi feito.");
+      return;
+    }
+    if (Boolean(form.nextStepType) !== Boolean(form.nextStepAt)) {
+      toast.error("Para o próximo passo, informe o tipo e a data/hora.");
       return;
     }
     if (form.type === "visita" && !visitCheckIn) {
@@ -418,8 +529,14 @@ export default function ActivitiesPage() {
       if (requiresExecutionFields && form.result.trim().length > 0) {
         payload.result = form.result.trim();
       }
+      if (form.nextStepType && form.nextStepAt) {
+        payload.nextStep = { type: form.nextStepType, startsAt: new Date(form.nextStepAt).toISOString() };
+      } else if (form.noNextStepReason.trim()) {
+        payload.noNextStepReason = form.noNextStepReason.trim();
+      }
 
       await api.post("/activities", payload);
+      if (form.type === "visita" && canWriteVisitDraft) clearVisitDraft(user?.id);
       toast.success("Atividade criada");
       if (form.agendaEventId) {
         toast.success("Compromisso concluído automaticamente");
@@ -511,11 +628,16 @@ export default function ActivitiesPage() {
   const openDuplicateModal = (activity: Activity) => {
     setDuplicateActivity(activity);
     setDuplicateDate("");
+    setDuplicateNoNextStepReason("");
   };
 
   const duplicate = async (event: FormEvent) => {
     event.preventDefault();
     if (!duplicateActivity || !duplicateDate) return;
+    if (duplicateDate > brazilTodayKey()) {
+      toast.error("A data da atividade não pode ser futura.");
+      return;
+    }
     setSavingAction(true);
     try {
       await api.post("/activities", {
@@ -531,6 +653,7 @@ export default function ActivitiesPage() {
         product: duplicateActivity.product || undefined,
         clientId: duplicateActivity.client?.id || duplicateActivity.opportunity?.client?.id,
         opportunityId: duplicateActivity.opportunity?.id || undefined,
+        noNextStepReason: duplicateNoNextStepReason.trim() || undefined,
         ownerSellerId: duplicateActivity.ownerSellerId
       });
       toast.success("Atividade duplicada com sucesso.");
@@ -703,14 +826,14 @@ export default function ActivitiesPage() {
                         <>
                           <button type="button" className="rounded-md border border-brand-200 px-3 py-2 text-center text-xs font-medium text-brand-700" onClick={() => openExecutionModal(item)}>Executar</button>
                           <button type="button" className="rounded-md border border-slate-300 px-3 py-2 text-center text-xs font-medium text-slate-700" onClick={() => openEditModal(item)}>Editar</button>
-                          <button type="button" className="rounded-md border border-rose-200 px-3 py-2 text-center text-xs font-medium text-rose-700" disabled={removingId === item.id} onClick={() => void deleteActivity(item.id)}>Excluir</button>
+                          {canChooseSeller ? <button type="button" className="rounded-md border border-rose-200 px-3 py-2 text-center text-xs font-medium text-rose-700" disabled={removingId === item.id} onClick={() => void deleteActivity(item.id)}>Excluir</button> : null}
                         </>
                       ) : null}
                       {status === "vencido" ? (
                         <>
                           <button type="button" className="rounded-md border border-brand-200 px-3 py-2 text-center text-xs font-medium text-brand-700" onClick={() => openExecutionModal(item)}>Executar</button>
                           <button type="button" className="rounded-md border border-amber-200 px-3 py-2 text-center text-xs font-medium text-amber-700" onClick={() => openRescheduleModal(item)}>Reagendar</button>
-                          <button type="button" className="rounded-md border border-rose-200 px-3 py-2 text-center text-xs font-medium text-rose-700" disabled={removingId === item.id} onClick={() => void deleteActivity(item.id)}>Excluir</button>
+                          {canChooseSeller ? <button type="button" className="rounded-md border border-rose-200 px-3 py-2 text-center text-xs font-medium text-rose-700" disabled={removingId === item.id} onClick={() => void deleteActivity(item.id)}>Excluir</button> : null}
                         </>
                       ) : null}
                       {status === "realizado" ? (
@@ -758,14 +881,14 @@ export default function ActivitiesPage() {
                               <>
                                 <button type="button" className="rounded-md border border-brand-200 px-2 py-1 text-xs text-brand-700" onClick={() => openExecutionModal(item)}>Executar</button>
                                 <button type="button" className="rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700" onClick={() => openEditModal(item)}>Editar</button>
-                                <button type="button" className="rounded-md border border-rose-200 px-2 py-1 text-xs text-rose-700" disabled={removingId === item.id} onClick={() => void deleteActivity(item.id)}>Excluir</button>
+                                {canChooseSeller ? <button type="button" className="rounded-md border border-rose-200 px-2 py-1 text-xs text-rose-700" disabled={removingId === item.id} onClick={() => void deleteActivity(item.id)}>Excluir</button> : null}
                               </>
                             ) : null}
                             {status === "vencido" ? (
                               <>
                                 <button type="button" className="rounded-md border border-brand-200 px-2 py-1 text-xs text-brand-700" onClick={() => openExecutionModal(item)}>Executar</button>
                                 <button type="button" className="rounded-md border border-amber-200 px-2 py-1 text-xs text-amber-700" onClick={() => openRescheduleModal(item)}>Reagendar</button>
-                                <button type="button" className="rounded-md border border-rose-200 px-2 py-1 text-xs text-rose-700" disabled={removingId === item.id} onClick={() => void deleteActivity(item.id)}>Excluir</button>
+                                {canChooseSeller ? <button type="button" className="rounded-md border border-rose-200 px-2 py-1 text-xs text-rose-700" disabled={removingId === item.id} onClick={() => void deleteActivity(item.id)}>Excluir</button> : null}
                               </>
                             ) : null}
                             {status === "realizado" ? (
@@ -876,8 +999,14 @@ export default function ActivitiesPage() {
             </div>
             <form className="flex min-h-0 flex-1 flex-col" onSubmit={duplicate}>
               <div className="mobile-modal-body space-y-3">
-              <label className="text-sm">Nova data de vencimento</label>
-              <input type="date" required className="w-full min-w-0 rounded-lg border border-slate-300 p-2" value={duplicateDate} onChange={(event) => setDuplicateDate(event.target.value)} />
+              <label className="text-sm">Data da atividade</label>
+              <input type="date" required max={brazilTodayKey()} className="w-full min-w-0 rounded-lg border border-slate-300 p-2" value={duplicateDate} onChange={(event) => setDuplicateDate(event.target.value)} />
+              {duplicateActivity.opportunity ? (
+                <>
+                  <label className="text-sm">Motivo de não ter próximo passo (obrigatório com oportunidade aberta)</label>
+                  <textarea className="w-full min-w-0 rounded-lg border border-slate-300 p-2" value={duplicateNoNextStepReason} onChange={(event) => setDuplicateNoNextStepReason(event.target.value)} />
+                </>
+              ) : null}
               </div>
               <div className="mobile-modal-footer">
                 <button type="button" className="mobile-secondary-half rounded-lg border border-slate-300 px-4 py-2" onClick={() => setDuplicateActivity(null)}>Cancelar</button>
@@ -935,7 +1064,12 @@ export default function ActivitiesPage() {
             <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 bg-white px-4 py-4 sm:px-6">
               <div>
                 <h3 className="text-xl font-semibold">Nova atividade</h3>
-                <p className="text-sm text-slate-500">Registre uma próxima ação com cliente e mantenha o funil atualizado.</p>
+                <p className="text-sm text-slate-500">Registre o que foi feito. O próximo passo vira compromisso na Agenda.</p>
+                {hasVisitDraft && canWriteVisitDraft ? (
+                  <button type="button" className="mt-2 rounded-md border border-rose-200 px-2 py-1 text-xs font-medium text-rose-700 hover:bg-rose-50" onClick={discardVisitDraft}>
+                    Descartar visita em andamento
+                  </button>
+                ) : null}
               </div>
               <button type="button" className="rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-500 hover:bg-slate-50" onClick={closeCreateModal} aria-label="Fechar modal">
                 ✕
@@ -991,24 +1125,8 @@ export default function ActivitiesPage() {
                   </select>
                 </div>
                 <div>
-                  <label className="text-sm">Vencimento</label>
-                  <input type="date" required className="w-full min-w-0 rounded-lg border border-slate-300 p-2" value={form.dueDate} onChange={(event) => setForm((previous) => ({ ...previous, dueDate: event.target.value }))} />
-                </div>
-                <div className="md:col-span-2">
-                  <label className="inline-flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={form.executed}
-                      onChange={(event) =>
-                        setForm((previous) => ({
-                          ...previous,
-                          executed: event.target.checked,
-                          ...(event.target.checked ? {} : { result: "", observations: "", duration: "" })
-                        }))
-                      }
-                    />
-                    Atividade já realizada
-                  </label>
+                  <label className="text-sm">Data</label>
+                  <input type="date" required max={brazilTodayKey()} className="w-full min-w-0 rounded-lg border border-slate-300 p-2" value={form.dueDate} onChange={(event) => setForm((previous) => ({ ...previous, dueDate: event.target.value }))} />
                 </div>
                 {canChooseSeller ? (
                   <div className="md:col-span-2">
@@ -1085,7 +1203,7 @@ export default function ActivitiesPage() {
                   <input className="w-full min-w-0 rounded-lg border border-slate-300 p-2" value={form.product} onChange={(event) => setForm((previous) => ({ ...previous, product: event.target.value }))} />
                 </div>
                 <div className="md:col-span-2">
-                  <label className="text-sm font-semibold text-slate-900">Resumo da visita {form.executed ? "(obrigatório)" : "(opcional)"}</label>
+                  <label className="text-sm font-semibold text-slate-900">Resumo do que foi feito (obrigatório)</label>
                   <textarea
                     required={form.executed}
                     disabled={!form.executed}
@@ -1099,6 +1217,25 @@ export default function ActivitiesPage() {
                   <label className="text-sm">Notas (opcional)</label>
                   <textarea className="min-h-24 w-full rounded-lg border border-slate-300 p-2" value={form.notes} onChange={(event) => setForm((previous) => ({ ...previous, notes: event.target.value }))} />
                 </div>
+                <div>
+                  <label className="text-sm">Próximo passo (opcional)</label>
+                  <select className="w-full min-w-0 rounded-lg border border-slate-300 p-2" value={form.nextStepType} onChange={(event) => setForm((previous) => ({ ...previous, nextStepType: event.target.value }))}>
+                    <option value="">Sem próximo passo</option>
+                    {NEXT_STEP_TYPE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-sm">Data e hora do próximo passo</label>
+                  <input type="datetime-local" disabled={!form.nextStepType} className="w-full min-w-0 rounded-lg border border-slate-300 p-2 disabled:bg-slate-100" value={form.nextStepAt} onChange={(event) => setForm((previous) => ({ ...previous, nextStepAt: event.target.value }))} />
+                </div>
+                {form.opportunityId && !form.nextStepType ? (
+                  <div className="md:col-span-2">
+                    <label className="text-sm">Motivo de não ter próximo passo (obrigatório com oportunidade aberta)</label>
+                    <textarea className="w-full min-w-0 rounded-lg border border-slate-300 p-2" value={form.noNextStepReason} onChange={(event) => setForm((previous) => ({ ...previous, noNextStepReason: event.target.value }))} />
+                  </div>
+                ) : null}
                 </div>
               </div>
               <div className="mobile-modal-footer">

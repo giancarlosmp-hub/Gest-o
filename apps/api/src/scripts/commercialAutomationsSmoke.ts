@@ -16,7 +16,8 @@ assert.match(service, /RECENT_AUTOMATION_DAYS = 90/, "Não deve recriar oportuni
 assert.match(service, /used >= dailyLimitPerSeller/, "Teto diário por vendedor deve ser respeitado");
 assert.match(service, /title: `Reativação – \$\{client\.name\}`/, "Título deve ser Reativação – <cliente>");
 assert.match(service, /value: 0,/, "Valor inicial deve ser 0");
-assert.match(service, /workflow\.createActivity[\s\S]*tx\.activity\.create/, "Activity deve ser criada quando habilitada");
+assert.match(service, /workflow\.createActivity[\s\S]*tx\.agendaEvent\.create\(\{ data: \{ type: AgendaEventType\.ligacao/, "Compromisso de Ligação deve ser criado quando habilitado");
+assert.doesNotMatch(service, /tx\.activity\.create/, "Automação não cria atividade pendente");
 assert.match(service, /workflow\.createTimelineEvent[\s\S]*tx\.timelineEvent\.create/, "TimelineEvent deve ser criado quando habilitado");
 assert.match(routes, /post\("\/commercial-automations\/run"[\s\S]*runCommercialAutomations\("manual"\)/, "Rota manual POST deve executar workflow");
 assert.match(routes, /get\("\/commercial-automations\/history"[\s\S]*loadCommercialAutomationsHistory/, "Rota de histórico persistente deve existir");

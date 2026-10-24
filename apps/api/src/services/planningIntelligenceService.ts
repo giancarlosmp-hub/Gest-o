@@ -79,7 +79,7 @@ const nextBusinessDays = (from: Date, count: number) => {
   return days;
 };
 // Só a visita é presencial: ligação, WhatsApp, follow-up, proposta e revisão não definem a cidade do dia.
-const isInPersonAppointment = (type: string) => type === "roteiro_visita" || type === "reuniao_presencial";
+const isInPersonAppointment = (type: string) => type === "roteiro_visita" || type === "reuniao_presencial" || type === "visita";
 const sanitize = (value: string | null | undefined, max = 160) => (value || "").replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[contato]").replace(/\b\d{10,}\b/g, "[numero]").replace(/\b\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}\b/g, "[documento]").slice(0, max);
 const stripInternal = ({ fixedDate, dedupeKey, sourceActivityId, ...candidate }: Candidate) => candidate;
 

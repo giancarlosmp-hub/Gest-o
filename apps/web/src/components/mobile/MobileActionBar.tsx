@@ -1,5 +1,6 @@
 import { CalendarPlus, MessageCircle, TrendingUp } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
+import { visitQuickActionHref } from "../../lib/mobileQuickActions";
 import { OPPORTUNITY_CREATE_TARGET } from "../../lib/opportunityQuickAction";
 
 const actionButtonBaseClass =
@@ -9,7 +10,8 @@ const primaryActions = [
   {
     id: "visita",
     label: "Visita",
-    to: `/atividades?${new URLSearchParams({ open: "create", type: "visita", date: new Date().toISOString().slice(0, 10) }).toString()}`,
+    // Calculado a cada renderização: o dia muda sem recarregar o app.
+    to: visitQuickActionHref,
     icon: CalendarPlus
   },
   {
@@ -34,12 +36,13 @@ export default function MobileActionBar() {
       <div className="mx-auto flex w-full max-w-3xl items-stretch gap-2">
         {primaryActions.map((action) => {
           const Icon = action.icon;
-          const isActive = location.pathname.startsWith(action.to.split("?")[0]);
+          const to = typeof action.to === "function" ? action.to() : action.to;
+          const isActive = location.pathname.startsWith(to.split("?")[0]);
 
           return (
             <Link
               key={action.id}
-              to={action.to}
+              to={to}
               className={`${actionButtonBaseClass} ${isActive ? "bg-brand-700 text-white" : "bg-slate-100 text-slate-700"}`}
             >
               <Icon size={18} />

@@ -54,6 +54,7 @@ const crmOrders: Row[] = [{ clientId: "b-pedido", status: "sent", sentAt: daysAg
 const automationNotes = `${WORKFLOW_INACTIVE_CLIENT_ORIGIN}\nFicticio.`;
 let opportunities: Row[] = [];
 let activities: Row[] = [];
+let agendaEvents: Row[] = [];
 let timelineEvents: Row[] = [];
 const resetOpportunities = () => {
   opportunities = [
@@ -67,6 +68,7 @@ const resetOpportunities = () => {
     { id: "opp-ontem", clientId: "ativo", ownerSellerId: "seller-a", stage: "ganho", notes: automationNotes, createdAt: new Date("2026-10-19T02:30:00.000Z") },
   ];
   activities = [];
+  agendaEvents = [];
   timelineEvents = [];
 };
 const appConfig = new Map<string, string>();
@@ -123,6 +125,7 @@ setModel("opportunity", {
   },
 });
 setModel("activity", { create: async ({ data }: any) => { writes.push("activity"); activities.push(data); return data; } });
+setModel("agendaEvent", { create: async ({ data }: any) => { writes.push("agendaEvent"); agendaEvents.push(data); return data; } });
 setModel("timelineEvent", { create: async ({ data }: any) => { writes.push("timelineEvent"); timelineEvents.push(data); return data; } });
 setModel("appConfig", {
   findUnique: async ({ where }: any) => (appConfig.has(where.key) ? { value: appConfig.get(where.key) } : null),
@@ -226,7 +229,8 @@ try {
   const run = await runCommercialAutomations("scheduler", now);
   assert.equal(run.skipped, false);
   assert.equal(run.createdOpportunities, 6);
-  assert.equal(run.createdActivities, 6);
+  assert.equal(run.createdAgendaEvents, 6);
+  assert.equal(activities.length, 0, "automação não cria atividade pendente");
   assert.equal(run.createdTimelineEvents, 6);
   assert.deepEqual(run.skippedByReason, simulation.skipped, "a simulação antecipa a execução");
   const createdIds = created().map((row) => row.clientId);
@@ -235,17 +239,19 @@ try {
     assert(!createdIds.includes(outside), `${outside} fica fora`);
   }
   const first = created().find((row) => row.clientId === "a-400")!;
-  const firstActivity = activities.find((row) => row.opportunityId === first.id)!;
+  const firstCall = agendaEvents.find((row) => row.opportunityId === first.id)!;
   assert.equal(first.title, "Reativação – Cliente Ficticio a-400");
   assert.equal(first.value, 0, "valor 0 não infla o pipeline");
   assert.equal(first.stage, "prospeccao");
   assert.equal(first.ownerSellerId, "seller-a");
   assert(first.notes.startsWith(`${WORKFLOW_INACTIVE_CLIENT_ORIGIN}\n`), "origem marcada como automação");
   assert.equal(first.followUpDate.toISOString(), "2026-10-21T00:00:00.000Z", "segunda + 2 dias úteis = quarta");
-  assert.equal(firstActivity.type, "ligacao");
-  assert.equal(firstActivity.ownerSellerId, "seller-a");
-  assert.equal(firstActivity.opportunityId, first.id);
-  assert.equal(firstActivity.dueDate.toISOString(), "2026-10-22T02:59:59.999Z", "vence no fim da quarta em Brasília");
+  assert.equal(firstCall.type, "ligacao", "compromisso de Ligação na Agenda");
+  assert.equal(firstCall.sellerId, "seller-a");
+  assert.equal(firstCall.clientId, "a-400");
+  assert.equal(firstCall.opportunityId, first.id);
+  assert.equal(firstCall.startDateTime.toISOString(), "2026-10-21T12:00:00.000Z", "quarta às 9h de Brasília");
+  assert.equal(firstCall.endDateTime.toISOString(), "2026-10-21T12:30:00.000Z");
   assert.equal(timelineEvents.find((row) => row.opportunityId === first.id)!.type, "status");
   assert.equal(history()[0].createdOpportunities, 6);
   assert.deepEqual(history()[0].skippedByReason, run.skippedByReason);
@@ -263,7 +269,7 @@ try {
   assert.deepEqual(created().slice(6).map((row) => row.clientId), ["b-auto-100", "a-550", "a-600", "b-livre"]);
   assert.equal(friday.skippedByReason.openOpportunity, 1 + 6);
   assert.equal(created()[6].followUpDate.toISOString(), "2026-10-27T00:00:00.000Z");
-  assert.equal(activities[6].dueDate.toISOString(), "2026-10-28T02:59:59.999Z");
+  assert.equal(agendaEvents[6].startDateTime.toISOString(), "2026-10-27T12:00:00.000Z", "terça às 9h de Brasília");
 
   // Não recria em 90 dias, mesmo com a oportunidade da automação encerrada (b-auto-100 voltou porque a anterior
   // tinha mais de 90 dias).

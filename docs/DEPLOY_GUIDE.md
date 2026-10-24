@@ -1,3 +1,14 @@
+## Agenda × Atividades — API (PR 2 de 4, 24/10/2026)
+
+Sem migration e sem mudança de schema: usa os valores de enum e as colunas da migration
+`20261023120000_agenda_activity_planning_split`, que precisa estar aplicada antes do cutover.
+Deploy normal (`phase=build`, depois `phase=cutover`).
+
+A partir desta versão a API grava `nao_realizado`, `notDoneReason`, `noNextStepReason` e os tipos
+novos de compromisso. **Voltar** para a versão da PR 1 não quebra a leitura (o Prisma dela já conhece
+os valores), mas a API antiga mostra `nao_realizado` como “Planejado” e volta a aceitar atividade
+pendente e `followup`. Voltar para antes da PR 1 quebra a leitura de linhas com os valores novos.
+
 ## Migration `20261023120000_agenda_activity_planning_split` (23/10/2026)
 
 Primeira de quatro PRs que separam Agenda (planejamento) de Atividades (execução). Só aditiva:

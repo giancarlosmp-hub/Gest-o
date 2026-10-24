@@ -1,6 +1,8 @@
-export type AgendaEventType = "reuniao_online" | "reuniao_presencial" | "roteiro_visita" | "followup";
+import type { AgendaEventType } from "@salesforce-pro/shared";
+export type { AgendaEventType } from "@salesforce-pro/shared";
 
-export type AgendaEventStatus = "planned" | "completed" | "cancelled";
+// cancelled é o cancelamento antigo (vencido); not_done é o "Não realizado" com motivo.
+export type AgendaEventStatus = "planned" | "completed" | "cancelled" | "not_done";
 
 export type AgendaEvent = {
   id: string;
@@ -14,6 +16,7 @@ export type AgendaEvent = {
   endsAt: string;
   city?: string;
   status: AgendaEventStatus;
+  notDoneReason?: string | null;
   linkedActivityId?: string | null;
   hasLinkedActivity?: boolean;
 
