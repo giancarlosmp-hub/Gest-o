@@ -1,11 +1,19 @@
-# Validador do preview de schema não bloqueia DML (23/10/2026)
+# Validador do preview de schema não bloqueia DML (23/10/2026) — resolvido no código, aguardando merge
 
 `scripts/production-schema-preview.sh` passa o conteúdo do SQL como nome de arquivo para o `grep`
 na checagem de `UPDATE|DELETE|INSERT|MERGE|COPY|CREATE OR REPLACE`. O `grep` falha, a condição é
 falsa e o arquivo passa: um `UPDATE` ou `DELETE` numa migration não é bloqueado por essa linha.
 Comprovado com SQL fictício em 23/10/2026; o defeito já existia na `main`. A migration
 `20261023120000_agenda_activity_planning_split` não tem DML, e o smoke `production-schema-safety`
-prova isso no próprio arquivo. A correção fica para uma PR própria.
+prova isso no próprio arquivo.
+
+Resolvido no código em 24/10/2026, aguardando merge: a checagem lê o SQL sem comentários, sem
+diferenciar maiúsculas, e bloqueia `UPDATE`, `DELETE`, `INSERT`, `MERGE`, `COPY`, `TRUNCATE` e
+`CREATE OR REPLACE` (os `ON DELETE`/`ON UPDATE` de chave estrangeira não contam). A única exceção é
+o backfill já aprovado de `20260904120000_orders_operational_view`, amarrado ao id, ao sha256 do
+manifesto e ao token `ALLOW_DATA_BACKFILL`. Resta: a remoção de comentários `--` (comum a todas as
+checagens do preview) não reconhece aspas, então um `--` dentro de string ou identificador esconde
+o resto da linha.
 
 # Progresso 1.0B.2-H — descendentes ainda isolados
 
