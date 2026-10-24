@@ -78,17 +78,33 @@ export const OpportunityStageEnum = z.enum([
   "perdido"
 ]);
 
-export const ActivityTypeEnum = z.enum(["ligacao", "whatsapp", "visita", "reuniao", "followup", "proposta_enviada", "proposta_negociacao", "fechamento", "envio_proposta", "visita_tecnica", "cliente_novo", "follow_up"]);
+export const ActivityTypeEnum = z.enum(["ligacao", "whatsapp", "visita", "reuniao", "followup", "proposta_enviada", "proposta_negociacao", "fechamento", "envio_proposta", "visita_tecnica", "cliente_novo", "follow_up", "reuniao_online", "reuniao_presencial"]);
 export const EventTypeEnum = z.enum(["comentario", "mudanca_etapa", "status"]);
-export const AgendaEventTypeEnum = z.enum(["reuniao_online", "reuniao_presencial", "roteiro_visita", "followup"]);
+// followup é legado: só aparece em compromissos antigos e não é aceito em compromisso novo.
+export const AgendaEventTypeEnum = z.enum(["ligacao", "whatsapp", "visita", "reuniao_online", "reuniao_presencial", "proposta", "fechamento", "roteiro_visita", "followup"]);
 export type AgendaEventType = z.infer<typeof AgendaEventTypeEnum>;
 
+// Catálogo único de compromissos (Agenda) e de próximo passo. roteiro_visita é o roteiro de várias visitas.
+export const AgendaCatalogTypeEnum = z.enum(["ligacao", "whatsapp", "visita", "reuniao_online", "reuniao_presencial", "proposta", "fechamento"]);
+export type AgendaCatalogType = z.infer<typeof AgendaCatalogTypeEnum>;
+export const AgendaEventCreateTypeEnum = z.enum([...AgendaCatalogTypeEnum.options, "roteiro_visita"]);
+
+// Opções de criação; o rótulo de tipos legados fica em AGENDA_EVENT_TYPE_LABELS.
 export const AGENDA_EVENT_TYPE_OPTIONS = [
+  { id: "CALL", value: "ligacao", label: "Ligação" },
+  { id: "WHATSAPP", value: "whatsapp", label: "WhatsApp" },
+  { id: "VISIT", value: "visita", label: "Visita" },
   { id: "ONLINE_MEETING", value: "reuniao_online", label: "Reunião online" },
   { id: "IN_PERSON_MEETING", value: "reuniao_presencial", label: "Reunião presencial" },
-  { id: "VISIT_ROUTE", value: "roteiro_visita", label: "Roteiro de visita" },
-  { id: "FOLLOW_UP", value: "followup", label: "Follow-up" }
+  { id: "PROPOSAL", value: "proposta", label: "Proposta" },
+  { id: "CLOSING", value: "fechamento", label: "Fechamento" },
+  { id: "VISIT_ROUTE", value: "roteiro_visita", label: "Roteiro de visita" }
 ] as const;
+
+export const AGENDA_EVENT_TYPE_LABELS: Record<AgendaEventType, string> = {
+  ...(Object.fromEntries(AGENDA_EVENT_TYPE_OPTIONS.map((option) => [option.value, option.label])) as Record<Exclude<AgendaEventType, "followup">, string>),
+  followup: "Follow-up"
+};
 
 export const loginSchema = z.object({
   email: z.string().email(),
@@ -182,7 +198,18 @@ export const activitySchema = z.object({
   checkInLng: z.number().finite().optional(),
   checkInAccuracy: z.number().nonnegative().optional(),
   ownerId: z.string().optional(),
-  ownerSellerId: z.string().optional()
+  ownerSellerId: z.string().optional(),
+  // Próximo passo vira compromisso na Agenda, com cliente e oportunidade da atividade.
+  nextStep: z
+    .object({
+      type: AgendaCatalogTypeEnum,
+      startsAt: z.string(),
+      endsAt: z.string().optional(),
+      title: z.string().trim().min(2).max(200).optional(),
+      notes: z.string().max(2000).optional()
+    })
+    .optional(),
+  noNextStepReason: z.string().trim().min(2).max(500).optional()
 });
 
 export const timelineEventSchema = z.object({
