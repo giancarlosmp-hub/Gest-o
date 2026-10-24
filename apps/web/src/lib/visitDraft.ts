@@ -17,6 +17,8 @@ export type VisitDraft = {
   startedAt: string;
   type: string;
   dueDate: string;
+  // Horário (Brasília) da visita; rascunhos antigos não têm e usam o horário atual.
+  time?: string;
   clientId: string;
   opportunityId: string;
   agendaEventId: string;

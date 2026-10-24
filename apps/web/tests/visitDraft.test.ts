@@ -67,7 +67,8 @@ saveVisitDraft("seller-ficticio", visit, { storage, now: new Date(checkInAt) });
 clearVisitDraft("seller-ficticio", { storage });
 assert.equal(loadVisitDraft("seller-ficticio", { storage, now: new Date(checkInAt) }), null);
 const page = readFileSync(new URL("../src/pages/ActivitiesPage.tsx", import.meta.url), "utf8");
-assert.match(page, /await api\.post\("\/activities", payload\);\n\s+if \(form\.type === "visita" && canWriteVisitDraft\) clearVisitDraft\(user\?\.id\);/, "apagado ao salvar com sucesso");
+// Depois de salvar com sucesso, pelo registro avulso ou pelo "Concluir" do compromisso.
+assert.match(page, /await api\.post\(`\/agenda\/events\/\$\{form\.agendaEventId\}\/complete`, payload\);\n\s+\} else \{\n\s+await api\.post\("\/activities", \{[\s\S]*?\}\);\n\s+\}\n\s+if \(form\.type === "visita" && canWriteVisitDraft\) clearVisitDraft\(user\?\.id\);/, "apagado ao salvar com sucesso");
 assert.match(page, /const discardVisitDraft = \(\) => \{\n\s+clearVisitDraft\(user\?\.id\);/, "apagado ao descartar no formulário");
 assert.match(page, />\s*Descartar visita em andamento\s*</);
 const banner = readFileSync(new URL("../src/components/visit/VisitDraftBanner.tsx", import.meta.url), "utf8");
