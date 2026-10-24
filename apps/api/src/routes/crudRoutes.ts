@@ -8,6 +8,8 @@ import { validateBody } from "../middlewares/validate.js";
 import {
   activityKpiUpsertSchema,
   activitySchema,
+  AGENDA_EVENT_TYPE_LABELS,
+  AgendaEventCreateTypeEnum,
   CLIENT_WITHOUT_ERP_CODE_ORDER_MESSAGE,
   clientContactSchema,
   clientSchema,
@@ -58,6 +60,13 @@ import { buildAssistantWhatsappContext, generateAssistantWhatsappMessage } from 
 import { aiService } from "../services/ai/aiService.js";
 import { runAiFlow, timeAiStage } from "../services/ai/aiTimeBudget.js";
 import { TODAY_PRIORITIES_OPPORTUNITY_SELECT } from "../services/ai/calculateTodayPriorities.js";
+import {
+  ACTIVITY_TYPE_FOR_AGENDA_TYPE,
+  NEXT_STEP_DEFAULT_DURATION_MINUTES,
+  isFutureBrazilDay,
+  pendingAgendaWindowStart,
+  validateExecutedActivity
+} from "../services/agendaActivityRules.js";
 import {
   calculateTodayPriorities,
   generateClientSummary,
@@ -928,6 +937,10 @@ const ACTIVITY_EXECUTED_LABEL: Partial<Record<ActivityType, string>> = {
   ligacao: "Ligação realizada",
   visita: "Visita realizada",
   reuniao: "Reunião realizada",
+  reuniao_online: "Reunião online realizada",
+  reuniao_presencial: "Reunião presencial realizada",
+  whatsapp: "WhatsApp realizado",
+  fechamento: "Fechamento realizado",
   proposta_enviada: "Envio de proposta realizado",
   followup: "Follow-up realizado",
   follow_up: "Follow-up realizado",
@@ -1038,18 +1051,25 @@ const parsePositiveInt = (value: unknown, fallback: number) => {
   return parsed;
 };
 
-const agendaEventTypeSchema = z.enum(["reuniao_online", "reuniao_presencial", "roteiro_visita", "followup"]);
-const agendaEventStatusSchema = z.enum(["planned", "completed", "cancelled"]);
+// Compromisso novo usa o catálogo único (mais roteiro_visita); followup segue só para leitura dos antigos.
+const agendaEventTypeSchema = z.enum(AgendaEventCreateTypeEnum.options, {
+  errorMap: () => ({
+    message: "Tipo de compromisso inválido. Use Ligação, WhatsApp, Visita, Reunião online, Reunião presencial, Proposta, Fechamento ou Roteiro de visita."
+  })
+});
+// "cancelled" (vencido) não é mais gravado: compromisso que não aconteceu vai para "Não realizado" com motivo.
+const agendaEventStatusSchema = z.enum(["planned", "completed"]);
 
-const mapAgendaStatusToDb = (status: "planned" | "completed" | "cancelled") => {
+const mapAgendaStatusToDb = (status: "planned" | "completed") => {
   if (status === "completed") return "realizado" as const;
-  if (status === "cancelled") return "vencido" as const;
   return "agendado" as const;
 };
 
-const mapAgendaStatusFromDb = (status: string): "planned" | "completed" | "cancelled" => {
+// vencido é o cancelamento antigo e continua lido como "cancelled".
+const mapAgendaStatusFromDb = (status: string): "planned" | "completed" | "cancelled" | "not_done" => {
   if (status === "realizado") return "completed";
   if (status === "vencido") return "cancelled";
+  if (status === "nao_realizado") return "not_done";
   return "planned";
 };
 
@@ -1070,12 +1090,20 @@ const buildAgendaCreatedDescription = (event: { type: AgendaEventType; title: st
   return `${baseLabel}: ${event.title}`;
 };
 
+const AGENDA_STATUS_TIMELINE_LABEL = {
+  completed: "Compromisso concluído",
+  cancelled: "Compromisso cancelado",
+  not_done: "Compromisso não realizado",
+  reopened: "Compromisso reaberto"
+} as const;
+
 const buildAgendaStatusDescription = (
-  status: "completed" | "cancelled",
-  event: { type: AgendaEventType; title: string }
+  status: keyof typeof AGENDA_STATUS_TIMELINE_LABEL,
+  event: { type: AgendaEventType; title: string },
+  reason?: string | null
 ) => {
-  const base = status === "completed" ? "Compromisso concluído" : "Compromisso cancelado";
-  return `${base}: ${event.title} (${AGENDA_TIMELINE_LABEL[event.type]})`;
+  const base = `${AGENDA_STATUS_TIMELINE_LABEL[status]}: ${event.title} (${AGENDA_TIMELINE_LABEL[event.type]})`;
+  return reason?.trim() ? `${base}. Motivo: ${reason.trim()}` : base;
 };
 
 const agendaEventCreateSchema = z.object({
@@ -8290,6 +8318,74 @@ router.get("/activities/monthly-counts", async (req, res) => {
     }))
   );
 });
+type NextStepBody = { type: AgendaEventType; startsAt: string; endsAt?: string; title?: string; notes?: string };
+
+// Próximo passo da atividade: compromisso na Agenda do mesmo vendedor, com cliente e oportunidade herdados.
+const createNextStepAgendaEvent = async (
+  tx: Prisma.TransactionClient,
+  nextStep: NextStepBody,
+  context: { sellerId: string; clientId?: string | null; opportunityId?: string | null; opportunityTitle?: string | null }
+) => {
+  const startDateTime = new Date(nextStep.startsAt);
+  const endDateTime = nextStep.endsAt
+    ? new Date(nextStep.endsAt)
+    : new Date(startDateTime.getTime() + NEXT_STEP_DEFAULT_DURATION_MINUTES * 60_000);
+  const label = AGENDA_EVENT_TYPE_LABELS[nextStep.type];
+  const event = await tx.agendaEvent.create({
+    data: {
+      title: nextStep.title?.trim() || (context.opportunityTitle ? `${label}: ${context.opportunityTitle}` : label),
+      type: nextStep.type,
+      startDateTime,
+      endDateTime,
+      sellerId: context.sellerId,
+      clientId: context.clientId || null,
+      opportunityId: context.opportunityId || null,
+      notes: nextStep.notes?.trim() || null
+    }
+  });
+  if (event.clientId) {
+    await tx.timelineEvent.create({
+      data: {
+        type: "status",
+        description: buildAgendaCreatedDescription(event),
+        clientId: event.clientId,
+        opportunityId: event.opportunityId,
+        ownerSellerId: event.sellerId
+      }
+    });
+  }
+  return event;
+};
+
+// Toda atividade criada é realizada. Usada pela criação direta e pelo "Concluir" do compromisso.
+const createExecutedActivityInTx = async (
+  tx: Prisma.TransactionClient,
+  data: Omit<Prisma.ActivityUncheckedCreateInput, "done">,
+  extras: { nextStep?: NextStepBody; opportunityTitle?: string | null }
+) => {
+  const activity = await tx.activity.create({ data: { ...data, done: true } });
+  if (activity.clientId) {
+    await tx.timelineEvent.create({
+      data: {
+        type: "status",
+        description: buildActivityExecutedDescription({ ...activity, opportunityTitle: extras.opportunityTitle }),
+        clientId: activity.clientId,
+        opportunityId: activity.opportunityId,
+        ownerSellerId: activity.ownerSellerId
+      }
+    });
+  }
+  const nextStepEvent = extras.nextStep
+    ? await createNextStepAgendaEvent(tx, extras.nextStep, {
+        sellerId: activity.ownerSellerId,
+        clientId: activity.clientId,
+        opportunityId: activity.opportunityId,
+        opportunityTitle: extras.opportunityTitle
+      })
+    : null;
+  return { activity, nextStepEvent };
+};
+
 router.post("/activities", validateBody(activitySchema), async (req, res) => {
   const ownerSellerId = resolveOwnerId(req, req.body.ownerSellerId || req.body.ownerId);
   const notes = (req.body.notes || req.body.description || "Sem notas").trim();
@@ -8300,7 +8396,7 @@ router.post("/activities", validateBody(activitySchema), async (req, res) => {
         id: req.body.opportunityId,
         ...sellerWhere(req)
       },
-      select: { id: true, clientId: true, title: true }
+      select: { id: true, clientId: true, title: true, stage: true }
     })
     : null;
 
@@ -8316,18 +8412,20 @@ router.post("/activities", validateBody(activitySchema), async (req, res) => {
   }
 
   const agendaEventId = req.body.agendaEventId || undefined;
+  let linkedAgendaEventType: AgendaEventType | null = null;
   if (agendaEventId) {
     const agendaEvent = await prisma.agendaEvent.findFirst({
       where: {
         id: agendaEventId,
         ...(req.user!.role === "vendedor" ? { sellerId: req.user!.id } : {})
       },
-      select: { id: true }
+      select: { id: true, type: true }
     });
 
     if (!agendaEvent) {
       return res.status(404).json({ message: "Evento da agenda não encontrado." });
     }
+    linkedAgendaEventType = agendaEvent.type;
   }
 
   const normalizedType = normalizeActivityType(req.body.type);
@@ -8336,60 +8434,46 @@ router.post("/activities", validateBody(activitySchema), async (req, res) => {
   if (!activityDateSource) {
     return res.status(400).json({ message: "Informe date ou dueDate para a atividade." });
   }
+  const validationError = validateExecutedActivity(req.body, relatedOpportunity);
+  if (validationError) {
+    return res.status(400).json({ message: validationError });
+  }
   const dueDate = new Date(req.body.dueDate || activityDateSource);
   const executionDate = req.body.date ? new Date(req.body.date) : dueDate;
-  const isExecuted = Boolean(req.body.done);
 
-  if (isExecuted && (!req.body.description || !String(req.body.description).trim())) {
-    return res.status(400).json({ message: "Atividades concluídas exigem o resumo da visita." });
-  }
+  const { activity: createdActivity, nextStepEvent } = await prisma.$transaction(async (tx) => {
+    const created = await createExecutedActivityInTx(tx, {
+      type: normalizedType,
+      notes,
+      description: req.body.description.trim(),
+      result: req.body.result,
+      dueDate,
+      date: executionDate,
+      duration: req.body.duration,
+      city: req.body.city,
+      crop: req.body.crop,
+      areaEstimated: req.body.areaEstimated,
+      product: req.body.product,
+      checkInAt: req.body.checkInAt ? new Date(req.body.checkInAt) : null,
+      checkInLat: req.body.checkInLat ?? null,
+      checkInLng: req.body.checkInLng ?? null,
+      checkInAccuracy: req.body.checkInAccuracy ?? null,
+      clientId: resolvedClientId,
+      opportunityId: req.body.opportunityId,
+      noNextStepReason: req.body.nextStep ? null : req.body.noNextStepReason?.trim() || null,
+      agendaEventId,
+      ownerSellerId
+    }, { nextStep: req.body.nextStep, opportunityTitle: relatedOpportunity?.title });
 
-  const createdActivity = await prisma.$transaction(async (tx) => {
-    const activity = await tx.activity.create({
-      data: {
-        type: normalizedType,
-        notes,
-        description: req.body.description || notes,
-        result: req.body.result,
-        dueDate,
-        date: executionDate,
-        duration: req.body.duration,
-        city: req.body.city,
-        crop: req.body.crop,
-        areaEstimated: req.body.areaEstimated,
-        product: req.body.product,
-        checkInAt: req.body.checkInAt ? new Date(req.body.checkInAt) : null,
-        checkInLat: req.body.checkInLat ?? null,
-        checkInLng: req.body.checkInLng ?? null,
-        checkInAccuracy: req.body.checkInAccuracy ?? null,
-        done: req.body.done,
-        clientId: resolvedClientId,
-        opportunityId: req.body.opportunityId,
-        agendaEventId,
-        ownerSellerId
-      }
-    });
-
-    if (agendaEventId) {
+    // Vincular conclui o compromisso; o roteiro só fica realizado quando todas as paradas forem resolvidas.
+    if (agendaEventId && linkedAgendaEventType !== "roteiro_visita") {
       await tx.agendaEvent.update({
         where: { id: agendaEventId },
         data: { status: "realizado" }
       });
     }
 
-    if (activity.done && activity.clientId) {
-      await tx.timelineEvent.create({
-        data: {
-          type: "status",
-          description: buildActivityExecutedDescription({ ...activity, opportunityTitle: relatedOpportunity?.title }),
-          clientId: activity.clientId,
-          opportunityId: activity.opportunityId,
-          ownerSellerId: activity.ownerSellerId
-        }
-      });
-    }
-
-    return activity;
+    return created;
   });
 
   await createEvent({
@@ -8405,6 +8489,7 @@ router.post("/activities", validateBody(activitySchema), async (req, res) => {
 
   return res.status(201).json({
     ...mapActivity(createdActivity),
+    nextStepAgendaEventId: nextStepEvent?.id ?? null,
     metrics: {
       month,
       logicalCount
@@ -8445,7 +8530,14 @@ router.put("/activities/:id", validateBody(activityUpdateSchema), async (req, re
     return res.status(404).json({ message: "Atividade não encontrada" });
   }
 
+  // Atividade realizada não volta a pendente. A pendente antiga só pode ser reagendada ou concluída.
+  if (existingActivity.done && req.body.done === false) {
+    return res.status(400).json({ message: "Atividade realizada não volta a pendente. Para planejar, crie um compromisso na Agenda." });
+  }
   const nextDone = req.body.done ?? existingActivity.done;
+  if (nextDone && [req.body.date, req.body.dueDate].some((value) => value !== undefined && isFutureBrazilDay(value))) {
+    return res.status(400).json({ message: "A data da atividade não pode ser futura." });
+  }
   const nextDescription = req.body.description !== undefined ? req.body.description : existingActivity.description;
   if (nextDone && !String(nextDescription || "").trim()) {
     return res.status(400).json({ message: "Atividades concluídas exigem o resumo da visita." });
@@ -8474,6 +8566,7 @@ router.put("/activities/:id", validateBody(activityUpdateSchema), async (req, re
         ...(req.body.clientId !== undefined ? { clientId: req.body.clientId } : {}),
         ...(req.body.opportunityId !== undefined ? { opportunityId: req.body.opportunityId } : {}),
         ...(req.body.agendaEventId !== undefined ? { agendaEventId: req.body.agendaEventId } : {}),
+        ...(req.body.noNextStepReason !== undefined ? { noNextStepReason: req.body.noNextStepReason.trim() || null } : {}),
         ...(ownerSellerId !== undefined ? { ownerSellerId } : {})
       }
     });
@@ -8501,17 +8594,26 @@ router.patch("/activities/:id/done", async (req, res) => {
       id: req.params.id,
       ...sellerWhere(req)
     },
-    select: { id: true }
+    select: { id: true, done: true, description: true }
   });
 
   if (!existingActivity) {
     return res.status(404).json({ message: "Atividade não encontrada" });
   }
 
-  const updatedActivity = await prisma.activity.update({ where: { id: req.params.id }, data: { done: Boolean(req.body.done) } });
+  // Só conclui: atividade não volta a pendente e a conclusão exige o resumo, como no PUT.
+  if (!req.body.done) {
+    return res.status(400).json({ message: "Atividade realizada não volta a pendente. Para planejar, crie um compromisso na Agenda." });
+  }
+  if (!String(existingActivity.description || "").trim()) {
+    return res.status(400).json({ message: "Atividades concluídas exigem o resumo da visita." });
+  }
+
+  const updatedActivity = await prisma.activity.update({ where: { id: req.params.id }, data: { done: true } });
   return res.json(mapActivity(updatedActivity));
 });
-router.delete("/activities/:id", async (req, res) => {
+// Exclusão de atividade só para gerente e diretor.
+router.delete("/activities/:id", authorize("diretor", "gerente"), async (req, res) => {
   const existingActivity = await prisma.activity.findFirst({
     where: {
       id: req.params.id,
@@ -8593,8 +8695,9 @@ router.delete(["/events/:id", "/agenda/:id", "/agenda/events/:id"], async (req, 
   });
 
   if (agendaEvent) {
-    if (req.user!.role === "vendedor" && agendaEvent.sellerId !== req.user!.id) {
-      return res.status(403).json({ message: "Acesso negado." });
+    // Compromisso só é excluído por gerente ou diretor; o vendedor marca "Não realizado".
+    if (req.user!.role === "vendedor") {
+      return res.status(403).json({ message: "Somente gerente ou diretor pode excluir compromisso." });
     }
 
     await prisma.agendaEvent.delete({ where: { id: req.params.id } });
@@ -8643,6 +8746,7 @@ const mapAgendaEvent = (agendaEvent: any) => {
   isOverdue,
   city: agendaEvent.city,
   notes: agendaEvent.notes,
+  notDoneReason: agendaEvent.notDoneReason ?? null,
   linkedActivityId,
   hasLinkedActivity: Boolean(linkedActivityId),
   stops: (agendaEvent.stops || []).map((stop: any) => ({
@@ -8790,11 +8894,26 @@ router.post(["/agenda", "/agenda/events"], validateBody(agendaEventCreateSchema)
 router.patch(["/agenda/:id", "/agenda/events/:id"], validateBody(agendaEventUpdateSchema), async (req, res) => {
   const event = await prisma.agendaEvent.findUnique({
     where: { id: req.params.id },
-    select: { sellerId: true, title: true, type: true, status: true, clientId: true }
+    select: { sellerId: true, title: true, type: true, status: true, clientId: true, _count: { select: { activities: true } } }
   });
   if (!event) return res.status(404).json({ message: "Evento não encontrado." });
   if (req.user!.role === "vendedor" && event.sellerId !== req.user!.id) {
     return res.status(403).json({ message: "Acesso negado." });
+  }
+
+  // Realizado só com atividade vinculada ("Concluir"); o roteiro fica realizado pelas paradas.
+  if (req.body.status === "completed" && event.status !== "realizado") {
+    if (event.type === "roteiro_visita") {
+      return res.status(400).json({ message: "O roteiro é concluído pelas paradas." });
+    }
+    if (event._count.activities === 0) {
+      return res.status(400).json({ message: "Use \"Concluir\" para registrar a atividade do compromisso." });
+    }
+  }
+  // Reabrir (voltar para agendado) é só para gerente e diretor; a atividade vinculada é mantida.
+  const isReopening = req.body.status === "planned" && event.status !== "agendado";
+  if (isReopening && req.user!.role === "vendedor") {
+    return res.status(403).json({ message: "Somente gerente ou diretor pode reabrir compromisso." });
   }
 
   const updated = await prisma.agendaEvent.update({
@@ -8804,6 +8923,7 @@ router.patch(["/agenda/:id", "/agenda/events/:id"], validateBody(agendaEventUpda
       ...((req.body.startsAt || req.body.startDateTime) ? { startDateTime: new Date(req.body.startsAt || req.body.startDateTime) } : {}),
       ...((req.body.endsAt || req.body.endDateTime) ? { endDateTime: new Date(req.body.endsAt || req.body.endDateTime) } : {}),
       ...(req.body.status ? { status: mapAgendaStatusToDb(req.body.status) } : {}),
+      ...(isReopening ? { notDoneReason: null } : {}),
       ...(req.body.notes !== undefined ? { notes: req.body.notes } : {}),
       ...(req.body.city !== undefined ? { city: req.body.city } : {}),
       ...(req.body.opportunityId !== undefined ? { opportunityId: req.body.opportunityId } : {})
@@ -8813,12 +8933,185 @@ router.patch(["/agenda/:id", "/agenda/events/:id"], validateBody(agendaEventUpda
 
   const previousStatus = mapAgendaStatusFromDb(event.status);
   const currentStatus = mapAgendaStatusFromDb(updated.status);
-  if (event.clientId && previousStatus !== currentStatus && (currentStatus === "completed" || currentStatus === "cancelled")) {
+  const timelineStatus = isReopening ? "reopened" : currentStatus === "completed" ? "completed" : null;
+  if (event.clientId && previousStatus !== currentStatus && timelineStatus) {
     await createEvent({
       type: "status",
-      description: buildAgendaStatusDescription(currentStatus, { type: updated.type, title: updated.title }),
+      description: buildAgendaStatusDescription(timelineStatus, { type: updated.type, title: updated.title }),
       clientId: event.clientId,
       ownerSellerId: updated.sellerId
+    });
+  }
+
+  return res.json(mapAgendaEvent(updated));
+});
+
+const AGENDA_EVENT_LIST_INCLUDE = {
+  stops: { include: { client: { select: { name: true } } }, orderBy: { order: "asc" } },
+  client: true,
+  activities: { select: { id: true }, orderBy: { createdAt: "desc" }, take: 1 }
+} satisfies Prisma.AgendaEventInclude;
+
+// Pendências: compromissos passados ainda agendados dos últimos 30 dias (Brasília), no escopo do usuário.
+// Os mais antigos aparecem só como contador, para gerente e diretor.
+router.get("/agenda/pending", async (req, res) => {
+  const now = new Date();
+  const windowStart = pendingAgendaWindowStart(now);
+  const isSeller = req.user!.role === "vendedor";
+  const scopedSellerId = isSeller ? req.user!.id : (req.query.sellerId as string | undefined);
+  const baseWhere: Prisma.AgendaEventWhereInput = {
+    ...(scopedSellerId ? { sellerId: scopedSellerId } : {}),
+    status: "agendado",
+    endDateTime: { lt: now }
+  };
+
+  const [events, olderCount] = await Promise.all([
+    prisma.agendaEvent.findMany({
+      where: { ...baseWhere, startDateTime: { gte: windowStart } },
+      include: AGENDA_EVENT_LIST_INCLUDE,
+      orderBy: { startDateTime: "asc" }
+    }),
+    isSeller ? Promise.resolve(null) : prisma.agendaEvent.count({ where: { ...baseWhere, startDateTime: { lt: windowStart } } })
+  ]);
+
+  return res.json({
+    items: events.map(mapAgendaEvent),
+    total: events.length,
+    windowStart: windowStart.toISOString(),
+    ...(olderCount === null ? {} : { olderCount })
+  });
+});
+
+const agendaCompleteSchema = activitySchema
+  .partial()
+  .omit({ done: true, clientId: true, opportunityId: true, agendaEventId: true, ownerId: true, ownerSellerId: true })
+  .extend({ activityId: z.string().optional() });
+
+// "Concluir": vincula uma atividade realizada já registrada (activityId) ou cria a atividade com cliente e
+// oportunidade do compromisso, e marca o compromisso como realizado.
+router.post("/agenda/events/:id/complete", validateBody(agendaCompleteSchema), async (req, res) => {
+  const event = await prisma.agendaEvent.findUnique({
+    where: { id: req.params.id },
+    select: {
+      id: true,
+      sellerId: true,
+      title: true,
+      type: true,
+      status: true,
+      city: true,
+      clientId: true,
+      opportunityId: true,
+      opportunity: { select: { title: true, stage: true } }
+    }
+  });
+  if (!event) return res.status(404).json({ message: "Evento não encontrado." });
+  if (req.user!.role === "vendedor" && event.sellerId !== req.user!.id) {
+    return res.status(403).json({ message: "Acesso negado." });
+  }
+  if (event.type === "roteiro_visita") {
+    return res.status(400).json({ message: "O roteiro é concluído pelas paradas." });
+  }
+  if (event.status !== "agendado") {
+    return res.status(400).json({ message: "Só compromisso agendado pode ser concluído." });
+  }
+
+  let activityId: string;
+  let nextStepAgendaEventId: string | null = null;
+  if (req.body.activityId) {
+    const activity = await prisma.activity.findFirst({
+      where: { id: req.body.activityId, ownerSellerId: event.sellerId, done: true },
+      select: { id: true, agendaEventId: true }
+    });
+    if (!activity) return res.status(404).json({ message: "Atividade realizada não encontrada." });
+    if (activity.agendaEventId && activity.agendaEventId !== event.id) {
+      return res.status(400).json({ message: "A atividade já está vinculada a outro compromisso." });
+    }
+    await prisma.$transaction(async (tx) => {
+      await tx.activity.update({ where: { id: activity.id }, data: { agendaEventId: event.id } });
+      await tx.agendaEvent.update({ where: { id: event.id }, data: { status: "realizado" } });
+    });
+    activityId = activity.id;
+  } else {
+    const date = req.body.date || new Date().toISOString();
+    const validationError = validateExecutedActivity({ ...req.body, date }, event.opportunity);
+    if (validationError) return res.status(400).json({ message: validationError });
+
+    const description = String(req.body.description).trim();
+    const created = await prisma.$transaction(async (tx) => {
+      const result = await createExecutedActivityInTx(tx, {
+        type: req.body.type ? normalizeActivityType(req.body.type) : ACTIVITY_TYPE_FOR_AGENDA_TYPE[event.type],
+        notes: req.body.notes?.trim() || description,
+        description,
+        result: req.body.result,
+        dueDate: new Date(date),
+        date: new Date(date),
+        duration: req.body.duration,
+        city: req.body.city ?? event.city,
+        crop: req.body.crop,
+        areaEstimated: req.body.areaEstimated,
+        product: req.body.product,
+        checkInAt: req.body.checkInAt ? new Date(req.body.checkInAt) : null,
+        checkInLat: req.body.checkInLat ?? null,
+        checkInLng: req.body.checkInLng ?? null,
+        checkInAccuracy: req.body.checkInAccuracy ?? null,
+        clientId: event.clientId,
+        opportunityId: event.opportunityId,
+        noNextStepReason: req.body.nextStep ? null : req.body.noNextStepReason?.trim() || null,
+        agendaEventId: event.id,
+        ownerSellerId: event.sellerId
+      }, { nextStep: req.body.nextStep, opportunityTitle: event.opportunity?.title });
+      await tx.agendaEvent.update({ where: { id: event.id }, data: { status: "realizado" } });
+      return result;
+    });
+    activityId = created.activity.id;
+    nextStepAgendaEventId = created.nextStepEvent?.id ?? null;
+  }
+
+  if (event.clientId) {
+    await createEvent({
+      type: "status",
+      description: buildAgendaStatusDescription("completed", event),
+      clientId: event.clientId,
+      ownerSellerId: event.sellerId
+    });
+  }
+
+  const updated = await prisma.agendaEvent.findUnique({ where: { id: event.id }, include: AGENDA_EVENT_LIST_INCLUDE });
+  return res.status(201).json({ agendaEvent: mapAgendaEvent(updated), activityId, nextStepAgendaEventId });
+});
+
+const agendaNotDoneSchema = z.object({ reason: z.string().max(500).optional() });
+
+// "Não realizado": o compromisso não aconteceu; o motivo é obrigatório. Substitui o cancelamento (vencido).
+router.post("/agenda/events/:id/not-done", validateBody(agendaNotDoneSchema), async (req, res) => {
+  const reason = String(req.body.reason || "").trim();
+  if (reason.length < 2) {
+    return res.status(400).json({ message: "Informe o motivo de o compromisso não ter sido realizado." });
+  }
+  const event = await prisma.agendaEvent.findUnique({
+    where: { id: req.params.id },
+    select: { id: true, sellerId: true, title: true, type: true, status: true, clientId: true }
+  });
+  if (!event) return res.status(404).json({ message: "Evento não encontrado." });
+  if (req.user!.role === "vendedor" && event.sellerId !== req.user!.id) {
+    return res.status(403).json({ message: "Acesso negado." });
+  }
+  if (event.status !== "agendado") {
+    return res.status(400).json({ message: "Só compromisso agendado pode ser marcado como não realizado." });
+  }
+
+  const updated = await prisma.agendaEvent.update({
+    where: { id: event.id },
+    data: { status: "nao_realizado", notDoneReason: reason },
+    include: AGENDA_EVENT_LIST_INCLUDE
+  });
+
+  if (event.clientId) {
+    await createEvent({
+      type: "status",
+      description: buildAgendaStatusDescription("not_done", event, reason),
+      clientId: event.clientId,
+      ownerSellerId: event.sellerId
     });
   }
 
@@ -9021,6 +9314,17 @@ router.patch(["/agenda-events/:id/result", "/agenda/events/:id/result"], validat
       } else {
         await tx.activity.create({ data: activityData });
       }
+    }
+
+    // Todas as paradas resolvidas (realizada ou não realizada): o roteiro fica realizado.
+    const unresolvedStops = await tx.agendaStop.count({
+      where: { agendaEventId: updatedStop.agendaEventId, resultStatus: null }
+    });
+    if (unresolvedStops === 0) {
+      await tx.agendaEvent.updateMany({
+        where: { id: updatedStop.agendaEventId, status: "agendado" },
+        data: { status: "realizado" }
+      });
     }
 
     return updatedStop;
