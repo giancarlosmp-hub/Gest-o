@@ -59,7 +59,19 @@ setModel("opportunity", {
 });
 setModel("erpOrderSync", { findMany: async () => [] });
 setModel("goal", { findMany: async () => [{ sellerId: "seller-a", targetValue: 2000 }, { sellerId: "seller-b", targetValue: 55555 }] });
-setModel("agendaEvent", { groupBy: async () => bySeller({ "seller-a": 4, "seller-b": 30 }, "sellerId") });
+// Planejado da Agenda (disciplina): um compromisso realizado de cada vendedor.
+setModel("agendaEvent", {
+  findMany: async () =>
+    ["seller-a", "seller-b"].map((sellerId) => ({
+      sellerId,
+      type: "visita",
+      status: "realizado",
+      startDateTime: daysAgo(1),
+      endDateTime: daysAgo(1),
+      stops: [],
+      activities: [{ date: daysAgo(1) }]
+    }))
+});
 setModel("timelineEvent", { findMany: async () => [] });
 setModel("activity", {
   findMany: async () => [],

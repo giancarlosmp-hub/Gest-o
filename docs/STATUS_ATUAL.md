@@ -1,3 +1,15 @@
+# Disciplina: planejado na Agenda × concluído — código pronto, aguardando deploy — 24/10/2026
+
+- PR 4 de 4 da separação Agenda × Atividades. Disciplina semanal, ranking de disciplina, componente de disciplina do
+  score comercial e relatório de execução passam a usar planejado = compromissos da Agenda (cada parada conta 1) e
+  concluído = realizados; não realizado, sem conclusão, a fazer e fora da Agenda aparecem separados.
+- Corte do histórico fixo no código (`DISCIPLINE_HISTORY_CUTOFF`): segunda 26/10/2026 00:00 de Brasília. Antes dele
+  o "sem conclusão" fica neutro e o roteiro realizado sem paradas resolvidas conta 1 concluído.
+- "Não realizado" neutro até 20% dos elegíveis; pontualidade = concluído no mesmo dia planejado (Brasília).
+- Central do Dia: compromissos de hoje com status e progresso do roteiro, contador de pendências de dias anteriores
+  (link para a Agenda) e atividades concluídas hoje com o horário informado (`date`).
+- Detalhes e pendências: `TECH_DEBT.md`, “TD-DISCIPLINE-AGENDA-PLANNED”.
+
 # Agenda × Atividades: migration aditiva cadastrada, não aplicada — 23/10/2026
 
 - PR 1 de 4 (migration `20261023120000_agenda_activity_planning_split`): 8 valores de enum e 2 colunas

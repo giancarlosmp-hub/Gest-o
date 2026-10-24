@@ -90,6 +90,8 @@ type DisciplineRankingItem = {
   sellerName: string;
   planned: number;
   executed: number;
+  notDone: number;
+  unresolved: number;
   executionRate: number;
   punctualRate: number;
   followUpRate: number;
@@ -1293,6 +1295,7 @@ export default function DashboardPage() {
               <tr className="border-b border-slate-200 text-left text-slate-500">
                 <th className="py-2.5 pr-3">Posição</th>
                 <th className="py-2.5 pr-3">Vendedor</th>
+                <th className="py-2.5 pr-3">Concluído / planejado</th>
                 <th className="py-2.5 pr-3">Execução</th>
                 <th className="py-2.5 pr-3">Pontualidade</th>
                 <th className="py-2.5 pr-3">Score</th>
@@ -1328,6 +1331,10 @@ export default function DashboardPage() {
                         ) : null}
                       </div>
                     </td>
+                    <td className="py-2.5 pr-3 text-slate-700">
+                      <div>{row.executed}/{row.planned}</div>
+                      <div className="text-xs text-slate-500">{row.notDone} não realizados · {row.unresolved} sem conclusão</div>
+                    </td>
                     <td className="py-2.5 pr-3 text-slate-700">{formatPercentBR(row.executionRate)}</td>
                     <td className="py-2.5 pr-3 text-slate-700">{formatPercentBR(row.punctualRate)}</td>
                     <td
@@ -1350,7 +1357,7 @@ export default function DashboardPage() {
               })}
               {disciplineRankingVisible.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="py-4 text-center text-slate-500">
+                  <td colSpan={6} className="py-4 text-center text-slate-500">
                     Sem dados de disciplina para o período.
                   </td>
                 </tr>

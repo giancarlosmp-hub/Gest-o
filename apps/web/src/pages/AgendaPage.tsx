@@ -546,13 +546,20 @@ export default function AgendaPage() {
   }, [canFilterBySeller, searchParams]);
 
 
+  // ?pendentes=antigos: antes da janela das Pendências. ?pendentes=dias-anteriores (Central do Dia): da janela até ontem.
   useEffect(() => {
-    if (searchParams.get("pendentes") !== "antigos") return;
+    const pending = searchParams.get("pendentes");
+    if (pending !== "antigos" && pending !== "dias-anteriores") return;
     const windowStartKey = shiftBrazilDayKey(brazilTodayKey(), -PENDING_WINDOW_DAYS);
     setView("list");
     setPeriodFilter("custom_range");
-    setCustomFrom(shiftBrazilDayKey(windowStartKey, -365));
-    setCustomTo(shiftBrazilDayKey(windowStartKey, -1));
+    if (pending === "antigos") {
+      setCustomFrom(shiftBrazilDayKey(windowStartKey, -365));
+      setCustomTo(shiftBrazilDayKey(windowStartKey, -1));
+    } else {
+      setCustomFrom(windowStartKey);
+      setCustomTo(shiftBrazilDayKey(brazilTodayKey(), -1));
+    }
     setOverdueOnly(true);
     setIsMoreFiltersOpen(true);
   }, [searchParams]);

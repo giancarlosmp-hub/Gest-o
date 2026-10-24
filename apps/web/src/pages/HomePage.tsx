@@ -11,6 +11,14 @@ import { getApiErrorMessage } from "../lib/apiError";
 import { DASHBOARD_REFRESH_EVENT } from "../lib/dashboardRefresh";
 import { brazilMonthKey, brazilTodayKey } from "../lib/brazilDate";
 import { collectionClientsPath, portfolioStatusClientsPath } from "../lib/clientListFilters";
+import {
+  AGENDA_STATUS_LABEL,
+  agendaEventsOfToday,
+  previousDaysPendingCount,
+  routeStopsProgress,
+  summarizeAgendaToday,
+  type CentralAgendaEvent
+} from "../lib/centralDayAgenda";
 
 type Activity = {
   id: string;
@@ -23,14 +31,7 @@ type Activity = {
   opportunity?: { id: string; title: string; client?: { id: string; name: string } } | null;
 };
 
-type AgendaEventLite = {
-  id: string;
-  title: string;
-  type: string;
-  status?: "planned" | "completed" | "cancelled";
-  startsAt?: string;
-  startDateTime?: string;
-};
+type AgendaEventLite = CentralAgendaEvent;
 
 type ActivityKpi = {
   type: string;
@@ -211,6 +212,13 @@ function getActivityExecutionDate(activity: Pick<Activity, "createdAt" | "dueDat
   return activity.date || activity.createdAt || activity.dueDate;
 }
 
+// Horário exibido: a data informada na atividade (date), não o momento do cadastro.
+function formatActivityTime(activity: Pick<Activity, "dueDate"> & { date?: string }) {
+  return new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(new Date(activity.date || activity.dueDate));
+}
+
+const PREVIOUS_DAYS_PENDING_PATH = "/agenda?pendentes=dias-anteriores";
+
 const blockClass = "rounded-xl border border-slate-200 bg-white p-4 shadow-sm";
 const PANEL_ORDER_STORAGE_KEY = "central-do-dia-panel-order";
 const defaultPanelOrder = ["routine", "pipeline", "summary", "agenda", "followups", "critical", "alerts", "missions", "activities"] as const;
@@ -238,6 +246,8 @@ export default function HomePage() {
   const [commercialInsightsLoading, setCommercialInsightsLoading] = useState(false);
   const [commercialInsightsError, setCommercialInsightsError] = useState<string | null>(null);
   const [agendaEventsToday, setAgendaEventsToday] = useState<AgendaEventLite[]>([]);
+  // null: ainda carregando ou indisponível; o aviso só aparece com a contagem.
+  const [previousDaysPending, setPreviousDaysPending] = useState<number | null>(null);
   const [pipelineError, setPipelineError] = useState<string | null>(null);
   const [coolingClients, setCoolingClients] = useState<CoolingClientsState>({ count: 0, unavailable: false });
   // null: ainda carregando ou indisponível; o bloco só aparece com a contagem.
@@ -313,6 +323,15 @@ export default function HomePage() {
         const agendaPayload = Array.isArray(agendaResponse.data?.items) ? agendaResponse.data.items : agendaResponse.data;
         setAgendaEventsToday(Array.isArray(agendaPayload) ? agendaPayload : []);
         setTodayPriorities(Array.isArray(prioritiesResponse.data) ? prioritiesResponse.data : []);
+
+        try {
+          const pendingResponse = await api.get("/agenda/pending", { signal });
+          const pendingItems = Array.isArray(pendingResponse.data?.items) ? pendingResponse.data.items : [];
+          setPreviousDaysPending(previousDaysPendingCount(pendingItems));
+        } catch (pendingError: unknown) {
+          if ((pendingError as { code?: string })?.code === "ERR_CANCELED") return;
+          setPreviousDaysPending(null);
+        }
 
         try {
           const coolingResponse = await api.get("/clients/alerts/cooling", { signal });
@@ -427,20 +446,17 @@ export default function HomePage() {
   );
   const inspirationalQuote = useMemo(() => getSessionMotivationalQuote(), [user?.id]);
 
-  const { plannedAppointmentsToday, activitiesToday, pendingFollowUps } = useMemo(() => {
+  const { agendaToday, agendaTodaySummary, doneActivitiesToday, visitsToday, pendingFollowUps } = useMemo(() => {
     const { start, end } = getTodayBoundaries();
-    const eligibleActivityTypes = new Set(["visita", "visita_tecnica"]);
+    const visitActivityTypes = new Set(["visita", "visita_tecnica"]);
 
-    const plannedAppointments = agendaEventsToday
-      .filter((item) => (item.status ?? "planned") === "planned")
-      .filter((item) => isSameDay(String(item.startsAt || item.startDateTime || ""), start, end));
+    // Planejado de hoje: todos os compromissos do dia, com o status de cada um.
+    const todayEvents = agendaEventsOfToday(agendaEventsToday);
 
-
-    const dayActivities = activities
-      .filter((item) => item.done)
-      .filter((item) => eligibleActivityTypes.has(normalizeActivityType(item.type)))
-      .filter((item) => item.date && isSameDay(item.date, start, end))
-      .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
+    // Feito hoje: todas as atividades concluídas; as visitas ficam numa contagem à parte.
+    const doneToday = activities
+      .filter((item) => item.done && isSameDay(getActivityExecutionDate(item), start, end))
+      .sort((a, b) => new Date(a.date || a.dueDate).getTime() - new Date(b.date || b.dueDate).getTime());
 
     const toFollowUpDate = (value?: string | null) => {
       if (!value) return null;
@@ -462,16 +478,13 @@ export default function HomePage() {
 
 
     return {
-      plannedAppointmentsToday: plannedAppointments,
-      activitiesToday: dayActivities,
+      agendaToday: todayEvents,
+      agendaTodaySummary: summarizeAgendaToday(todayEvents),
+      doneActivitiesToday: doneToday,
+      visitsToday: doneToday.filter((item) => visitActivityTypes.has(normalizeActivityType(item.type))),
       pendingFollowUps: pending
     };
   }, [activities, agendaEventsToday, opportunities]);
-
-  const completedActivitiesTodayCount = useMemo(() => {
-    const { start, end } = getTodayBoundaries();
-    return activities.filter((item) => item.done && isSameDay(getActivityExecutionDate(item), start, end)).length;
-  }, [activities]);
 
   const activitiesForMobileList = useMemo(() => {
     const { start, end } = getTodayBoundaries();
@@ -954,6 +967,35 @@ export default function HomePage() {
     );
   };
 
+  // Planejado de hoje em itens (cada parada de roteiro conta 1), como na disciplina.
+  const renderAgendaTodayCounter = () => (
+    <p className="mt-1 text-xs text-slate-500">
+      {agendaTodaySummary.completed} concluídos · {agendaTodaySummary.notDone} não realizados · {agendaTodaySummary.open} em aberto
+    </p>
+  );
+
+  const renderAgendaItemStatus = (item: AgendaEventLite) => {
+    const status = item.status ?? "planned";
+    const progress = routeStopsProgress(item);
+    const tone = status === "completed" ? "bg-emerald-50 text-emerald-700" : status === "not_done" ? "bg-amber-50 text-amber-800" : "bg-slate-100 text-slate-600";
+    return (
+      <p className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+        <span className={`rounded-full px-2 py-0.5 font-medium ${tone}`}>{AGENDA_STATUS_LABEL[status] ?? "Agendado"}</span>
+        {progress ? <span className="text-slate-500">{progress}</span> : null}
+      </p>
+    );
+  };
+
+  const renderPreviousDaysPending = () =>
+    previousDaysPending ? (
+      <Link
+        to={PREVIOUS_DAYS_PENDING_PATH}
+        className="mt-3 mb-3 inline-flex rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-100"
+      >
+        {previousDaysPending === 1 ? "1 compromisso de dias anteriores sem conclusão" : `${previousDaysPending} compromissos de dias anteriores sem conclusão`}
+      </Link>
+    ) : null;
+
   const renderCentralDayHero = (showStartRoute: boolean) => (
     <section className="rounded-xl border border-brand-100 bg-brand-50 p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1012,17 +1054,19 @@ export default function HomePage() {
           <div className="mt-4 grid gap-3">
             <div className="rounded-xl bg-slate-50 p-4">
               <p className="text-sm text-slate-600">Atividades concluídas hoje</p>
-              <p className="mt-1 text-3xl font-bold text-slate-900">{completedActivitiesTodayCount}</p>
+              <p className="mt-1 text-3xl font-bold text-slate-900">{doneActivitiesToday.length}</p>
             </div>
             <div className="rounded-xl bg-slate-50 p-4">
               <p className="text-sm text-slate-600">Compromissos do dia</p>
-              <p className="mt-1 text-3xl font-bold text-slate-900">{plannedAppointmentsToday.length}</p>
+              <p className="mt-1 text-3xl font-bold text-slate-900">{agendaTodaySummary.planned}</p>
+              {renderAgendaTodayCounter()}
             </div>
             <div className="rounded-xl bg-slate-50 p-4">
               <p className="text-sm text-slate-600">Visitas realizadas</p>
-              <p className="mt-1 text-3xl font-bold text-slate-900">{activitiesToday.length}</p>
+              <p className="mt-1 text-3xl font-bold text-slate-900">{visitsToday.length}</p>
             </div>
           </div>
+          {renderPreviousDaysPending()}
         </section>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -1074,8 +1118,7 @@ export default function HomePage() {
                     <p className="text-base font-medium text-slate-900">{activity.notes || "Atividade"}</p>
                     <p className="mt-1 text-sm text-slate-600">{activity.opportunity?.title || "Sem oportunidade"}</p>
                     <p className="mt-1 text-xs text-slate-500">
-                      {activity.done ? "Concluída" : "Pendente"} ·{" "}
-                      {new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(new Date(activity.createdAt || activity.dueDate))}
+                      {activity.done ? "Concluída" : "Pendente"} · {formatActivityTime(activity)}
                     </p>
                   </div>
                 ))
@@ -1088,10 +1131,10 @@ export default function HomePage() {
             <div className="mt-2 space-y-2">
               {loading ? (
                 <p className="text-sm text-slate-500">Carregando agenda...</p>
-              ) : plannedAppointmentsToday.length === 0 ? (
+              ) : agendaToday.length === 0 ? (
                 <p className="text-sm text-slate-500">Nenhum compromisso para hoje.</p>
               ) : (
-                plannedAppointmentsToday.map((item) => {
+                agendaToday.map((item) => {
                   const startsAt = item.startsAt || item.startDateTime;
                   return (
                     <div key={item.id} className="rounded-xl border border-slate-200 p-3">
@@ -1101,6 +1144,7 @@ export default function HomePage() {
                           : "Sem horário"}
                       </p>
                       <p className="mt-1 text-sm text-slate-600">{item.title || "Compromisso"}</p>
+                      {renderAgendaItemStatus(item)}
                     </div>
                   );
                 })
@@ -1343,15 +1387,17 @@ export default function HomePage() {
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="rounded-lg bg-slate-50 p-3">
               <p className="text-xs text-slate-500">Compromissos planejados hoje</p>
-              <p className="text-2xl font-bold text-slate-900">{plannedAppointmentsToday.length}</p>
+              <p className="text-2xl font-bold text-slate-900">{agendaTodaySummary.planned}</p>
+              {renderAgendaTodayCounter()}
             </div>
             <div className="rounded-lg bg-slate-50 p-3">
               <p className="text-xs text-slate-500">Follow-ups pendentes</p>
               <p className="text-2xl font-bold text-slate-900">{pendingFollowUps.length}</p>
             </div>
             <div className="rounded-lg bg-slate-50 p-3">
-              <p className="text-xs text-slate-500">Atividades do dia</p>
-              <p className="text-2xl font-bold text-slate-900">{activitiesToday.length}</p>
+              <p className="text-xs text-slate-500">Atividades concluídas hoje</p>
+              <p className="text-2xl font-bold text-slate-900">{doneActivitiesToday.length}</p>
+              <p className="text-xs text-slate-500">{visitsToday.length === 1 ? "1 visita" : `${visitsToday.length} visitas`}</p>
             </div>
           </div>
         </article>
@@ -1366,13 +1412,14 @@ export default function HomePage() {
             <UsersRound className="text-brand-700" size={20} />
           </div>
 
-          <div className={`space-y-2 ${plannedAppointmentsToday.length > 3 ? scrollablePanelClass : ""}`}>
+          {renderPreviousDaysPending()}
+          <div className={`space-y-2 ${agendaToday.length > 3 ? scrollablePanelClass : ""}`}>
             {loading ? (
               <p className="text-sm text-slate-500">Carregando agenda...</p>
-            ) : plannedAppointmentsToday.length === 0 ? (
+            ) : agendaToday.length === 0 ? (
               <p className="text-sm text-slate-500">Nenhum item planejado na Agenda para hoje.</p>
             ) : (
-              plannedAppointmentsToday.map((item) => {
+              agendaToday.map((item) => {
                 const startsAt = item.startsAt || item.startDateTime;
 
                 return (
@@ -1389,6 +1436,7 @@ export default function HomePage() {
                     <p className="text-xs text-slate-600">{item.title || "Compromisso"}</p>
                     <p className="text-xs text-slate-500">Origem: Agenda</p>
                   </div>
+                  {renderAgendaItemStatus(item)}
                 </div>
               );
             })
@@ -1406,13 +1454,13 @@ export default function HomePage() {
             <MessageCircleWarning className="text-brand-700" size={20} />
           </div>
 
-          <div className={`space-y-2 ${activitiesToday.length > 3 ? scrollablePanelClass : ""}`}>
+          <div className={`space-y-2 ${doneActivitiesToday.length > 3 ? scrollablePanelClass : ""}`}>
             {loading ? (
               <p className="text-sm text-slate-500">Carregando atividades...</p>
-            ) : activitiesToday.length === 0 ? (
+            ) : doneActivitiesToday.length === 0 ? (
               <p className="text-sm text-slate-500">Nenhuma atividade executada hoje.</p>
             ) : (
-              activitiesToday.map((activity) => (
+              doneActivitiesToday.map((activity) => (
                 <div
                   key={activity.id}
                   className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2"
@@ -1424,9 +1472,7 @@ export default function HomePage() {
                   </div>
                   <span className="inline-flex items-center gap-1 text-xs text-slate-500">
                     <Clock3 size={14} />
-                    {new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(
-                      new Date(activity.createdAt || activity.dueDate)
-                    )}
+                    {formatActivityTime(activity)}
                   </span>
                 </div>
               ))
