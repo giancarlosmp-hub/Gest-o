@@ -705,3 +705,29 @@ de variação não está no código; o percentual é aplicado como acréscimo (n
 explícito de `/prices` sem tabela não esconde o produto quando há linha positiva do catálogo na Tabela 1 (a Tabela 2
 já bloqueia). Há linhas duplicadas por produto (legacy, prices e products sem tabela, e linhas de filial); a limpeza
 fica para um script próprio.
+
+### TD-DISCIPLINE-AGENDA-PLANNED — disciplina com planejado = executado ou só roteiros
+
+**Resolvido no código, aguardando deploy** (PR 4 da separação Agenda × Atividades). A disciplina semanal usava
+planejado = executado; o ranking de disciplina, o score comercial e o planejado × realizado contavam só roteiros
+como planejado (1 por roteiro) e qualquer atividade como executada, com taxa acima de 100% e pontualidade sempre 100%.
+Agora a regra é única (`packages/shared/src/agendaDiscipline.ts`, carregada por `services/agendaDiscipline.ts`):
+planejado = compromissos da Agenda no período (cada parada de roteiro conta 1; roteiro sem paradas conta 1 pelo
+status; `vencido` fica fora); concluído = compromisso realizado ou parada realizada; não realizado (com motivo) e
+sem conclusão separados; "a fazer" (ainda no futuro) e atividade sem compromisso vinculado ("fora da Agenda") não
+entram na taxa. "Não realizado" fica neutro até 20% dos elegíveis do período (`DISCIPLINE_NOT_DONE_NEUTRAL_SHARE`);
+o excesso conta contra. Pontual = concluído no mesmo dia planejado (Brasília), pela data informada na atividade
+(`date`) ou pelo `checkOutAt` da parada; sem data, o item fica fora da pontualidade. Corte do histórico
+(`DISCIPLINE_HISTORY_CUTOFF`, segunda 26/10/2026 00:00 de Brasília): antes dele o "sem conclusão" fica neutro e o
+roteiro realizado sem paradas resolvidas conta 1 concluído. Missões, consistência e destaques não mudaram.
+
+Pendente (fora deste PR):
+- O fator de volume do ranking de disciplina compara o planejado com a meta **semanal** de visitas mesmo quando o
+  período é o mês (`/reports/discipline-ranking`).
+- `GET /reports/weekly-discipline` não tem consumidor no web.
+- `getCurrentWeekRangeFromBrazilNow` fecha a semana em meia-noite UTC (domingo 21h de Brasília), não em Brasília.
+- O motivo de "não realizado" é texto livre: não dá para separar motivo justificável (chuva, estrada) sem categoria.
+- Central do Dia: a "Rotina Comercial do Dia" conta atividades de hoje ainda não concluídas como realizadas, e a lista
+  "Atividades do dia" do celular mostra atividades pendentes antigas. "Followups pendentes" e os alertas leem o
+  `followUpDate` da oportunidade, não os follow-ups da Agenda.
+- Os testes `test:agenda-discipline` (API) e `test:central-day-agenda` (web) não rodam no CI.
