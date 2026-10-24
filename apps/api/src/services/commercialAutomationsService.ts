@@ -1,4 +1,4 @@
-import { ActivityType, EventType, OpportunityStage, Prisma, type PrismaClient } from "@prisma/client";
+import { AgendaEventType, EventType, OpportunityStage, Prisma, type PrismaClient } from "@prisma/client";
 import {
   commercialAutomationsConfigSchema,
   type CommercialAutomationsConfig,
@@ -49,7 +49,8 @@ export type CommercialAutomationRunResult = {
   inactiveRecentClients: number;
   eligibleClients: number;
   createdOpportunities: number;
-  createdActivities: number;
+  // Compromissos de Ligação na Agenda. Execuções antigas do histórico têm createdActivities (atividade pendente).
+  createdAgendaEvents: number;
   createdTimelineEvents: number;
   skippedByReason: InactiveClientWorkflowSkips;
   // Inativos recentes em cobrança, fora da automação (execuções antigas do histórico não têm o campo).
@@ -61,6 +62,8 @@ const RECENT_AUTOMATION_DAYS = 90;
 const HISTORY_LIMIT = 100;
 const DAY_MS = 86_400_000;
 const BRAZIL_UTC_OFFSET_MS = 3 * 3_600_000;
+const CALL_START_HOUR = 9;
+const CALL_DURATION_MINUTES = 30;
 
 const status: CommercialAutomationRunStatus = {
   running: false,
@@ -242,7 +245,7 @@ const appendHistory = async (entry: CommercialAutomationRunResult) => {
 export const runCommercialAutomations = async (trigger: "manual" | "scheduler" = "manual", now = new Date()): Promise<CommercialAutomationRunResult> => {
   const result: CommercialAutomationRunResult = {
     at: now.toISOString(), trigger, skipped: false, dayKey: brazilDayKeyOf(now), inactiveRecentClients: 0, eligibleClients: 0,
-    createdOpportunities: 0, createdActivities: 0, createdTimelineEvents: 0, skippedByReason: emptySkips(), inCollection: 0
+    createdOpportunities: 0, createdAgendaEvents: 0, createdTimelineEvents: 0, skippedByReason: emptySkips(), inCollection: 0
   };
   if (status.running) return { ...result, skipped: true, reason: "already_running" };
 
@@ -271,8 +274,9 @@ export const runCommercialAutomations = async (trigger: "manual" | "scheduler" =
     const today = new Date(`${plan.dayKey}T00:00:00.000Z`);
     const dueDayKey = addBusinessDays(plan.dayKey, workflow.returnDeadlineBusinessDays);
     const followUpDate = new Date(`${dueDayKey}T00:00:00.000Z`);
-    // A atividade vence no fim do dia útil, em Brasília.
-    const activityDueDate = new Date(brazilDayStart(dueDayKey).getTime() + DAY_MS - 1);
+    // A ligação entra na Agenda às 9h de Brasília do dia útil do prazo, com 30 minutos.
+    const callStart = new Date(brazilDayStart(dueDayKey).getTime() + CALL_START_HOUR * 3_600_000);
+    const callEnd = new Date(callStart.getTime() + CALL_DURATION_MINUTES * 60_000);
 
     for (const client of plan.toCreate) {
       await prisma.$transaction(async (tx) => {
@@ -293,9 +297,10 @@ export const runCommercialAutomations = async (trigger: "manual" | "scheduler" =
         });
         result.createdOpportunities += 1;
 
+        // createActivity é a chave salva na configuração; agora cria o compromisso de Ligação (planejamento), não atividade.
         if (workflow.createActivity) {
-          await tx.activity.create({ data: { type: ActivityType.ligacao, notes: `Contato automático: ${WORKFLOW_INACTIVE_CLIENT_ORIGIN}`, description: "Contato de reativação com cliente inativo recente.", dueDate: activityDueDate, clientId: client.id, opportunityId: opportunity.id, ownerSellerId: client.ownerSellerId } });
-          result.createdActivities += 1;
+          await tx.agendaEvent.create({ data: { type: AgendaEventType.ligacao, title: `Ligação de reativação – ${client.name}`, notes: `Contato automático: ${WORKFLOW_INACTIVE_CLIENT_ORIGIN}. Contato de reativação com cliente inativo recente.`, startDateTime: callStart, endDateTime: callEnd, clientId: client.id, opportunityId: opportunity.id, sellerId: client.ownerSellerId } });
+          result.createdAgendaEvents += 1;
         }
 
         if (workflow.createTimelineEvent) {
