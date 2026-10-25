@@ -8,11 +8,11 @@ const transfer = (rows: City[], source: string, destination: string, selected: s
   return movable.length;
 };
 
-const rows: City[] = [{ id: "a", sellerId: "edirlei" }, { id: "b", sellerId: "edirlei" }, { id: "c", sellerId: "terceiro", thirdParty: true }];
-assert.equal(transfer(rows, "edirlei", "vitor", ["a"]), 1, "transferência parcial");
-assert.equal(rows.find((row) => row.id === "b")?.sellerId, "edirlei", "cidade não selecionada permanece na origem");
-assert.equal(transfer(rows, "edirlei", "vitor", ["a"]), 0, "repetição é idempotente");
-assert.equal(transfer(rows, "edirlei", "vitor", ["b"]), 1, "transferência total restante");
+const rows: City[] = [{ id: "a", sellerId: "vendedor-ficticio-desligado" }, { id: "b", sellerId: "vendedor-ficticio-desligado" }, { id: "c", sellerId: "terceiro", thirdParty: true }];
+assert.equal(transfer(rows, "vendedor-ficticio-desligado", "vendedor-ficticio-destino", ["a"]), 1, "transferência parcial");
+assert.equal(rows.find((row) => row.id === "b")?.sellerId, "vendedor-ficticio-desligado", "cidade não selecionada permanece na origem");
+assert.equal(transfer(rows, "vendedor-ficticio-desligado", "vendedor-ficticio-destino", ["a"]), 0, "repetição é idempotente");
+assert.equal(transfer(rows, "vendedor-ficticio-desligado", "vendedor-ficticio-destino", ["b"]), 1, "transferência total restante");
 assert.equal(rows.find((row) => row.id === "c")?.sellerId, "terceiro", "terceiro é preservado");
 
 const routes = fs.readFileSync(new URL("../routes/crudRoutes.ts", import.meta.url), "utf8");

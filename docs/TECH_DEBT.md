@@ -929,4 +929,3 @@ Pendente (fora deste PR):
 - A prévia do KML/KMZ continua bloqueando a importação inteira quando há conflito com vendedor ativo.
 - Para um nome ambíguo, só dá para escolher candidato livre (ou já vinculado); candidato de outro vendedor aparece
   desabilitado.
-- `sellerOffboarding.test.ts` (existente) usa nomes reais de vendedores nos dados de teste; não alterado aqui.
