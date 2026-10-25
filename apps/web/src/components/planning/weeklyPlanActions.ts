@@ -11,6 +11,8 @@ export type PlanningAction = {
   suggestedPeriod: "morning" | "afternoon" | null;
   estimatedDurationMinutes: number;
   source: string;
+  // Visita numa cidade fora do território do vendedor.
+  outsideTerritory?: boolean;
 };
 
 // Tipo da Nova atividade preenchida pelo "Registrar".

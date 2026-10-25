@@ -5,6 +5,7 @@ import { useAuth } from "../context/AuthContext";
 import CrudSimplePage from "./CrudSimplePage";
 import ActivityKpisPage from "./ActivityKpisPage";
 import WeeklyVisitMinimumPanel from "../components/settings/WeeklyVisitMinimumPanel";
+import PlanningVisitRadiusPanel from "../components/settings/PlanningVisitRadiusPanel";
 import TechnicalCulturesPanel from "../components/settings/TechnicalCulturesPanel";
 import ErpIntegrationPanel from "../components/settings/ErpIntegrationPanel";
 import SellerTerritoriesPanel from "../components/settings/SellerTerritoriesPanel";
@@ -23,7 +24,7 @@ const SETTINGS_SECTIONS: Array<{ id: SettingsSection; label: string; description
   {
     id: "discipline",
     label: "Disciplina Semanal",
-    description: "Configure a meta mínima de visitas por semana para monitorar a execução de campo.",
+    description: "Configure a meta mínima de visitas por semana e o raio das visitas no planejamento semanal.",
     icon: Settings2
   },
   {
@@ -164,7 +165,10 @@ export default function SettingsPage() {
       {activeSection === "kpis" ? (
         <ActivityKpisPage embedded />
       ) : activeSection === "discipline" ? (
-        <WeeklyVisitMinimumPanel canEdit={user.role === "diretor"} />
+        <div className="space-y-4">
+          <WeeklyVisitMinimumPanel canEdit={user.role === "diretor"} />
+          <PlanningVisitRadiusPanel canEdit={user.role === "diretor" || user.role === "gerente"} />
+        </div>
       ) : activeSection === "technical-cultures" ? (
         <TechnicalCulturesPanel />
       ) : activeSection === "knowledge-base" ? (

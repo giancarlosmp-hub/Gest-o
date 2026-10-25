@@ -26,6 +26,7 @@ import {
   userRoleUpdateSchema,
   userUpdateSchema,
   weeklyVisitMinimumSchema,
+  planningVisitRadiusSchema,
   commercialAutomationsConfigSchema,
   erpOrderGenerationSchema,
   knowledgeDocumentCreateSchema,
@@ -117,6 +118,7 @@ import { calculateOpportunityPriceForTable, isOpportunityProductSelectable, norm
 import { getCommercialInsights, invalidateCommercialInsightsCache } from "../services/commercialInsightsService.js";
 import { timelineIntelligenceService } from "../services/timelineIntelligenceService.js";
 import { planningIntelligenceService } from "../services/planningIntelligenceService.js";
+import { getPlanningVisitRadiusKm, parsePlanningVisitRadiusKm, PLANNING_VISIT_RADIUS_KEY } from "../services/planningVisitRadius.js";
 import { agendaIntelligenceService } from "../services/agendaIntelligenceService.js";
 import { getErpAutomaticSyncRuntimeStatus, refreshErpAutomaticSyncConfig, runAutomaticErpSyncNow, setErpAutomaticSyncEnabled } from "../jobs/erpSyncScheduler.js";
 import { investigateErpPartnerReadOnly } from "../services/erpPartnerInvestigationService.js";
@@ -10159,6 +10161,23 @@ router.put(
 
 
 
+
+// Raio do agrupamento de visitas do planejamento semanal: vendedor vê, gerente e diretor alteram. A chave do cache do
+// plano inclui o raio, então a mudança vale na próxima geração.
+router.get("/settings/planning-visit-radius", authorize("diretor", "gerente", "vendedor"), async (_req, res) => {
+  return res.json({ radiusKm: await getPlanningVisitRadiusKm() });
+});
+
+router.put("/settings/planning-visit-radius", authorize("diretor", "gerente"), validateBody(planningVisitRadiusSchema), async (req, res) => {
+  const value = String(req.body.radiusKm);
+  const config = await prisma.appConfig.upsert({
+    where: { key: PLANNING_VISIT_RADIUS_KEY },
+    update: { value },
+    create: { key: PLANNING_VISIT_RADIUS_KEY, value },
+    select: { value: true }
+  });
+  return res.json({ radiusKm: parsePlanningVisitRadiusKm(config.value) });
+});
 
 router.get("/ai/commercial-insights", authorize("diretor", "gerente"), async (req, res) => {
   const refresh = req.query.refresh === "true" || req.query.refresh === "1";

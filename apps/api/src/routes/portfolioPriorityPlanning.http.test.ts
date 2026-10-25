@@ -137,6 +137,9 @@ setModel("erpOrderSync", {
       .map((order) => ({ sentAt: order.sentAt, createdAt: order.createdAt, orderStatus: order.orderStatus ?? null, operationalOrderStatus: order.operationalOrderStatus ?? "UNKNOWN", opportunity: { clientId: order.clientId } })),
 });
 setModel("agendaEvent", { findMany: async () => [] });
+setModel("sellerTerritoryCity", { findMany: async () => [] });
+// Raio do agrupamento de visitas: sem configuração, o padrão.
+setModel("appConfig", { findUnique: async () => null });
 setModel("product", { findMany: async () => [] });
 setModel("opportunityItem", { findMany: async () => [] });
 setModel("knowledgeDocument", { findMany: async () => [], findFirst: async () => null });

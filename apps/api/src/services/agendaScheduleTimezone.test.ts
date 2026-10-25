@@ -51,6 +51,8 @@ setModel("activity", { findMany: async () => activities });
 setModel("client", { findMany: async () => [] });
 setModel("erpOrderSync", { findMany: async () => [] });
 setModel("sellerTerritoryCity", { findMany: async () => [] });
+// Raio do agrupamento de visitas: sem configuração, o padrão.
+setModel("appConfig", { findUnique: async () => null });
 
 const seller = { viewerUserId: "seller-a", viewerRole: "vendedor" };
 const results: string[] = [];

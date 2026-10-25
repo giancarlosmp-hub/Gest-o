@@ -1,3 +1,21 @@
+# Planejamento semanal: visitas agrupadas por cidades próximas — código pronto, aguardando deploy — 25/10/2026
+
+- Visita só entra num dia em que fica a no máximo o raio (padrão 70 km, em linha reta) de todas as visitas já colocadas
+  nele, incluindo compromissos presenciais da agenda; senão abre um dia sem visita; sem nenhum, fica sem dia. Visita com
+  data marcada fica no seu dia e entra primeiro. Ligação, WhatsApp, proposta e follow-up seguem sem restrição de cidade.
+  Continuam 3 visitas e 8 ações por dia.
+- Coordenada: centroide do município do IBGE (API de malhas, extraído em 25/10/2026), embutido no catálogo de PR, SC e
+  MS, sem chamada externa em produção. Cliente pela UF do cadastro; sem coordenada (UF fora de PR/SC/MS ou cidade não
+  achada na UF), vale a regra antiga de cidade igual.
+- Normalização do catálogo trata apóstrofo como espaço ("diamante d oeste" = "Diamante D'Oeste"), também nas telas de
+  território.
+- Aviso "Fora do território" no cartão da visita; link "Ver rota do dia" no Google Maps (só URL, cada cidade uma vez,
+  até 4 cidades por link, divide em "Rota 1/2" quando passa). Bloco "Visitas sem dia nesta semana" abaixo dos dias,
+  com Agendar/Registrar/Abrir.
+- Raio em Configurações > Disciplina Semanal: gerente e diretor alteram (10 a 300 km), vendedor vê no planejamento.
+  Chave `planning.visitClusterRadiusKm` no `AppConfig`, sem migration. Detalhes: `TECH_DEBT.md`,
+  “TD-PLANNING-VISIT-PROXIMITY”.
+
 # Territórios comerciais: configuração, importação KML/KMZ e transferência — código pronto, aguardando deploy — 25/10/2026
 
 - A configuração e a prévia do KML/KMZ passam a enxergar as cidades gravadas sem `tenantId` (344 em produção, pelo
