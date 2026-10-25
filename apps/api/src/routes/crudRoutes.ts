@@ -125,6 +125,7 @@ import { buildErpHealthcheckResponse } from "../services/erpOrderOperationalSumm
 import { COMMERCIAL_AUTOMATIONS_CONFIG_KEY, DEFAULT_COMMERCIAL_AUTOMATIONS_CONFIG, getCommercialAutomationsStatus, loadCommercialAutomationsHistory, parseCommercialAutomationsConfig, runCommercialAutomations, simulateCommercialAutomations } from "../services/commercialAutomationsService.js";
 import { recordClientCodeChange } from "../services/clientCodeAuditService.js";
 import { buildClientCreditAlert, projectClientForResponse } from "../services/clientErpProjection.js";
+import { findOfficialTerritoryCity, isTerritoryAllowedState, listOfficialTerritoryCities, normalizeTerritoryCityKey, resolvePlacemarkCities, type OfficialTerritoryCity, type TerritoryAllowedState } from "../services/territoryOfficialCities.js";
 import { ensureInitialKnowledgeDocuments, getKnowledgeContextForAi, searchKnowledgeDocuments } from "../services/knowledgeBaseService.js";
 import { formatTenantReadPilotMarker, isTenantReadPilotActive, runClientListShadowPilot } from "../tenancy/tenantReadPilot.js";
 import { PrismaTenantControlPlaneReader } from "../tenancy/prismaTenantControlPlaneReader.js";
@@ -445,13 +446,6 @@ const cultureQuerySchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).optional(),
 });
 
-
-const normalizeTerritoryCityKey = (city?: string | null) =>
-  normalizeText(city)
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
 
 const parseTerritoryMonth = (monthParam: unknown) => {
   const rawMonth = typeof monthParam === "string" && /^\d{4}-\d{2}$/.test(monthParam) ? monthParam : brazilTodayKey().slice(0, 7);
@@ -10482,93 +10476,6 @@ router.delete("/goals/:id", authorize("diretor", "gerente"), async (req, res) =>
 
 
 
-const TERRITORY_ALLOWED_STATES = ["PR", "SC", "MS"] as const;
-type TerritoryAllowedState = (typeof TERRITORY_ALLOWED_STATES)[number];
-type OfficialTerritoryCity = { city: string; state: TerritoryAllowedState; ibgeCode: string | null };
-
-const TERRITORY_GEOJSON_STATES: Record<TerritoryAllowedState, string> = {
-  PR: "https://cdn.jsdelivr.net/gh/tbrugz/geodata-br@master/geojson/geojs-41-mun.json",
-  SC: "https://cdn.jsdelivr.net/gh/tbrugz/geodata-br@master/geojson/geojs-42-mun.json",
-  MS: "https://cdn.jsdelivr.net/gh/tbrugz/geodata-br@master/geojson/geojs-50-mun.json"
-};
-
-const FALLBACK_OFFICIAL_TERRITORY_CITIES: OfficialTerritoryCity[] = [
-  { city: "Cascavel", state: "PR", ibgeCode: "4104808" },
-  { city: "Toledo", state: "PR", ibgeCode: "4127700" },
-  { city: "Santa Helena", state: "PR", ibgeCode: "4123501" },
-  { city: "Mundo Novo", state: "MS", ibgeCode: "5005681" },
-  { city: "Eldorado", state: "MS", ibgeCode: "5003751" },
-  { city: "Ponta Porã", state: "MS", ibgeCode: "5006606" },
-  { city: "Joinville", state: "SC", ibgeCode: "4209102" },
-  { city: "Florianópolis", state: "SC", ibgeCode: "4205407" },
-  { city: "Campo Grande", state: "MS", ibgeCode: "5002704" }
-];
-
-const territoryOfficialCitiesCache = new Map<TerritoryAllowedState, OfficialTerritoryCity[]>();
-
-const isTerritoryAllowedState = (state: string): state is TerritoryAllowedState => TERRITORY_ALLOWED_STATES.includes(normalizeState(state) as TerritoryAllowedState);
-
-const getOfficialFeatureCityName = (properties: Record<string, unknown>) => {
-  const candidate = properties.name ?? properties.nome ?? properties.NM_MUN ?? properties.NM_MUNICIP ?? properties.description ?? properties.municipio ?? properties.MUNICIPIO;
-  return String(candidate ?? "").replace(/\s+/g, " ").trim();
-};
-
-const getOfficialFeatureIbgeCode = (properties: Record<string, unknown>) => {
-  const candidate = properties.id ?? properties.codigo_ibge ?? properties.CD_MUN ?? properties.CD_GEOCMU ?? properties.geocodigo;
-  return candidate === undefined || candidate === null ? null : String(candidate);
-};
-
-const fetchOfficialTerritoryCitiesByState = async (state: TerritoryAllowedState) => {
-  const cached = territoryOfficialCitiesCache.get(state);
-  if (cached) return cached;
-
-  try {
-    const response = await fetch(TERRITORY_GEOJSON_STATES[state]);
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const geoJson = await response.json() as { features?: Array<{ properties?: Record<string, unknown> }> };
-    const cities = (geoJson.features ?? [])
-      .map((feature) => ({
-        city: getOfficialFeatureCityName(feature.properties ?? {}),
-        state,
-        ibgeCode: getOfficialFeatureIbgeCode(feature.properties ?? {})
-      }))
-      .filter((city): city is OfficialTerritoryCity => Boolean(city.city))
-      .sort((a, b) => a.city.localeCompare(b.city, "pt-BR"));
-
-    if (cities.length > 0) {
-      territoryOfficialCitiesCache.set(state, cities);
-      return cities;
-    }
-  } catch {
-    // Mantém fallback local seguro para preview/dev quando a rede do GeoJSON não estiver disponível.
-  }
-
-  const fallbackCities = FALLBACK_OFFICIAL_TERRITORY_CITIES.filter((city) => city.state === state);
-  territoryOfficialCitiesCache.set(state, fallbackCities);
-  return fallbackCities;
-};
-
-const listOfficialTerritoryCities = async (state?: string) => {
-  const states = state ? [normalizeState(state)] : [...TERRITORY_ALLOWED_STATES];
-  const validStates = states.filter(isTerritoryAllowedState);
-  const cityGroups = await Promise.all(validStates.map((uf) => fetchOfficialTerritoryCitiesByState(uf)));
-  return cityGroups.flat().sort((a, b) => a.state.localeCompare(b.state) || a.city.localeCompare(b.city, "pt-BR"));
-};
-
-const findOfficialTerritoryCity = async (state: string, city: string, ibgeCode?: string | null) => {
-  const normalizedState = normalizeState(state);
-  if (!isTerritoryAllowedState(normalizedState)) return null;
-  const officialCities = await fetchOfficialTerritoryCitiesByState(normalizedState);
-  const normalizedIbgeCode = ibgeCode?.trim();
-  if (normalizedIbgeCode) {
-    const officialByIbge = officialCities.find((officialCity) => officialCity.ibgeCode === normalizedIbgeCode);
-    if (officialByIbge) return officialByIbge;
-  }
-
-  const normalizedCityKey = normalizeTerritoryCityKey(city);
-  return officialCities.find((officialCity) => normalizeTerritoryCityKey(officialCity.city) === normalizedCityKey) ?? null;
-};
-
 const territoryCityInputSchema = z.object({
   city: z.string().trim().min(1).max(120),
   state: z.string().trim().min(2).max(2).transform((value) => normalizeState(value)).refine(isTerritoryAllowedState, { message: "UF inválida para território comercial." }),
@@ -10587,17 +10494,21 @@ const territoryBulkCitySchema = z.object({
 const TERRITORY_KML_IMPORT_MAX_BYTES = 8 * 1024 * 1024;
 const TERRITORY_KML_IMPORT_ALLOWED_EXTENSIONS = [".kml", ".kmz"] as const;
 
-type TerritoryKmlImportItemStatus = "to_add" | "already_seller" | "inactive_transfer" | "conflict" | "not_found" | "duplicate_file";
-type TerritoryKmlImportItem = {
+type TerritoryKmlImportItemStatus = "to_add" | "already_seller" | "inactive_transfer" | "conflict" | "not_found" | "duplicate_file" | "ambiguous";
+type TerritoryKmlCityClassification = {
+  status: Extract<TerritoryKmlImportItemStatus, "to_add" | "already_seller" | "inactive_transfer" | "conflict">;
+  message: string;
+  territoryCityId?: string;
+  sellerId?: string;
+  sellerName?: string;
+};
+type TerritoryKmlImportItem = Omit<TerritoryKmlCityClassification, "status"> & {
   sourceName: string;
   city: string | null;
   state: TerritoryAllowedState | null;
   ibgeCode: string | null;
   status: TerritoryKmlImportItemStatus;
-  message: string;
-  territoryCityId?: string;
-  sellerId?: string;
-  sellerName?: string;
+  candidates?: Array<OfficialTerritoryCity & TerritoryKmlCityClassification>;
 };
 
 const territoryKmlConfirmSchema = z.object({
@@ -10745,7 +10656,8 @@ const parseMultipartFormData = (req: Request) => {
     const fieldName = nameMatch[1];
     const fileNameMatch = rawHeaders.match(/filename="([^"]*)"/i);
     if (fileNameMatch) {
-      file = { fileName: fileNameMatch[1], buffer: Buffer.from(content, "binary") };
+      // O corpo foi lido byte a byte (latin1); o nome do arquivo chega em UTF-8 ("Região", não "RegiÃ£o").
+      file = { fileName: Buffer.from(fileNameMatch[1], "binary").toString("utf8"), buffer: Buffer.from(content, "binary") };
     } else {
       fields.set(fieldName, Buffer.from(content, "binary").toString("utf8").trim());
     }
@@ -10754,64 +10666,88 @@ const parseMultipartFormData = (req: Request) => {
   return { fields, file };
 };
 
-const resolveOfficialCityFromPlacemarkName = async (name: string) => {
-  const matches: OfficialTerritoryCity[] = [];
-  for (const state of TERRITORY_ALLOWED_STATES) {
-    const city = await findOfficialTerritoryCity(state, name);
-    if (city) matches.push(city);
-  }
-  return matches.length === 1 ? matches[0] : null;
+// Chaves de uma cidade: código IBGE (quando houver) e nome normalizado. Duas linhas são a mesma cidade quando
+// qualquer chave bate, o que cobre linha antiga sem IBGE e nome gravado com outra grafia.
+const getTerritoryCityKeys = (city: { state: string; city: string; ibgeCode?: string | null }) => {
+  const normalizedIbgeCode = city.ibgeCode?.trim();
+  const nameKey = getTerritoryCityNormalizedKey(city.state, city.city);
+  return normalizedIbgeCode ? [`${normalizeState(city.state)}::IBGE::${normalizedIbgeCode}`, nameKey] : [nameKey];
 };
 
-const buildTerritoryKmlImportPreview = async (sellerId: string, placemarkNames: string[], tenantId: string) => {
+const indexTerritoryRowsByCity = <T extends { id: string; state: string; city: string; ibgeCode: string | null }>(rows: T[]) => {
+  const byKey = new Map<string, T[]>();
+  for (const row of rows) {
+    for (const key of getTerritoryCityKeys(row)) byKey.set(key, [...(byKey.get(key) ?? []), row]);
+  }
+  return (city: { state: string; city: string; ibgeCode?: string | null }) => {
+    const found = new Map<string, T>();
+    for (const key of getTerritoryCityKeys(city)) for (const row of byKey.get(key) ?? []) found.set(row.id, row);
+    return [...found.values()];
+  };
+};
+
+const classifyKmlOfficialCity = (
+  sellerId: string,
+  linkedRows: Array<{ id: string; sellerId: string; seller: { name: string; isActive: boolean } }>
+): TerritoryKmlCityClassification => {
+  if (linkedRows.some((row) => row.sellerId === sellerId)) return { status: "already_seller", message: "Esta cidade já está vinculada a este vendedor." };
+  const active = linkedRows.find((row) => row.seller.isActive);
+  if (active) return { status: "conflict", territoryCityId: active.id, sellerId: active.sellerId, sellerName: active.seller.name, message: `Esta cidade já está vinculada ao vendedor ativo ${active.seller.name}; a importação está bloqueada.` };
+  const inactive = linkedRows[0];
+  if (inactive) return { status: "inactive_transfer", territoryCityId: inactive.id, sellerId: inactive.sellerId, sellerName: inactive.seller.name, message: `Transferível de vendedor inativo: ${inactive.seller.name}. A confirmação moverá somente o vínculo territorial.` };
+  return { status: "to_add", message: "Cidade válida para importação." };
+};
+
+const buildTerritoryKmlImportPreview = async (sellerId: string, placemarkNames: string[], tenantScope: TerritoryTenantScope) => {
   const existingCities = await prisma.sellerTerritoryCity.findMany({
-    where: { tenantId },
+    where: tenantScope.where,
     select: { id: true, sellerId: true, city: true, state: true, ibgeCode: true, updatedAt: true, seller: { select: { id: true, name: true, isActive: true } } }
   });
-  const existingByKey = new Map(existingCities.map((city) => [getTerritoryCityStableKey(city), city]));
+  const findLinkedRows = indexTerritoryRowsByCity(existingCities);
   const seenInFile = new Set<string>();
   const items: TerritoryKmlImportItem[] = [];
+  const resolutions = resolvePlacemarkCities(placemarkNames);
 
-  for (const sourceName of placemarkNames) {
-    const officialCity = await resolveOfficialCityFromPlacemarkName(sourceName);
-    if (!officialCity) {
+  placemarkNames.forEach((sourceName, index) => {
+    const resolution = resolutions[index];
+    if (resolution.status === "not_found") {
       items.push({ sourceName, city: null, state: null, ibgeCode: null, status: "not_found", message: `Cidade não encontrada no catálogo oficial: ${sourceName}.` });
-      continue;
+      return;
+    }
+    if (resolution.status === "ambiguous") {
+      const states = resolution.candidates.map((candidate) => candidate.state).join("/");
+      items.push({
+        sourceName, city: null, state: null, ibgeCode: null, status: "ambiguous",
+        message: `Ambígua (${states}): o nome existe em mais de uma UF. Escolha a UF na prévia.`,
+        candidates: resolution.candidates.map((candidate) => ({ ...candidate, ...classifyKmlOfficialCity(sellerId, findLinkedRows(candidate)) }))
+      });
+      return;
     }
 
+    const officialCity = resolution.city;
     const key = getTerritoryCityStableKey(officialCity);
     if (seenInFile.has(key)) {
       items.push({ sourceName, city: officialCity.city, state: officialCity.state, ibgeCode: officialCity.ibgeCode, status: "duplicate_file", message: "Cidade duplicada no arquivo de importação." });
-      continue;
+      return;
     }
     seenInFile.add(key);
-
-    const existing = existingByKey.get(key);
-    if (existing?.sellerId === sellerId) {
-      items.push({ sourceName, city: officialCity.city, state: officialCity.state, ibgeCode: officialCity.ibgeCode, status: "already_seller", message: "Esta cidade já está vinculada a este vendedor." });
-      continue;
-    }
-    if (existing && existing.sellerId !== sellerId) {
-      items.push({ sourceName, city: officialCity.city, state: officialCity.state, ibgeCode: officialCity.ibgeCode, status: existing.seller.isActive ? "conflict" : "inactive_transfer", territoryCityId: existing.id, sellerId: existing.sellerId, sellerName: existing.seller.name, message: existing.seller.isActive ? `Esta cidade já está vinculada ao vendedor ativo ${existing.seller.name}; a importação está bloqueada.` : `Transferível de vendedor inativo: ${existing.seller.name}. A confirmação moverá somente o vínculo territorial.` });
-      continue;
-    }
-
-    items.push({ sourceName, city: officialCity.city, state: officialCity.state, ibgeCode: officialCity.ibgeCode, status: "to_add", message: "Cidade válida para importação." });
-  }
+    items.push({ sourceName, city: officialCity.city, state: officialCity.state, ibgeCode: officialCity.ibgeCode, ...classifyKmlOfficialCity(sellerId, findLinkedRows(officialCity)) });
+  });
 
   const summary = {
     totalRead: placemarkNames.length,
-    valid: items.filter((item) => item.status !== "not_found").length,
+    valid: items.filter((item) => item.status !== "not_found" && item.status !== "ambiguous").length,
     alreadySeller: items.filter((item) => item.status === "already_seller").length,
     linkedToOtherSeller: items.filter((item) => item.status === "conflict").length,
     transferableFromInactive: items.filter((item) => item.status === "inactive_transfer").length,
     notFound: items.filter((item) => item.status === "not_found").length,
+    ambiguous: items.filter((item) => item.status === "ambiguous").length,
     duplicateInFile: items.filter((item) => item.status === "duplicate_file").length,
     toAdd: items.filter((item) => item.status === "to_add").length
   };
 
   const transferableRows = existingCities.filter((row) => items.some((item) => item.status === "inactive_transfer" && item.territoryCityId === row.id));
-  return { summary, items, citiesToAdd: items.filter((item) => item.status === "to_add").map((item) => ({ city: item.city!, state: item.state!, ibgeCode: item.ibgeCode })), transferableCityIds: transferableRows.map((row) => row.id), snapshotToken: territorySnapshotToken(tenantId, sellerId, transferableRows) };
+  return { summary, items, citiesToAdd: items.filter((item) => item.status === "to_add").map((item) => ({ city: item.city!, state: item.state!, ibgeCode: item.ibgeCode })), transferableCityIds: transferableRows.map((row) => row.id), snapshotToken: territorySnapshotToken(tenantScope.tenantId, sellerId, transferableRows) };
 };
 
 const OPEN_TERRITORY_OPPORTUNITY_STAGES = [OpportunityStage.prospeccao, OpportunityStage.negociacao, OpportunityStage.proposta] as const;
@@ -10868,7 +10804,18 @@ const getTerritoryTenantId = async (userId: string) => {
   return memberships[0].tenantId;
 };
 
-const assertTerritorySellerAccess = async (req: Request, sellerId: string, mode: "read" | "edit") => {
+type TerritoryTenantScope = { tenantId: string; where: Prisma.SellerTerritoryCityWhereInput };
+
+// Cidades gravadas sem tenantId (rotas antigas) pertencem ao tenant só quando há um único tenant ativo; nesse caso
+// são lidas junto. Com mais de um tenant ativo, vale apenas o tenantId exato. A leitura nunca grava nada.
+const getTerritoryTenantScope = async (userId: string): Promise<TerritoryTenantScope> => {
+  const tenantId = await getTerritoryTenantId(userId);
+  const activeTenants = await prisma.tenant.findMany({ where: { status: "active" }, select: { id: true }, take: 2 });
+  const includeUnscoped = activeTenants.length === 1 && activeTenants[0].id === tenantId;
+  return { tenantId, where: includeUnscoped ? { OR: [{ tenantId }, { tenantId: null }] } : { tenantId } };
+};
+
+const assertTerritorySellerAccess =async (req: Request, sellerId: string, mode: "read" | "edit") => {
   const actor = await getTerritoryActor(req);
   if (!actor) return { allowed: false as const, status: 401, message: "Não autenticado" };
   if (mode === "edit" && actor.role === "vendedor") {
@@ -10983,7 +10930,7 @@ router.get("/territories/sellers", async (req, res) => {
 router.get("/territories/config/sellers", authorize("diretor", "gerente"), async (req, res) => {
   const actor = await getTerritoryActor(req);
   if (!actor) return res.status(401).json({ message: "Não autenticado" });
-  const tenantId = await getTerritoryTenantId(actor.id);
+  const { tenantId, where: territoryScope } = await getTerritoryTenantScope(actor.id);
   // Users created after the tenancy backfill used to miss their membership. Repair is safe
   // only in a provably single-tenant installation; ambiguous installations remain blocked.
   const activeTenants = await prisma.tenant.findMany({ where: { status: "active" }, select: { id: true }, take: 2 });
@@ -10998,10 +10945,10 @@ router.get("/territories/config/sellers", authorize("diretor", "gerente"), async
       ...(actor.role === "gerente" && actor.region?.trim() && !isNationalTerritoryRegion(actor.region) ? { region: actor.region } : {}),
       OR: [
         { tenantMemberships: { some: { tenantId, status: "active" } } },
-        { isActive: false, territoryCities: { some: { tenantId } } }
+        { isActive: false, territoryCities: { some: territoryScope } }
       ]
     },
-    select: { id: true, name: true, role: true, region: true, isActive: true, _count: { select: { territoryCities: { where: { tenantId } } } } },
+    select: { id: true, name: true, role: true, region: true, isActive: true, _count: { select: { territoryCities: { where: territoryScope } } } },
     orderBy: { name: "asc" }
   });
   return res.json(users.map(({ _count, ...seller }) => ({
@@ -11022,10 +10969,10 @@ router.get("/territories/config/official-cities", authorize("diretor", "gerente"
 router.get("/territories/config/city-links", authorize("diretor", "gerente"), async (req, res) => {
   const actor = await getTerritoryActor(req);
   if (!actor) return res.status(401).json({ message: "Não autenticado" });
-  const tenantId = await getTerritoryTenantId(actor.id);
+  const tenantScope = await getTerritoryTenantScope(actor.id);
 
   const cities = await prisma.sellerTerritoryCity.findMany({
-    where: { tenantId, seller: { role: "vendedor", ...(actor.role === "gerente" && actor.region?.trim() && !isNationalTerritoryRegion(actor.region) ? { region: actor.region } : {}) } },
+    where: { ...tenantScope.where, seller: { role: "vendedor", ...(actor.role === "gerente" && actor.region?.trim() && !isNationalTerritoryRegion(actor.region) ? { region: actor.region } : {}) } },
     select: {
       id: true,
       sellerId: true,
@@ -11040,35 +10987,79 @@ router.get("/territories/config/city-links", authorize("diretor", "gerente"), as
   return res.json(cities.map((city) => ({ ...toTerritoryCityResponse(city), sellerName: city.seller.name, sellerIsActive: city.seller.isActive })));
 });
 
+type TerritoryTransferSourceRow = { id: string; sellerId: string; city: string; state: string; ibgeCode: string | null; updatedAt: Date };
+type TerritoryTransferLinkedRow = { id: string; sellerId: string; city: string; state: string; ibgeCode: string | null; seller: { id: string; name: string; isActive: boolean } };
+
+// Regras da transferência: cidade que o destino já tem sai da origem ("Já é do destino"); cidade de terceiro ativo é
+// conflito, fica na origem e não bloqueia o resto; as demais mudam de dono. A comparação usa IBGE ou nome normalizado.
+const planTerritoryTransfer = (cities: TerritoryTransferSourceRow[], linkedRows: TerritoryTransferLinkedRow[], sourceSellerId: string, destinationSellerId: string) => {
+  const findLinkedRows = indexTerritoryRowsByCity(linkedRows.filter((row) => row.sellerId !== sourceSellerId));
+  const transferable: TerritoryTransferSourceRow[] = [];
+  const alreadyDestination: TerritoryTransferSourceRow[] = [];
+  const conflicts: Array<{ cityId: string; city: string; state: string; sellerId: string; sellerName: string }> = [];
+  for (const city of cities) {
+    const rows = findLinkedRows(city);
+    const thirdParty = rows.find((row) => row.sellerId !== destinationSellerId && row.seller.isActive);
+    if (rows.some((row) => row.sellerId === destinationSellerId)) alreadyDestination.push(city);
+    else if (thirdParty) conflicts.push({ cityId: city.id, city: city.city, state: normalizeState(city.state), sellerId: thirdParty.sellerId, sellerName: thirdParty.seller.name });
+    else transferable.push(city);
+  }
+  return { transferable, alreadyDestination, conflicts };
+};
+
+// O token cobre as linhas da origem e a classificação de cada uma: se algo mudar entre prévia e confirmação, nada é aplicado.
+const territoryTransferSnapshotToken = (tenantId: string, destinationSellerId: string, cities: TerritoryTransferSourceRow[], plan: ReturnType<typeof planTerritoryTransfer>) => {
+  const statusById = new Map<string, string>([
+    ...plan.transferable.map((city) => [city.id, "transfer"] as const),
+    ...plan.alreadyDestination.map((city) => [city.id, "already_destination"] as const),
+    ...plan.conflicts.map((conflict) => [conflict.cityId, `conflict:${conflict.sellerId}`] as const)
+  ]);
+  return createHash("sha256")
+    .update(JSON.stringify({ tenantId, destinationSellerId, rows: cities.map((row) => [row.id, row.sellerId, row.updatedAt.toISOString(), statusById.get(row.id) ?? ""]).sort() }))
+    .digest("hex");
+};
+
+const territoryTransferLinkedRowsWhere = (tenantScope: TerritoryTenantScope, cities: TerritoryTransferSourceRow[]): Prisma.SellerTerritoryCityWhereInput => ({
+  AND: [tenantScope.where, { state: { in: [...new Set(cities.map((city) => city.state))] } }]
+});
+const territoryTransferLinkedRowsSelect = { id: true, sellerId: true, city: true, state: true, ibgeCode: true, seller: { select: { id: true, name: true, isActive: true } } } as const;
+
 router.post("/territories/config/transfers/preview", authorize("diretor", "gerente"), validateBody(territoryTransferSchema), async (req, res) => {
   try {
-    const tenantId = await getTerritoryTenantId(req.user!.id);
+    const tenantScope = await getTerritoryTenantScope(req.user!.id);
+    const { tenantId } = tenantScope;
     const { sourceSellerId, destinationSellerId, cityIds } = req.body;
     if (sourceSellerId === destinationSellerId) return res.status(400).json({ message: "Origem e destino devem ser vendedores diferentes." });
     const [sourceAccess, destinationAccess, source, destination] = await Promise.all([
       assertTerritorySellerAccess(req, sourceSellerId, "edit"),
       assertTerritorySellerAccess(req, destinationSellerId, "edit"),
-      prisma.user.findFirst({ where: { id: sourceSellerId, role: "vendedor", OR: [{ tenantMemberships: { some: { tenantId } } }, { territoryCities: { some: { tenantId } } }] }, select: { id: true, name: true, isActive: true } }),
+      prisma.user.findFirst({ where: { id: sourceSellerId, role: "vendedor", OR: [{ tenantMemberships: { some: { tenantId } } }, { territoryCities: { some: tenantScope.where } }] }, select: { id: true, name: true, isActive: true } }),
       prisma.user.findFirst({ where: { id: destinationSellerId, role: "vendedor", isActive: true, tenantMemberships: { some: { tenantId, status: "active" } } }, select: { id: true, name: true } })
     ]);
     if (!sourceAccess.allowed) return res.status(sourceAccess.status).json({ message: sourceAccess.message });
     if (!destinationAccess.allowed) return res.status(destinationAccess.status).json({ message: destinationAccess.message });
     if (!source || !destination) return res.status(409).json({ message: "Origem e destino devem pertencer ao mesmo tenant; o destino deve estar ativo." });
-    const cities = await prisma.sellerTerritoryCity.findMany({ where: { id: { in: cityIds }, sellerId: sourceSellerId, tenantId }, orderBy: [{ state: "asc" }, { city: "asc" }] });
+    const cities = await prisma.sellerTerritoryCity.findMany({ where: { AND: [tenantScope.where, { id: { in: cityIds }, sellerId: sourceSellerId }] }, orderBy: [{ state: "asc" }, { city: "asc" }] });
     if (cities.length !== cityIds.length) return res.status(409).json({ message: "A origem mudou durante a prévia; nenhuma cidade foi transferida." });
-    const conflicts = [] as Array<{ cityId: string; city: string; state: string; sellerId: string; sellerName: string }>;
-    for (const city of cities) {
-      const conflict = await prisma.sellerTerritoryCity.findFirst({ where: { id: { not: city.id }, tenantId, sellerId: { notIn: [sourceSellerId, destinationSellerId] }, state: city.state, OR: [{ ibgeCode: city.ibgeCode || undefined }, { city: { equals: city.city, mode: "insensitive" } }] }, select: { sellerId: true, seller: { select: { id: true, name: true } } } });
-      if (conflict && conflict.seller.id !== destinationSellerId) conflicts.push({ cityId: city.id, city: city.city, state: city.state, sellerId: conflict.seller.id, sellerName: conflict.seller.name });
-    }
-    const snapshotRows = await prisma.sellerTerritoryCity.findMany({ where: { id: { in: cityIds }, tenantId }, select: { id: true, sellerId: true, updatedAt: true } });
-    return res.json({ source, destination, requested: cityIds.length, transferable: cities.filter((city) => !conflicts.some((conflict) => conflict.cityId === city.id)).map(toTerritoryCityResponse), conflicts, snapshotToken: territorySnapshotToken(tenantId, destinationSellerId, snapshotRows) });
+    const linkedRows = await prisma.sellerTerritoryCity.findMany({ where: territoryTransferLinkedRowsWhere(tenantScope, cities), select: territoryTransferLinkedRowsSelect });
+    const plan = planTerritoryTransfer(cities, linkedRows, sourceSellerId, destinationSellerId);
+    return res.json({
+      source,
+      destination,
+      requested: cityIds.length,
+      cityIds: cities.map((city) => city.id),
+      transferable: plan.transferable.map(toTerritoryCityResponse),
+      alreadyDestination: plan.alreadyDestination.map(toTerritoryCityResponse),
+      conflicts: plan.conflicts,
+      snapshotToken: territoryTransferSnapshotToken(tenantId, destinationSellerId, cities, plan)
+    });
   } catch (error: any) { return res.status(error?.status || 500).json({ message: error?.message || "Não foi possível gerar a prévia da transferência." }); }
 });
 
 router.post("/territories/config/transfers/confirm", authorize("diretor", "gerente"), validateBody(territoryTransferSchema), async (req, res) => {
   try {
-    const tenantId = await getTerritoryTenantId(req.user!.id);
+    const tenantScope = await getTerritoryTenantScope(req.user!.id);
+    const { tenantId } = tenantScope;
     const { sourceSellerId, destinationSellerId, cityIds } = req.body;
     if (!req.body.snapshotToken) return res.status(400).json({ message: "Gere uma nova prévia antes de confirmar." });
     if (sourceSellerId === destinationSellerId) return res.status(400).json({ message: "Origem e destino devem ser vendedores diferentes." });
@@ -11080,23 +11071,36 @@ router.post("/territories/config/transfers/confirm", authorize("diretor", "geren
     if (!sourceAccess.allowed) return res.status(sourceAccess.status).json({ message: sourceAccess.message });
     if (!destinationAccess.allowed) return res.status(destinationAccess.status).json({ message: destinationAccess.message });
     if (!destinationMembership || !destinationAccess.seller.isActive) return res.status(409).json({ message: "Origem e destino devem pertencer ao mesmo tenant; o destino deve estar ativo." });
-    const moved = await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`territory-transfer:${tenantId}`}))`;
-      const cities = await tx.sellerTerritoryCity.findMany({ where: { id: { in: cityIds }, sellerId: sourceSellerId, tenantId }, orderBy: { id: "asc" } });
+      const cities = await tx.sellerTerritoryCity.findMany({ where: { AND: [tenantScope.where, { id: { in: cityIds }, sellerId: sourceSellerId }] }, orderBy: { id: "asc" } });
       const destinationNow = await tx.user.findFirst({ where: { id: destinationSellerId, role: "vendedor", isActive: true, tenantMemberships: { some: { tenantId, status: "active" } } }, select: { id: true } });
       if (!destinationNow) throw Object.assign(new Error("O destino foi desativado ou mudou de tenant; nenhuma cidade foi transferida."), { status: 409 });
-      if (cities.length !== cityIds.length || territorySnapshotToken(tenantId, destinationSellerId, cities) !== req.body.snapshotToken) throw Object.assign(new Error("O território mudou após a prévia; nenhuma cidade foi transferida."), { status: 409 });
-      for (const city of cities) {
-        const thirdParty = await tx.sellerTerritoryCity.findFirst({ where: { id: { not: city.id }, sellerId: { notIn: [sourceSellerId, destinationSellerId] }, tenantId, state: city.state, OR: [{ ibgeCode: city.ibgeCode || undefined }, { city: { equals: city.city, mode: "insensitive" } }] }, select: { seller: { select: { name: true } } } });
-        if (thirdParty) throw Object.assign(new Error(`Conflito real: ${city.city}/${city.state} pertence a ${thirdParty.seller.name}.`), { status: 409 });
-      }
-      if (!cities.length) return [];
-      await Promise.all(cities.map((city) => tx.sellerTerritoryCity.update({ where: { id: city.id }, data: { sellerId: destinationSellerId } })));
+      if (cities.length !== cityIds.length) throw Object.assign(new Error("O território mudou após a prévia; nenhuma cidade foi transferida."), { status: 409 });
+      const linkedRows = await tx.sellerTerritoryCity.findMany({ where: territoryTransferLinkedRowsWhere(tenantScope, cities), select: territoryTransferLinkedRowsSelect });
+      const plan = planTerritoryTransfer(cities, linkedRows, sourceSellerId, destinationSellerId);
+      if (territoryTransferSnapshotToken(tenantId, destinationSellerId, cities, plan) !== req.body.snapshotToken) throw Object.assign(new Error("O território mudou após a prévia; nenhuma cidade foi transferida."), { status: 409 });
+      if (!plan.transferable.length && !plan.alreadyDestination.length) return { ...plan, removed: 0 };
+      // Muda o dono da mesma linha (não copia) e preenche o tenantId das linhas antigas.
+      await Promise.all(plan.transferable.map((city) => tx.sellerTerritoryCity.update({ where: { id: city.id }, data: { sellerId: destinationSellerId, tenantId } })));
+      // O destino já tem a cidade: a linha da origem é retirada (o índice único impede movê-la). Só nesta confirmação.
+      const removed = plan.alreadyDestination.length
+        ? (await tx.sellerTerritoryCity.deleteMany({ where: { id: { in: plan.alreadyDestination.map((city) => city.id) }, sellerId: sourceSellerId } })).count
+        : 0;
+      if (removed !== plan.alreadyDestination.length) throw Object.assign(new Error("O território mudou após a prévia; nenhuma cidade foi transferida."), { status: 409 });
       const correlationId = randomUUID();
-      await tx.timelineEvent.create({ data: { type: "status", ownerSellerId: sourceSellerId, description: `Auditoria de transferência territorial [${correlationId}]: ${cities.length} cidade(s) de ${sourceAccess.seller.name} para ${destinationAccess.seller.name}; ator=${req.user!.id}.` } });
-      return cities;
+      await tx.timelineEvent.create({ data: { type: "status", ownerSellerId: sourceSellerId, description: `Auditoria de transferência territorial [${correlationId}]: ${plan.transferable.length} cidade(s) de ${sourceAccess.seller.name} para ${destinationAccess.seller.name}; ${removed} retirada(s) da origem por já serem do destino; ${plan.conflicts.length} conflito(s) com terceiro ativo mantido(s) na origem; ator=${req.user!.id}.` } });
+      return { ...plan, removed };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
-    return res.json({ moved: moved.length, idempotent: moved.length === 0, sourceSellerId, destinationSellerId, cityIds: moved.map((city) => city.id) });
+    return res.json({
+      moved: result.transferable.length,
+      removedAlreadyDestination: result.removed,
+      keptConflicts: result.conflicts.length,
+      idempotent: result.transferable.length === 0 && result.removed === 0,
+      sourceSellerId,
+      destinationSellerId,
+      cityIds: result.transferable.map((city) => city.id)
+    });
   } catch (error: any) { return res.status(error?.status || 500).json({ message: error?.message || "Não foi possível transferir o território." }); }
 });
 
@@ -11108,7 +11112,7 @@ router.post("/territories/config/import-kml-preview", authorize("diretor", "gere
   if (!sellerId) return res.status(400).json({ message: "Informe um vendedor para importar territórios." });
   const access = await assertTerritorySellerAccess(req, sellerId, "edit");
   if (!access.allowed) return res.status(access.status).json({ message: access.message });
-  const tenantId = await getTerritoryTenantId(req.user!.id);
+  const tenantScope = await getTerritoryTenantScope(req.user!.id);
   if (!uploadedFile) return res.status(400).json({ message: "Envie um arquivo .kml ou .kmz." });
   if (uploadedFile.buffer.length > TERRITORY_KML_IMPORT_MAX_BYTES) return res.status(413).json({ message: "Arquivo excede o limite de 8 MB." });
 
@@ -11121,7 +11125,7 @@ router.post("/territories/config/import-kml-preview", authorize("diretor", "gere
   if (!kmlText) return res.status(400).json({ message: "Não foi possível localizar um arquivo .kml válido para processar." });
 
   const placemarkNames = extractPlacemarkNamesFromKml(kmlText);
-  const preview = await buildTerritoryKmlImportPreview(sellerId, placemarkNames, tenantId);
+  const preview = await buildTerritoryKmlImportPreview(sellerId, placemarkNames, tenantScope);
   return res.json({ fileName: uploadedFile.fileName, sellerId, ...preview });
 });
 
@@ -11130,7 +11134,8 @@ router.post("/territories/config/import-kml-confirm", authorize("diretor", "gere
   const access = await assertTerritorySellerAccess(req, sellerId, "edit");
   if (!access.allowed) return res.status(access.status).json({ message: access.message });
   if (!access.seller.isActive) return res.status(409).json({ message: "Vendedor inativo não pode receber novos territórios." });
-  const tenantId = await getTerritoryTenantId(req.user!.id);
+  const tenantScope = await getTerritoryTenantScope(req.user!.id);
+  const { tenantId } = tenantScope;
   const destinationMembership = await prisma.tenantMembership.findFirst({ where: { userId: sellerId, tenantId, status: "active" }, select: { id: true } });
   if (!destinationMembership) return res.status(409).json({ message: "O destino não pertence ao tenant da operação." });
 
@@ -11139,33 +11144,42 @@ router.post("/territories/config/import-kml-confirm", authorize("diretor", "gere
   try {
     const result = await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`territory-transfer:${tenantId}`}))`;
-      const transferable = await tx.sellerTerritoryCity.findMany({ where: { id: { in: req.body.transferableCityIds }, tenantId }, select: { id: true, sellerId: true, updatedAt: true, seller: { select: { name: true, isActive: true } } } });
+      const transferable = await tx.sellerTerritoryCity.findMany({ where: { AND: [tenantScope.where, { id: { in: req.body.transferableCityIds } }] }, select: { id: true, sellerId: true, updatedAt: true, seller: { select: { name: true, isActive: true } } } });
       const destinationNow = await tx.user.findFirst({ where: { id: sellerId, role: "vendedor", isActive: true, tenantMemberships: { some: { tenantId, status: "active" } } }, select: { id: true } });
       if (!destinationNow) throw Object.assign(new Error("O destino foi desativado ou mudou de tenant; nenhuma cidade foi importada."), { status: 409 });
       if (transferable.length !== req.body.transferableCityIds.length || transferable.some((row) => row.seller.isActive) || territorySnapshotToken(tenantId, sellerId, transferable) !== req.body.snapshotToken) {
         throw Object.assign(new Error("Os vínculos mudaram após a prévia; nenhuma cidade foi importada ou transferida."), { status: 409 });
       }
-      const allTenantCities = await tx.sellerTerritoryCity.findMany({ where: { tenantId }, select: { id: true, sellerId: true, state: true, city: true, ibgeCode: true } });
+      const allTenantCities = await tx.sellerTerritoryCity.findMany({ where: tenantScope.where, select: { id: true, sellerId: true, state: true, city: true, ibgeCode: true } });
       const transferableIds = new Set(transferable.map((row) => row.id));
-      const destinationKeys = new Set(allTenantCities.filter((row) => row.sellerId === sellerId).map(getTerritoryCityStableKey));
+      const findLinkedRows = indexTerritoryRowsByCity(allTenantCities);
+      const addedKeys = new Set<string>();
       const citiesToCreate: OfficialTerritoryCity[] = [];
+      let alreadyLinked = 0;
       for (const city of officialValidation.cities) {
-        const key = getTerritoryCityStableKey(city);
-        if (destinationKeys.has(key)) continue;
-        const conflicting = allTenantCities.find((row) => row.sellerId !== sellerId && !transferableIds.has(row.id) && getTerritoryCityStableKey(row) === key);
+        const linkedRows = findLinkedRows(city);
+        // Já vinculada ao vendedor (por IBGE ou nome): pula, nunca recria.
+        if (linkedRows.some((row) => row.sellerId === sellerId) || getTerritoryCityKeys(city).some((key) => addedKeys.has(key))) {
+          alreadyLinked += 1;
+          continue;
+        }
+        const conflicting = linkedRows.find((row) => !transferableIds.has(row.id));
         if (conflicting) throw Object.assign(new Error("Conflito com outro vendedor detectado; nenhuma cidade foi importada."), { status: 409 });
-        destinationKeys.add(key);
+        getTerritoryCityKeys(city).forEach((key) => addedKeys.add(key));
         citiesToCreate.push(city);
       }
-      if (transferable.length) await tx.sellerTerritoryCity.updateMany({ where: { id: { in: transferable.map((row) => row.id) }, tenantId }, data: { sellerId } });
-      if (citiesToCreate.length) await tx.sellerTerritoryCity.createMany({ data: citiesToCreate.map((city) => ({ sellerId, tenantId, ...city })) });
+      if (transferable.length) await tx.sellerTerritoryCity.updateMany({ where: { id: { in: transferable.map((row) => row.id) } }, data: { sellerId, tenantId } });
+      // skipDuplicates protege contra linha concorrente com o mesmo (sellerId, state, city): nunca falha por duplicidade.
+      const created = citiesToCreate.length
+        ? (await tx.sellerTerritoryCity.createMany({ data: citiesToCreate.map((city) => ({ sellerId, tenantId, ...city })), skipDuplicates: true })).count
+        : 0;
       if (transferable.length) {
         const origins = [...new Set(transferable.map((row) => row.seller.name))].join(", ");
         await tx.timelineEvent.create({ data: { type: "status", ownerSellerId: transferable[0].sellerId, description: `Auditoria de transferência territorial [${randomUUID()}]: ${transferable.length} cidade(s) de ${origins} para ${access.seller.name}; ator=${req.user!.id}.` } });
       }
-      return { created: citiesToCreate.length, transferred: transferable.length };
+      return { created, transferred: transferable.length, alreadyLinked: alreadyLinked + citiesToCreate.length - created };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
-    const savedCities = await prisma.sellerTerritoryCity.findMany({ where: { sellerId, tenantId }, orderBy: [{ state: "asc" }, { city: "asc" }] });
+    const savedCities = await prisma.sellerTerritoryCity.findMany({ where: { AND: [tenantScope.where, { sellerId }] }, orderBy: [{ state: "asc" }, { city: "asc" }] });
     return res.status(201).json({ ...result, cities: savedCities.map(toTerritoryCityResponse) });
   } catch (error: any) {
     return res.status(error?.status || 500).json({ message: error?.message || "Não foi possível confirmar a importação." });
@@ -11181,14 +11195,15 @@ router.get("/territories/config/cities", authorize("diretor", "gerente"), async 
   if (!sellerId) return res.status(400).json({ message: "Informe um vendedor para consultar territórios." });
   const access = await assertTerritorySellerAccess(req, sellerId, "read");
   if (!access.allowed) return res.status(access.status).json({ message: access.message });
-  const tenantId = await getTerritoryTenantId(req.user!.id);
+  const tenantScope = await getTerritoryTenantScope(req.user!.id);
 
   const cities = await prisma.sellerTerritoryCity.findMany({
     where: {
-      sellerId,
-      tenantId,
-      ...(uf ? { state: uf } : {}),
-      ...(search.trim() ? { city: { contains: search.trim(), mode: "insensitive" } } : {})
+      AND: [tenantScope.where, {
+        sellerId,
+        ...(uf ? { state: uf } : {}),
+        ...(search.trim() ? { city: { contains: search.trim(), mode: "insensitive" } } : {})
+      }]
     },
     orderBy: [{ state: "asc" }, { city: "asc" }]
   });
@@ -11213,7 +11228,8 @@ router.post("/territories/config/cities", authorize("diretor", "gerente"), valid
   const conflict = await findTerritoryCityLinkedToOtherSeller(sellerId, officialCity.state, officialCity.city, officialCity.ibgeCode);
   if (conflict) return res.status(409).json({ message: getTerritoryCityConflictMessage(conflict.seller.name) });
 
-  const saved = await prisma.sellerTerritoryCity.create({ data: { sellerId, ...officialCity } });
+  const tenantId = await getTerritoryTenantId(req.user!.id);
+  const saved = await prisma.sellerTerritoryCity.create({ data: { sellerId, tenantId, ...officialCity } });
   return res.status(201).json(toTerritoryCityResponse(saved));
 });
 
@@ -11255,8 +11271,9 @@ router.post("/territories/config/cities/bulk", authorize("diretor", "gerente"), 
   }
 
   if (citiesToCreate.length > 0) {
+    const tenantId = await getTerritoryTenantId(req.user!.id);
     await prisma.sellerTerritoryCity.createMany({
-      data: citiesToCreate.map((city) => ({ sellerId, ...city })),
+      data: citiesToCreate.map((city) => ({ sellerId, tenantId, ...city })),
       skipDuplicates: true
     });
   }
@@ -11280,11 +11297,12 @@ router.put("/territories/config/sellers/:sellerId/cities", authorize("diretor", 
   const conflict = await findTerritoryCityConflict(sellerId, officialValidation.cities);
   if (conflict) return res.status(409).json({ message: getTerritoryCityConflictMessage(conflict.seller.name) });
 
+  const tenantId = await getTerritoryTenantId(req.user!.id);
   await prisma.$transaction(async (tx) => {
     await tx.sellerTerritoryCity.deleteMany({ where: { sellerId } });
     if (officialValidation.cities.length > 0) {
       await tx.sellerTerritoryCity.createMany({
-        data: officialValidation.cities.map((city) => ({ sellerId, ...city })),
+        data: officialValidation.cities.map((city) => ({ sellerId, tenantId, ...city })),
         skipDuplicates: true
       });
     }
