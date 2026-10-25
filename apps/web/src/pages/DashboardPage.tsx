@@ -38,6 +38,7 @@ import { normalizeActivityType, toLabel } from "../constants/activityTypes";
 import DonutLegendChips from "../components/DonutLegendChips";
 import { brazilMonthKey, brazilTodayKey } from "../lib/brazilDate";
 import { portfolioStatusClientsPath } from "../lib/clientListFilters";
+import { buildSellerWeekMetrics, sellerWeekRanges, type SellerWeekData, type SellerWeekDiscipline } from "../lib/sellerWeek";
 
 ChartJS.register(
   CategoryScale,
@@ -138,6 +139,10 @@ type MonthlyScoreResponse = {
   month: string;
   items: MonthlyScoreItem[];
 };
+
+type WeeklyVisitsItem = { userId: string; visitsDone: number; goal: number };
+
+type SellerWeek = { current: SellerWeekData; previous: SellerWeekData };
 
 const palette = {
   primary: "#0B3C1D",
@@ -350,6 +355,7 @@ export default function DashboardPage() {
   const [monthlyScore, setMonthlyScore] = useState<MonthlyScoreResponse | null>(null);
   const [scoreSellerId, setScoreSellerId] = useState("");
   const [scoreSearch, setScoreSearch] = useState("");
+  const [sellerWeek, setSellerWeek] = useState<SellerWeek | null>(null);
   const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
@@ -390,7 +396,12 @@ export default function DashboardPage() {
     const existingRequest = dashboardInFlightRef.current.get(dashboardQueryKey);
     if (existingRequest && !options?.force) return existingRequest;
 
-    const scoreQuery = user?.role !== "vendedor" && scoreSellerId ? `&userId=${scoreSellerId}` : "";
+    const isSeller = user?.role === "vendedor";
+    const scoreQuery = !isSeller && scoreSellerId ? `&userId=${scoreSellerId}` : "";
+    // Vendedor não vê os blocos de ranking (Destaques, Ranking Disciplina, Score do Mês, Consistência):
+    // essas rotas nem são chamadas para ele; no lugar vem "Minha semana".
+    const skip = Promise.resolve(null);
+    const weeks = sellerWeekRanges();
 
     const request = Promise.all([
       api.get<DashboardSummary>(`/dashboard/summary?month=${month}${querySeller}`, { signal }),
@@ -398,24 +409,41 @@ export default function DashboardPage() {
       api.get<DashboardPortfolio>(`/dashboard/portfolio?month=${month}${querySeller}`, { signal }),
       api.get<ActivityKpi[]>(`/activity-kpis?month=${month}${querySeller}`, { signal }),
       api.get<Activity[]>(`/activities?month=${month}${querySeller}&done=true`, { signal }),
-      api.get<DisciplineRankingItem[]>(`/reports/discipline-ranking?from=${from}&to=${to}${querySeller}`, { signal }),
+      isSeller ? skip : api.get<DisciplineRankingItem[]>(`/reports/discipline-ranking?from=${from}&to=${to}${querySeller}`, { signal }),
       api.get<DisciplineRankingItem[]>(`/reports/discipline-ranking?from=${getCurrentWeekStart()}&to=${brazilTodayKey()}${querySeller}`, { signal }),
-      api.get<WeeklyHighlights>(`/reports/weekly-highlights?weekStart=${getCurrentWeekStart()}${querySeller}`, { signal }),
-      api.get<ConsistencyResponse>(`/reports/consistency${querySeller ? `?sellerId=${debouncedSellerId}` : ""}`, { signal }),
-      api.get<MonthlyScoreResponse>(`/reports/score-monthly?month=${month}${scoreQuery}`, { signal }),
+      isSeller ? skip : api.get<WeeklyHighlights>(`/reports/weekly-highlights?weekStart=${getCurrentWeekStart()}${querySeller}`, { signal }),
+      isSeller ? skip : api.get<ConsistencyResponse>(`/reports/consistency${querySeller ? `?sellerId=${debouncedSellerId}` : ""}`, { signal }),
+      isSeller ? skip : api.get<MonthlyScoreResponse>(`/reports/score-monthly?month=${month}${scoreQuery}`, { signal }),
+      isSeller
+        ? Promise.all([
+            api.get<SellerWeekDiscipline[]>(`/reports/discipline-ranking?from=${weeks.current.from}&to=${weeks.current.to}`, { signal }),
+            api.get<SellerWeekDiscipline[]>(`/reports/discipline-ranking?from=${weeks.previous.from}&to=${weeks.previous.to}`, { signal }),
+            api.get<WeeklyVisitsItem[]>(`/reports/weekly-visits?weekStart=${weeks.current.from}`, { signal }),
+            api.get<WeeklyVisitsItem[]>(`/reports/weekly-visits?weekStart=${weeks.previous.from}`, { signal }),
+          ])
+        : skip,
     ])
-      .then(([summaryResponse, seriesResponse, portfolioResponse, activityKpisResponse, activitiesResponse, disciplineRankingResponse, weeklyDisciplineRankingResponse, weeklyHighlightsResponse, consistencyResponse, monthlyScoreResponse]) => {
+      .then(([summaryResponse, seriesResponse, portfolioResponse, activityKpisResponse, activitiesResponse, disciplineRankingResponse, weeklyDisciplineRankingResponse, weeklyHighlightsResponse, consistencyResponse, monthlyScoreResponse, sellerWeekResponses]) => {
         if (signal?.aborted) return;
         setSummary(summaryResponse.data);
         setSeries(seriesResponse.data);
         setPortfolio(portfolioResponse.data);
         setActivityKpis(activityKpisResponse.data);
         setActivities(activitiesResponse.data);
-        setDisciplineRanking(disciplineRankingResponse.data);
+        setDisciplineRanking(disciplineRankingResponse?.data ?? []);
         setWeeklyDisciplineRanking(weeklyDisciplineRankingResponse.data);
-        setWeeklyHighlights(weeklyHighlightsResponse.data);
-        setConsistencyReport(consistencyResponse.data);
-        setMonthlyScore(monthlyScoreResponse.data);
+        setWeeklyHighlights(weeklyHighlightsResponse?.data ?? null);
+        setConsistencyReport(consistencyResponse?.data ?? null);
+        setMonthlyScore(monthlyScoreResponse?.data ?? null);
+        if (sellerWeekResponses) {
+          const [currentDiscipline, previousDiscipline, currentVisits, previousVisits] = sellerWeekResponses;
+          setSellerWeek({
+            current: { discipline: currentDiscipline.data[0] ?? null, visitsDone: currentVisits.data[0]?.visitsDone ?? 0, visitGoal: currentVisits.data[0]?.goal ?? null },
+            previous: { discipline: previousDiscipline.data[0] ?? null, visitsDone: previousVisits.data[0]?.visitsDone ?? 0, visitGoal: previousVisits.data[0]?.goal ?? null },
+          });
+        } else {
+          setSellerWeek(null);
+        }
       })
       .finally(() => {
         dashboardInFlightRef.current.delete(dashboardQueryKey);
@@ -967,6 +995,98 @@ export default function DashboardPage() {
     return <div className={cardClass}>Carregando dashboard...</div>;
   }
 
+  const isSeller = user?.role === "vendedor";
+
+  const walletCard = (
+    <div className={cardClass}>
+      <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+        <h3 className="font-semibold text-slate-800">Carteira de clientes</h3>
+        <div className="sm:text-right">
+          <div className="flex items-center gap-2 sm:justify-end">
+            <span className="text-lg font-semibold text-slate-900">{walletQuickKpi.primary}</span>
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-brand-700">%</span>
+          </div>
+          <div className="text-xs text-slate-500">{walletQuickKpi.secondary}</div>
+        </div>
+      </div>
+      <div className="mb-3 text-sm text-slate-600">Total de clientes: <span className="font-semibold text-slate-900">{formatNumberBR(portfolio.totalClients)}</span></div>
+      <div className={doughnutContainerClass}>
+        <Doughnut
+          plugins={[doughnutCenterTextPlugin]}
+          options={walletDoughnutOptions}
+          data={{
+            labels: ["Ativos", "Inativos recentes", "Ex-clientes", "Prospects"],
+            datasets: [
+              {
+                data: walletData,
+                backgroundColor: walletSegmentColors,
+                borderColor: palette.surface,
+                borderWidth: 2,
+                hoverOffset: 8,
+              },
+            ],
+          }}
+        />
+      </div>
+      <DonutLegendChips items={walletSegments} total={walletTotal} />
+    </div>
+  );
+
+  const abcCard = (
+    <div className={cardClass}>
+      <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+        <h3 className="font-semibold text-slate-800">Curva ABC de clientes (últimos 90 dias)</h3>
+        <div className="sm:text-right">
+          <div className="flex items-center gap-2 sm:justify-end">
+            <span className="text-lg font-semibold text-slate-900">{abcQuickKpi.primary}</span>
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-brand-700">%</span>
+          </div>
+          <div className="text-xs text-slate-500">{abcQuickKpi.secondary}</div>
+        </div>
+      </div>
+      <div className={doughnutContainerClass}>
+        <Doughnut
+          plugins={[doughnutCenterTextPlugin]}
+          options={abcDoughnutOptions}
+          data={{
+            labels: ["Classe A", "Classe B", "Classe C"],
+            datasets: [
+              {
+                data: abcData,
+                backgroundColor: donutSegmentColors,
+                borderColor: palette.surface,
+                borderWidth: 2,
+                hoverOffset: 8,
+              },
+            ],
+          }}
+        />
+      </div>
+      <DonutLegendChips items={abcSegments} total={abcTotal} formatValue={formatPercentBR} />
+    </div>
+  );
+
+  const sellerWeekMetrics = sellerWeek ? buildSellerWeekMetrics(sellerWeek.current, sellerWeek.previous) : [];
+  const sellerWeekToneClass = { better: "text-emerald-700", worse: "text-rose-700", same: "text-slate-500" };
+
+  // Só os números do próprio vendedor: sem posição, medalha ou colegas.
+  const myWeekCard = (
+    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+      <h3 className="text-base font-semibold text-slate-900">Minha semana</h3>
+      <p className="mt-1 text-sm text-slate-500">Minha disciplina na Agenda: planejado × concluído desta semana (segunda a domingo), comparado com a semana anterior.</p>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {sellerWeekMetrics.map((metric) => (
+          <div key={metric.key} className={cardClass}>
+            <div className="text-sm text-slate-500">{metric.label}</div>
+            <div className="text-2xl font-bold tabular-nums text-slate-900">{metric.value}</div>
+            {metric.detail ? <div className="text-xs text-slate-500">{metric.detail}</div> : null}
+            <div className={`mt-1 text-xs font-medium ${sellerWeekToneClass[metric.tone]}`}>{metric.comparison}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-2 sm:items-end">
@@ -1001,46 +1121,48 @@ export default function DashboardPage() {
         </div>
       )}
 
-      <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h3 className="text-base font-semibold text-slate-900">Destaques da Semana</h3>
-        <p className="mt-1 text-sm text-slate-500">Reconhecimento coletivo atualizado automaticamente a cada segunda-feira.</p>
+      {!isSeller && (
+        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <h3 className="text-base font-semibold text-slate-900">Destaques da Semana</h3>
+          <p className="mt-1 text-sm text-slate-500">Reconhecimento coletivo atualizado automaticamente a cada segunda-feira.</p>
 
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {weeklyHighlightCards.map((item) => (
-            <div key={item.key} className={cardClass}>
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-sm font-semibold text-slate-700">{item.title}</p>
-                  <p className="mt-1 text-xs text-slate-500">{item.highlight?.metricLabel ?? "Sem dados na semana"}</p>
-                </div>
-                <span className="text-xl" aria-hidden>{item.highlight?.medal ?? "🏅"}</span>
-              </div>
-
-              {item.highlight ? (
-                <div className="mt-4 flex items-center gap-3">
-                  {item.highlight.avatarUrl ? (
-                    <img
-                      src={item.highlight.avatarUrl}
-                      alt={`Avatar de ${item.highlight.sellerName}`}
-                      className="h-10 w-10 rounded-full border border-slate-200 object-cover"
-                    />
-                  ) : (
-                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-brand-100 text-sm font-semibold text-brand-700">
-                      {item.highlight.sellerName.slice(0, 2).toUpperCase()}
-                    </div>
-                  )}
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {weeklyHighlightCards.map((item) => (
+              <div key={item.key} className={cardClass}>
+                <div className="flex items-start justify-between gap-3">
                   <div>
-                    <p className="text-sm font-semibold text-slate-900">{item.highlight.sellerName}</p>
-                    <p className="text-sm text-slate-600">{item.formatter(item.highlight.metricValue)}</p>
+                    <p className="text-sm font-semibold text-slate-700">{item.title}</p>
+                    <p className="mt-1 text-xs text-slate-500">{item.highlight?.metricLabel ?? "Sem dados na semana"}</p>
                   </div>
+                  <span className="text-xl" aria-hidden>{item.highlight?.medal ?? "🏅"}</span>
                 </div>
-              ) : (
-                <p className="mt-4 text-sm text-slate-500">Aguardando movimentações da semana.</p>
-              )}
-            </div>
-          ))}
+
+                {item.highlight ? (
+                  <div className="mt-4 flex items-center gap-3">
+                    {item.highlight.avatarUrl ? (
+                      <img
+                        src={item.highlight.avatarUrl}
+                        alt={`Avatar de ${item.highlight.sellerName}`}
+                        className="h-10 w-10 rounded-full border border-slate-200 object-cover"
+                      />
+                    ) : (
+                      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-brand-100 text-sm font-semibold text-brand-700">
+                        {item.highlight.sellerName.slice(0, 2).toUpperCase()}
+                      </div>
+                    )}
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900">{item.highlight.sellerName}</p>
+                      <p className="text-sm text-slate-600">{item.formatter(item.highlight.metricValue)}</p>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="mt-4 text-sm text-slate-500">Aguardando movimentações da semana.</p>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
         {[
@@ -1152,6 +1274,16 @@ export default function DashboardPage() {
           </div>
         </div>
       </div>
+
+      {isSeller && (
+        <>
+          <div className="grid gap-3 md:grid-cols-2">
+            {walletCard}
+            {abcCard}
+          </div>
+          {myWeekCard}
+        </>
+      )}
 
       <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
         <h3 className="text-base font-semibold text-slate-900">Performance de Atividades</h3>
@@ -1284,310 +1416,254 @@ export default function DashboardPage() {
         )}
       </div>
 
-      <div className={cardClass}>
-        <div className="mb-3 flex items-center justify-between">
-          <h3 className="font-semibold text-slate-800">Ranking Disciplina</h3>
-          <span className="text-xs text-slate-500">Agenda + Roteiro</span>
-        </div>
-        <div className="w-full overflow-x-auto">
-          <table className="min-w-[600px] w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-200 text-left text-slate-500">
-                <th className="py-2.5 pr-3">Posição</th>
-                <th className="py-2.5 pr-3">Vendedor</th>
-                <th className="py-2.5 pr-3">Concluído / planejado</th>
-                <th className="py-2.5 pr-3">Execução</th>
-                <th className="py-2.5 pr-3">Pontualidade</th>
-                <th className="py-2.5 pr-3">Score</th>
-              </tr>
-            </thead>
-            <tbody>
-              {disciplineRankingVisible.map((row) => {
-                const medal = row.position === 1 ? "🥇" : row.position === 2 ? "🥈" : row.position === 3 ? "🥉" : "";
-                return (
-                  <tr key={row.sellerId} className="border-b border-slate-100">
-                    <td className="py-2.5 pr-3">{medal || `#${row.position}`}</td>
-                    <td className="py-2.5 pr-3 font-medium text-slate-800">
-                      <div className="inline-flex items-center gap-2">
-                        <span>{row.sellerName}</span>
-                        {row.hasInactivityFlag || row.isUnderExecutionThreshold || row.volumeFactor < 1 ? (
-                          <span
-                            className="inline-flex h-2.5 w-2.5 rounded-full bg-rose-600"
-                            title={[
-                              row.isUnderExecutionThreshold ? "Execução semanal abaixo de 60% (penalidade de 10% no score aplicada)." : null,
-                              row.hasInactivityFlag ? "Inatividade: vendedor sem registro de visita nos últimos 3 dias úteis." : null,
-                              row.volumeFactor < 1 ? "Score ajustado pelo volume mínimo semanal" : null,
-                            ]
-                              .filter(Boolean)
-                              .join(" ")}
-                            aria-label={[
-                              row.isUnderExecutionThreshold ? "Execução semanal abaixo de 60% (penalidade de 10% no score aplicada)." : null,
-                              row.hasInactivityFlag ? "Inatividade: vendedor sem registro de visita nos últimos 3 dias úteis." : null,
-                              row.volumeFactor < 1 ? "Score ajustado pelo volume mínimo semanal" : null,
-                            ]
-                              .filter(Boolean)
-                              .join(" ")}
-                          />
-                        ) : null}
-                      </div>
-                    </td>
-                    <td className="py-2.5 pr-3 text-slate-700">
-                      <div>{row.executed}/{row.planned}</div>
-                      <div className="text-xs text-slate-500">{row.notDone} não realizados · {row.unresolved} sem conclusão</div>
-                    </td>
-                    <td className="py-2.5 pr-3 text-slate-700">{formatPercentBR(row.executionRate)}</td>
-                    <td className="py-2.5 pr-3 text-slate-700">{formatPercentBR(row.punctualRate)}</td>
-                    <td
-                      className="py-2.5 pr-3 text-slate-700"
-                      title={row.volumeFactor < 1 ? "Score ajustado pelo volume mínimo semanal" : undefined}
-                    >
-                      <span className="inline-flex items-center gap-1.5">
-                        <span>{formatPercentBR(row.disciplineScoreFinal)}</span>
-                        {row.volumeFactor < 1 ? (
-                          <span
-                            className="inline-flex h-2 w-2 rounded-full bg-amber-500"
-                            title="Score ajustado pelo volume mínimo semanal"
-                            aria-label="Score ajustado pelo volume mínimo semanal"
-                          />
-                        ) : null}
-                      </span>
-                    </td>
-                  </tr>
-                );
-              })}
-              {disciplineRankingVisible.length === 0 && (
-                <tr>
-                  <td colSpan={6} className="py-4 text-center text-slate-500">
-                    Sem dados de disciplina para o período.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div className={cardClass}>
-        <div className="mb-3 flex items-center justify-between">
-          <div>
-            <h3 className="font-semibold text-slate-800">Score Comercial do Mês</h3>
-            <p className="text-xs text-slate-500">Resultado mensal (faturado + atingimento + pipeline ponderado).</p>
-          </div>
-          <span className="text-xs text-slate-500">{monthlyScore?.month ?? month}</span>
-        </div>
-
-        {user?.role !== "vendedor" ? (
-          <div className="mb-3 grid gap-2 sm:grid-cols-2">
-            <select
-              value={scoreSellerId}
-              onChange={(event) => setScoreSellerId(event.target.value)}
-              className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500"
-            >
-              <option value="">Todos vendedores</option>
-              {sellers.map((seller) => (
-                <option key={seller.id} value={seller.id}>{seller.name}</option>
-              ))}
-            </select>
-            <input
-              value={scoreSearch}
-              onChange={(event) => setScoreSearch(event.target.value)}
-              placeholder="Buscar vendedor"
-              className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500"
-            />
-          </div>
-        ) : null}
-
-        <div className="w-full overflow-x-auto">
-          <table className="min-w-[600px] w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-200 text-left text-slate-500">
-                {user?.role === "vendedor" ? null : <th className="py-2.5 pr-3">Posição</th>}
-                <th className="py-2.5 pr-3">Vendedor</th>
-                <th className="py-2.5 pr-3">Faturado</th>
-                <th className="py-2.5 pr-3">Objetivo</th>
-                <th className="py-2.5 pr-3">Atingimento</th>
-                <th className="py-2.5 pr-3">Pipeline pond.</th>
-                <th className="py-2.5 pr-3">Score</th>
-              </tr>
-            </thead>
-            <tbody>
-              {monthlyScoreVisible.map((row) => {
-                const medal = row.rank === 1 ? "🥇" : row.rank === 2 ? "🥈" : row.rank === 3 ? "🥉" : "";
-                return (
-                  <tr key={`${row.userId}-${row.rank}`} className="border-b border-slate-100">
-                    {user?.role === "vendedor" ? null : <td className="py-2.5 pr-3">{medal || `#${row.rank}`}</td>}
-                    <td className="py-2.5 pr-3 font-medium text-slate-800">{row.name}</td>
-                    <td className="py-2.5 pr-3 text-slate-700">{formatCurrencyBRL(row.faturadoMes)}</td>
-                    <td className="py-2.5 pr-3 text-slate-700">{row.objetivoMes > 0 ? formatCurrencyBRL(row.objetivoMes) : "—"}</td>
-                    <td className="py-2.5 pr-3 text-slate-700">{formatPercentBR(row.atingimentoPercent)}</td>
-                    <td className="py-2.5 pr-3 text-slate-700">{formatCurrencyBRL(row.pipelinePonderado)}</td>
-                    <td className="py-2.5 pr-3 text-slate-700">{formatNumberBR(row.score)}</td>
-                  </tr>
-                );
-              })}
-              {monthlyScoreVisible.length === 0 && (
-                <tr>
-                  <td colSpan={user?.role === "vendedor" ? 6 : 7} className="py-4 text-center text-slate-500">Sem dados de score mensal no período.</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div className={cardClass}>
-        <div className="mb-3 flex items-center justify-between">
-          <div>
-            <h3 className="font-semibold text-slate-800">Consistência</h3>
-            <p className="text-xs text-slate-500">Média de ScoreFinal, meses com meta batida e estabilidade (últimos 3 meses).</p>
-          </div>
-          <span className="text-xs text-slate-500">Dashboard &gt; Consistência</span>
-        </div>
-        <div className="w-full overflow-x-auto">
-          <table className="min-w-[600px] w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-200 text-left text-slate-500">
-                <th className="py-2.5 pr-3">Posição</th>
-                <th className="py-2.5 pr-3">Vendedor</th>
-                <th className="py-2.5 pr-3">Índice</th>
-                <th className="py-2.5 pr-3">Média Score</th>
-                <th className="py-2.5 pr-3">% Meta</th>
-                <th className="py-2.5 pr-3">Desvio padrão</th>
-                <th className="py-2.5 pr-3">Indicador</th>
-              </tr>
-            </thead>
-            <tbody>
-              {consistencyRankingVisible.map((row) => {
-                const badge = consistencyBadge(row.consistencyLevel);
-                return (
-                  <tr key={row.sellerId} className="border-b border-slate-100">
-                    <td className="py-2.5 pr-3">#{row.position}</td>
-                    <td className="py-2.5 pr-3 font-medium text-slate-800">{row.sellerName}</td>
-                    <td className="py-2.5 pr-3 text-slate-700">{formatPercentBR(row.consistencyScore)}</td>
-                    <td className="py-2.5 pr-3 text-slate-700">{formatPercentBR(row.averageScore)}</td>
-                    <td className="py-2.5 pr-3 text-slate-700">{formatPercentBR(row.metaHitRate)}</td>
-                    <td className="py-2.5 pr-3 text-slate-700">{formatNumberBR(row.stdDevResult)}</td>
-                    <td className="py-2.5 pr-3">
-                      <span className={`inline-flex rounded-full border px-2 py-1 text-xs font-semibold ${badge.className}`}>{badge.label}</span>
-                    </td>
-                  </tr>
-                );
-              })}
-              {consistencyRankingVisible.length === 0 && (
-                <tr>
-                  <td colSpan={7} className="py-4 text-center text-slate-500">
-                    Sem dados de consistência para o período.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        <div className={cardClass}>
-          <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
-            <h3 className="font-semibold text-slate-800">Carteira de clientes</h3>
-            <div className="sm:text-right">
-              <div className="flex items-center gap-2 sm:justify-end">
-                <span className="text-lg font-semibold text-slate-900">{walletQuickKpi.primary}</span>
-                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-brand-700">%</span>
-              </div>
-              <div className="text-xs text-slate-500">{walletQuickKpi.secondary}</div>
+      {!isSeller && (
+        <>
+          <div className={cardClass}>
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="font-semibold text-slate-800">Ranking Disciplina</h3>
+              <span className="text-xs text-slate-500">Agenda + Roteiro</span>
             </div>
-          </div>
-          <div className="mb-3 text-sm text-slate-600">Total de clientes: <span className="font-semibold text-slate-900">{formatNumberBR(portfolio.totalClients)}</span></div>
-          <div className={doughnutContainerClass}>
-            <Doughnut
-              plugins={[doughnutCenterTextPlugin]}
-              options={walletDoughnutOptions}
-              data={{
-                labels: ["Ativos", "Inativos recentes", "Ex-clientes", "Prospects"],
-                datasets: [
-                  {
-                    data: walletData,
-                    backgroundColor: walletSegmentColors,
-                    borderColor: palette.surface,
-                    borderWidth: 2,
-                    hoverOffset: 8,
-                  },
-                ],
-              }}
-            />
-          </div>
-          <DonutLegendChips items={walletSegments} total={walletTotal} />
-        </div>
-
-        <div className={cardClass}>
-          <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
-            <h3 className="font-semibold text-slate-800">Curva ABC de clientes (últimos 90 dias)</h3>
-            <div className="sm:text-right">
-              <div className="flex items-center gap-2 sm:justify-end">
-                <span className="text-lg font-semibold text-slate-900">{abcQuickKpi.primary}</span>
-                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-brand-700">%</span>
-              </div>
-              <div className="text-xs text-slate-500">{abcQuickKpi.secondary}</div>
-            </div>
-          </div>
-          <div className={doughnutContainerClass}>
-            <Doughnut
-              plugins={[doughnutCenterTextPlugin]}
-              options={abcDoughnutOptions}
-              data={{
-                labels: ["Classe A", "Classe B", "Classe C"],
-                datasets: [
-                  {
-                    data: abcData,
-                    backgroundColor: donutSegmentColors,
-                    borderColor: palette.surface,
-                    borderWidth: 2,
-                    hoverOffset: 8,
-                  },
-                ],
-              }}
-            />
-          </div>
-          <DonutLegendChips items={abcSegments} total={abcTotal} formatValue={formatPercentBR} />
-        </div>
-
-        <div className={`${cardClass} flex min-h-[260px] flex-col p-5`}>
-          <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
-            <h3 className="font-semibold text-slate-800">Performance da equipe</h3>
-            <div className="sm:text-right">
-              <div className="text-lg font-semibold text-slate-900">{teamQuickKpi.primary}</div>
-              <div className="text-xs text-slate-500">{teamQuickKpi.secondary}</div>
-            </div>
-          </div>
-          <div className="flex flex-1 items-center overflow-x-auto">
-            <table className="min-w-[600px] w-full text-sm">
-              <thead>
-                <tr className="border-b border-slate-200 text-left text-slate-500">
-                  <th className="py-2.5 pr-3">Ranking</th>
-                  <th className="py-2.5 pr-3">Vendedor</th>
-                  <th className="py-2.5 pr-3">Vendas</th>
-                  <th className="py-2.5 pr-3">Faturamento</th>
-                  <th className="py-2.5 pr-3">Realizado</th>
-                </tr>
-              </thead>
-              <tbody>
-                {summary.performance.map((row: DashboardSummary["performance"][number], index: number) => {
-                  const medal = index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : "";
-                  return (
-                    <tr key={row.sellerId} className="border-b border-slate-100">
-                      <td className="py-2.5 pr-3">{medal || `#${index + 1}`}</td>
-                      <td className="py-2.5 pr-3 font-medium text-slate-800">{row.seller}</td>
-                      <td className="py-2.5 pr-3 text-slate-700">{formatNumberBR(row.sales)}</td>
-                      <td className="py-2.5 pr-3 text-slate-700">{formatCurrencyBRL(row.revenue)}</td>
-                      <td className="py-2.5 pr-3 text-slate-700">{formatPercentBR(row.realizedPercent)}</td>
+            <div className="w-full overflow-x-auto">
+              <table className="min-w-[600px] w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-left text-slate-500">
+                    <th className="py-2.5 pr-3">Posição</th>
+                    <th className="py-2.5 pr-3">Vendedor</th>
+                    <th className="py-2.5 pr-3">Concluído / planejado</th>
+                    <th className="py-2.5 pr-3">Execução</th>
+                    <th className="py-2.5 pr-3">Pontualidade</th>
+                    <th className="py-2.5 pr-3">Score</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {disciplineRankingVisible.map((row) => {
+                    const medal = row.position === 1 ? "🥇" : row.position === 2 ? "🥈" : row.position === 3 ? "🥉" : "";
+                    return (
+                      <tr key={row.sellerId} className="border-b border-slate-100">
+                        <td className="py-2.5 pr-3">{medal || `#${row.position}`}</td>
+                        <td className="py-2.5 pr-3 font-medium text-slate-800">
+                          <div className="inline-flex items-center gap-2">
+                            <span>{row.sellerName}</span>
+                            {row.hasInactivityFlag || row.isUnderExecutionThreshold || row.volumeFactor < 1 ? (
+                              <span
+                                className="inline-flex h-2.5 w-2.5 rounded-full bg-rose-600"
+                                title={[
+                                  row.isUnderExecutionThreshold ? "Execução semanal abaixo de 60% (penalidade de 10% no score aplicada)." : null,
+                                  row.hasInactivityFlag ? "Inatividade: vendedor sem registro de visita nos últimos 3 dias úteis." : null,
+                                  row.volumeFactor < 1 ? "Score ajustado pelo volume mínimo semanal" : null,
+                                ]
+                                  .filter(Boolean)
+                                  .join(" ")}
+                                aria-label={[
+                                  row.isUnderExecutionThreshold ? "Execução semanal abaixo de 60% (penalidade de 10% no score aplicada)." : null,
+                                  row.hasInactivityFlag ? "Inatividade: vendedor sem registro de visita nos últimos 3 dias úteis." : null,
+                                  row.volumeFactor < 1 ? "Score ajustado pelo volume mínimo semanal" : null,
+                                ]
+                                  .filter(Boolean)
+                                  .join(" ")}
+                              />
+                            ) : null}
+                          </div>
+                        </td>
+                        <td className="py-2.5 pr-3 text-slate-700">
+                          <div>{row.executed}/{row.planned}</div>
+                          <div className="text-xs text-slate-500">{row.notDone} não realizados · {row.unresolved} sem conclusão</div>
+                        </td>
+                        <td className="py-2.5 pr-3 text-slate-700">{formatPercentBR(row.executionRate)}</td>
+                        <td className="py-2.5 pr-3 text-slate-700">{formatPercentBR(row.punctualRate)}</td>
+                        <td
+                          className="py-2.5 pr-3 text-slate-700"
+                          title={row.volumeFactor < 1 ? "Score ajustado pelo volume mínimo semanal" : undefined}
+                        >
+                          <span className="inline-flex items-center gap-1.5">
+                            <span>{formatPercentBR(row.disciplineScoreFinal)}</span>
+                            {row.volumeFactor < 1 ? (
+                              <span
+                                className="inline-flex h-2 w-2 rounded-full bg-amber-500"
+                                title="Score ajustado pelo volume mínimo semanal"
+                                aria-label="Score ajustado pelo volume mínimo semanal"
+                              />
+                            ) : null}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {disciplineRankingVisible.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="py-4 text-center text-slate-500">
+                        Sem dados de disciplina para o período.
+                      </td>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className={cardClass}>
+            <div className="mb-3 flex items-center justify-between">
+              <div>
+                <h3 className="font-semibold text-slate-800">Score Comercial do Mês</h3>
+                <p className="text-xs text-slate-500">Resultado mensal (faturado + atingimento + pipeline ponderado).</p>
+              </div>
+              <span className="text-xs text-slate-500">{monthlyScore?.month ?? month}</span>
+            </div>
+
+            {user?.role !== "vendedor" ? (
+              <div className="mb-3 grid gap-2 sm:grid-cols-2">
+                <select
+                  value={scoreSellerId}
+                  onChange={(event) => setScoreSellerId(event.target.value)}
+                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500"
+                >
+                  <option value="">Todos vendedores</option>
+                  {sellers.map((seller) => (
+                    <option key={seller.id} value={seller.id}>{seller.name}</option>
+                  ))}
+                </select>
+                <input
+                  value={scoreSearch}
+                  onChange={(event) => setScoreSearch(event.target.value)}
+                  placeholder="Buscar vendedor"
+                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500"
+                />
+              </div>
+            ) : null}
+
+            <div className="w-full overflow-x-auto">
+              <table className="min-w-[600px] w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-left text-slate-500">
+                    {user?.role === "vendedor" ? null : <th className="py-2.5 pr-3">Posição</th>}
+                    <th className="py-2.5 pr-3">Vendedor</th>
+                    <th className="py-2.5 pr-3">Faturado</th>
+                    <th className="py-2.5 pr-3">Objetivo</th>
+                    <th className="py-2.5 pr-3">Atingimento</th>
+                    <th className="py-2.5 pr-3">Pipeline pond.</th>
+                    <th className="py-2.5 pr-3">Score</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {monthlyScoreVisible.map((row) => {
+                    const medal = row.rank === 1 ? "🥇" : row.rank === 2 ? "🥈" : row.rank === 3 ? "🥉" : "";
+                    return (
+                      <tr key={`${row.userId}-${row.rank}`} className="border-b border-slate-100">
+                        {user?.role === "vendedor" ? null : <td className="py-2.5 pr-3">{medal || `#${row.rank}`}</td>}
+                        <td className="py-2.5 pr-3 font-medium text-slate-800">{row.name}</td>
+                        <td className="py-2.5 pr-3 text-slate-700">{formatCurrencyBRL(row.faturadoMes)}</td>
+                        <td className="py-2.5 pr-3 text-slate-700">{row.objetivoMes > 0 ? formatCurrencyBRL(row.objetivoMes) : "—"}</td>
+                        <td className="py-2.5 pr-3 text-slate-700">{formatPercentBR(row.atingimentoPercent)}</td>
+                        <td className="py-2.5 pr-3 text-slate-700">{formatCurrencyBRL(row.pipelinePonderado)}</td>
+                        <td className="py-2.5 pr-3 text-slate-700">{formatNumberBR(row.score)}</td>
+                      </tr>
+                    );
+                  })}
+                  {monthlyScoreVisible.length === 0 && (
+                    <tr>
+                      <td colSpan={user?.role === "vendedor" ? 6 : 7} className="py-4 text-center text-slate-500">Sem dados de score mensal no período.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className={cardClass}>
+            <div className="mb-3 flex items-center justify-between">
+              <div>
+                <h3 className="font-semibold text-slate-800">Consistência</h3>
+                <p className="text-xs text-slate-500">Média de ScoreFinal, meses com meta batida e estabilidade (últimos 3 meses).</p>
+              </div>
+              <span className="text-xs text-slate-500">Dashboard &gt; Consistência</span>
+            </div>
+            <div className="w-full overflow-x-auto">
+              <table className="min-w-[600px] w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-left text-slate-500">
+                    <th className="py-2.5 pr-3">Posição</th>
+                    <th className="py-2.5 pr-3">Vendedor</th>
+                    <th className="py-2.5 pr-3">Índice</th>
+                    <th className="py-2.5 pr-3">Média Score</th>
+                    <th className="py-2.5 pr-3">% Meta</th>
+                    <th className="py-2.5 pr-3">Desvio padrão</th>
+                    <th className="py-2.5 pr-3">Indicador</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {consistencyRankingVisible.map((row) => {
+                    const badge = consistencyBadge(row.consistencyLevel);
+                    return (
+                      <tr key={row.sellerId} className="border-b border-slate-100">
+                        <td className="py-2.5 pr-3">#{row.position}</td>
+                        <td className="py-2.5 pr-3 font-medium text-slate-800">{row.sellerName}</td>
+                        <td className="py-2.5 pr-3 text-slate-700">{formatPercentBR(row.consistencyScore)}</td>
+                        <td className="py-2.5 pr-3 text-slate-700">{formatPercentBR(row.averageScore)}</td>
+                        <td className="py-2.5 pr-3 text-slate-700">{formatPercentBR(row.metaHitRate)}</td>
+                        <td className="py-2.5 pr-3 text-slate-700">{formatNumberBR(row.stdDevResult)}</td>
+                        <td className="py-2.5 pr-3">
+                          <span className={`inline-flex rounded-full border px-2 py-1 text-xs font-semibold ${badge.className}`}>{badge.label}</span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {consistencyRankingVisible.length === 0 && (
+                    <tr>
+                      <td colSpan={7} className="py-4 text-center text-slate-500">
+                        Sem dados de consistência para o período.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
+
+      {!isSeller && (
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {walletCard}
+          {abcCard}
+
+          <div className={`${cardClass} flex min-h-[260px] flex-col p-5`}>
+            <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+              <h3 className="font-semibold text-slate-800">Performance da equipe</h3>
+              <div className="sm:text-right">
+                <div className="text-lg font-semibold text-slate-900">{teamQuickKpi.primary}</div>
+                <div className="text-xs text-slate-500">{teamQuickKpi.secondary}</div>
+              </div>
+            </div>
+            <div className="flex flex-1 items-center overflow-x-auto">
+              <table className="min-w-[600px] w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-left text-slate-500">
+                    <th className="py-2.5 pr-3">Ranking</th>
+                    <th className="py-2.5 pr-3">Vendedor</th>
+                    <th className="py-2.5 pr-3">Vendas</th>
+                    <th className="py-2.5 pr-3">Faturamento</th>
+                    <th className="py-2.5 pr-3">Realizado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {summary.performance.map((row: DashboardSummary["performance"][number], index: number) => {
+                    const medal = index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : "";
+                    return (
+                      <tr key={row.sellerId} className="border-b border-slate-100">
+                        <td className="py-2.5 pr-3">{medal || `#${index + 1}`}</td>
+                        <td className="py-2.5 pr-3 font-medium text-slate-800">{row.seller}</td>
+                        <td className="py-2.5 pr-3 text-slate-700">{formatNumberBR(row.sales)}</td>
+                        <td className="py-2.5 pr-3 text-slate-700">{formatCurrencyBRL(row.revenue)}</td>
+                        <td className="py-2.5 pr-3 text-slate-700">{formatPercentBR(row.realizedPercent)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
