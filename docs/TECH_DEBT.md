@@ -719,8 +719,11 @@ fica para um script próprio.
 **Resolvido no código, aguardando deploy.** Para o vendedor, os blocos de ranking do Dashboard (Destaques da Semana,
 Ranking Disciplina, Score Comercial do Mês, Consistência e Performance da equipe) mostravam só ele, sempre em 1º.
 Agora o vendedor vê "Minha semana" (`apps/web/src/lib/sellerWeek.ts`): os números de `/reports/discipline-ranking`
-da semana atual e da anterior (segunda a domingo de Brasília) e as visitas de `/reports/weekly-visits`, sem posição,
-medalha ou colegas; Carteira e Curva ABC sobem para logo depois do objetivo do mês. Gerente e diretor sem mudança.
+de segunda até hoje contra o mesmo período da semana passada (segunda até o mesmo dia da semana, em dias de
+Brasília; na segunda-feira compara só a segunda), sem posição, medalha ou colegas; Carteira e Curva ABC sobem para
+logo depois do objetivo do mês. Gerente e diretor sem mudança. As visitas de "Minha semana" são as concluídas pela
+data informada (`date`), igual à disciplina: `/reports/discipline-ranking` ganhou `visitsDone` e `visitGoal` (só o
+Dashboard usa a rota; os campos novos não mudam nenhuma tela existente).
 Conferência no servidor das rotas que o Dashboard chama (`/dashboard/summary`, `/sales-series`, `/portfolio`,
 `/activity-kpis`, `/activities`, `/reports/discipline-ranking`, `/weekly-highlights`, `/consistency`,
 `/score-monthly`, `/weekly-visits`): todas já filtravam o vendedor; a única sobra era o `rank` do
@@ -728,11 +731,11 @@ Conferência no servidor das rotas que o Dashboard chama (`/dashboard/summary`, 
 `test:seller-week` (web).
 
 Pendente (fora deste PR):
-- "Visitas da semana" segue `/reports/weekly-visits`, que conta visitas concluídas pela data prevista (`dueDate`); a
-  disciplina e as metas de atividade usam a data informada (`date`). Uma visita feita em outra semana da prevista
-  conta na semana prevista.
-- A comparação é com a semana anterior inteira; no meio da semana, os totais (concluído, visitas) ainda estão
-  parciais. As taxas (execução, pontualidade) não dependem disso.
+- `/reports/weekly-visits` continua contando visitas concluídas pela data prevista (`dueDate`), semana inteira; a
+  disciplina, as metas de atividade e "Minha semana" usam a data informada (`date`). Não mudou porque é a base do
+  ranking semanal de visitas (com medalhas) da tela Execução Comercial (`CommercialExecutionReportPage.tsx`): ali,
+  uma visita feita em outra semana da prevista ainda conta na semana prevista. As missões semanais
+  (`/reports/weekly-missions`, com a meta semanal de visitas) não usam essa rota e já contam pela `date`.
 - Código que ficou sem uso para o vendedor no `DashboardPage.tsx` (não removido): os ramos `vendedor` de
   `disciplineRankingVisible`, `consistencyRankingVisible` e `monthlyScoreVisible`, e as condições de "Posição" na
   tabela do Score Comercial do Mês.
