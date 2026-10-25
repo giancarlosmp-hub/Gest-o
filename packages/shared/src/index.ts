@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export * from "./portfolioStatus.js";
+export * from "./abcCurve.js";
 export * from "./rankingSellers.js";
 export * from "./clientCollection.js";
 export * from "./agendaDiscipline.js";

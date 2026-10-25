@@ -157,7 +157,9 @@ setModel("activity", {
   groupBy: async ({ where }: any) => countBySeller(activityRows(where))
 });
 setModel("opportunity", {
-  findMany: async ({ where }: any) => byOwner(where?.stage === "ganho" ? wonOpportunities : [], where),
+  // A Curva ABC filtra pelo dono do cliente (where.client), como o Prisma faria.
+  findMany: async ({ where }: any) =>
+    byOwner(where?.stage === "ganho" ? wonOpportunities : [], where).filter((row) => !where?.client || byOwner(clients, where.client).some((client) => client.id === row.clientId)),
   groupBy: async () => []
 });
 setModel("client", {

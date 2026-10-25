@@ -1,12 +1,13 @@
 import { Router } from "express";
-import { isVisibleInRanking, rankingSellerName, type PortfolioStatus } from "@salesforce-pro/shared";
+import { isVisibleInRanking, rankingSellerName, type AbcClass, type PortfolioStatus } from "@salesforce-pro/shared";
 import { prisma } from "../config/prisma.js";
 import { authMiddleware } from "../middlewares/auth.js";
 import { appUsageRateLimit } from "../middlewares/rateLimit.js";
 import { sellerWhere } from "../utils/access.js";
 import { loadEffectiveWonContributions } from "../services/effectiveWins.js";
+import { loadClientAbcCurve } from "../services/clientAbcCurve.js";
 import { loadLastSentCrmOrderByClient, portfolioStatusOf } from "../services/clientPortfolioStatus.js";
-import { brazilDayKeyOf, brazilDayRange, brazilTodayKey, calendarDayRange, monthDayBounds, shiftDayKey } from "../utils/dateRange.js";
+import { brazilDayKeyOf, brazilDayRange, brazilTodayKey, calendarDayRange, monthDayBounds } from "../utils/dateRange.js";
 import { closedOpportunityPeriodWhere } from "../utils/periodFilters.js";
 
 const router = Router();
@@ -269,17 +270,13 @@ router.get("/portfolio", async (req, res) => {
   const today = brazilTodayKey();
   const portfolioClientWhere = { ...whereOwner, isArchived: false };
 
-  const [clients, lastSentCrmOrderByClient, recentWonOpportunities, soldTodayData] = await Promise.all([
+  // Curva ABC: 90 dias até o fim do mês escolhido, nunca depois de hoje (no mês atual bate com a lista de clientes).
+  const abcEndDay = period.to < today ? period.to : today;
+
+  const [clients, lastSentCrmOrderByClient, abcCurve, soldTodayData] = await Promise.all([
     prisma.client.findMany({ where: portfolioClientWhere, select: { id: true, name: true, lastPurchaseDate: true, financialProfile: true } }),
     loadLastSentCrmOrderByClient(portfolioClientWhere),
-    prisma.opportunity.findMany({
-      where: {
-        ...whereOwner,
-        stage: "ganho",
-        ...closedOpportunityPeriodWhere(shiftDayKey(period.to, -89), period.to)
-      },
-      select: { id: true, client: { select: { tenantId: true } }, clientId: true, value: true }
-    }),
+    loadClientAbcCurve(portfolioClientWhere, abcEndDay),
     prisma.opportunity.findMany({
       where: {
         ...whereOwner,
@@ -290,7 +287,7 @@ router.get("/portfolio", async (req, res) => {
     })
   ]);
 
-  const portfolioStates = await loadEffectiveWonContributions([...recentWonOpportunities, ...soldTodayData]);
+  const soldTodayStates = await loadEffectiveWonContributions(soldTodayData);
 
   // A carteira é a situação de hoje: a data de compra do ERP não tem histórico por mês.
   const now = new Date();
@@ -299,57 +296,18 @@ router.get("/portfolio", async (req, res) => {
     walletStatus[portfolioStatusOf(client, lastSentCrmOrderByClient, now)] += 1;
   }
 
-  const revenueByClient = new Map<string, number>();
-  for (const opportunity of recentWonOpportunities) {
-    revenueByClient.set(opportunity.clientId, (revenueByClient.get(opportunity.clientId) || 0) + portfolioStates.get(opportunity.id)!.value);
-  }
-
-  const sortedRevenue = [...revenueByClient.entries()].sort((a, b) => b[1] - a[1]);
-  const totalRevenue = sortedRevenue.reduce((acc, [, value]) => acc + value, 0);
-  const abcAccumulator = {
-    A: { clients: 0, revenue: 0 },
-    B: { clients: 0, revenue: 0 },
-    C: { clients: 0, revenue: 0 }
-  };
-
-  const totalClientsWithRevenue = sortedRevenue.length;
-  const limitA = Math.ceil(totalClientsWithRevenue * 0.2);
-  const limitB = Math.ceil(totalClientsWithRevenue * 0.5);
-
-  sortedRevenue.forEach(([, revenue], index) => {
-    if (index < limitA) {
-      abcAccumulator.A.clients += 1;
-      abcAccumulator.A.revenue += revenue;
-    } else if (index < limitB) {
-      abcAccumulator.B.clients += 1;
-      abcAccumulator.B.revenue += revenue;
-    } else {
-      abcAccumulator.C.clients += 1;
-      abcAccumulator.C.revenue += revenue;
-    }
+  const abcClients: Record<AbcClass, number> = { A: 0, B: 0, C: 0 };
+  for (const abcClass of abcCurve.classByClient.values()) abcClients[abcClass] += 1;
+  const abcSegment = (abcClass: AbcClass) => ({
+    clients: abcClients[abcClass],
+    percentRevenue: abcCurve.totalRevenue > 0 ? (abcCurve.revenueByClass[abcClass] / abcCurve.totalRevenue) * 100 : 0
   });
-
-  const zeroRevenueClients = clients.length - sortedRevenue.length;
-  if (zeroRevenueClients > 0) abcAccumulator.C.clients += zeroRevenueClients;
 
   res.json({
     walletStatus,
-    abcCurve: {
-      A: {
-        clients: abcAccumulator.A.clients,
-        percentRevenue: totalRevenue > 0 ? (abcAccumulator.A.revenue / totalRevenue) * 100 : 0
-      },
-      B: {
-        clients: abcAccumulator.B.clients,
-        percentRevenue: totalRevenue > 0 ? (abcAccumulator.B.revenue / totalRevenue) * 100 : 0
-      },
-      C: {
-        clients: abcAccumulator.C.clients,
-        percentRevenue: totalRevenue > 0 ? (abcAccumulator.C.revenue / totalRevenue) * 100 : 0
-      }
-    },
+    abcCurve: { A: abcSegment("A"), B: abcSegment("B"), C: abcSegment("C") },
     totalClients: clients.length,
-    soldToday: soldTodayData.reduce((sum, opportunity) => sum + portfolioStates.get(opportunity.id)!.value, 0)
+    soldToday: soldTodayData.reduce((sum, opportunity) => sum + soldTodayStates.get(opportunity.id)!.value, 0)
   });
 });
 
