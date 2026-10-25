@@ -112,6 +112,9 @@ setModel("agendaEvent", {
 });
 setModel("timelineEvent", { create: async () => ({}) });
 setModel("erpOrderSync", { findMany: async () => [] });
+setModel("sellerTerritoryCity", { findMany: async () => [] });
+// Raio do agrupamento de visitas: sem configuração, o padrão.
+setModel("appConfig", { findUnique: async () => null });
 (prisma as any).$transaction = async (callback: (tx: unknown) => unknown) => callback(prisma);
 
 const server = app.listen(0);

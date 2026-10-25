@@ -46,6 +46,9 @@ setModel("activity", { findMany: async () => activities });
 // Sem cliente em cobrança e sem cliente para reativar (todos compraram há pouco).
 setModel("client", { findMany: async () => [] });
 setModel("erpOrderSync", { findMany: async () => [] });
+setModel("sellerTerritoryCity", { findMany: async () => [] });
+// Raio do agrupamento de visitas: sem configuração, o padrão.
+setModel("appConfig", { findUnique: async () => null });
 
 const generate = () => planningIntelligenceService.generateWeeklyCommercialPlan({ viewerUserId: "seller-a", viewerRole: "vendedor", weekStart: "2026-10-19", refresh: true });
 const dayOf = (plan: Row, date: string) => plan.days.find((day: Row) => day.date === date);

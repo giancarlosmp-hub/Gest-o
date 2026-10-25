@@ -308,6 +308,11 @@ export const weeklyVisitMinimumSchema = z.object({
   minimumWeeklyVisits: z.number().int().min(1).max(200)
 });
 
+// Raio (km em linha reta) do agrupamento de visitas do planejamento semanal.
+export const planningVisitRadiusSchema = z.object({
+  radiusKm: z.number().int().min(10).max(300)
+});
+
 
 // Etapas abertas do funil em que a automação pode criar a oportunidade de reativação.
 export const INACTIVE_CLIENT_WORKFLOW_STAGES = ["prospeccao", "negociacao", "proposta"] as const;
