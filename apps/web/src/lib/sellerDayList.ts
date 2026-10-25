@@ -1,3 +1,4 @@
+import { isProposalWithoutResponse, proposalDaysWithoutContact } from "@salesforce-pro/shared";
 import { brazilDayKeyOf, brazilTodayKey } from "./brazilDate";
 
 // "Minha lista de hoje" do vendedor: uma lista só, sem repetir a mesma oportunidade, juntando as prioridades
@@ -48,7 +49,6 @@ export type SellerDayItem = {
 
 // Quantas prioridades do dia entram na lista (as mesmas 5 do antigo bloco "Prioridades do dia").
 export const SELLER_DAY_PRIORITIES_LIMIT = 5;
-const PROPOSAL_NO_RESPONSE_DAYS = 7;
 const DAY_MS = 86_400_000;
 
 // Chave de duplicata: a oportunidade; sem ela, o cliente.
@@ -60,17 +60,17 @@ const daysSince = (value: string | null | undefined, todayKey: string) => {
   return Math.round((Date.parse(`${todayKey}T12:00:00Z`) - Date.parse(`${brazilDayKeyOf(value)}T12:00:00Z`)) / DAY_MS);
 };
 
-// Mesma regra do antigo bloco "Oportunidades críticas", em dias de Brasília.
-const criticalTagOf = (opportunity: SellerDayOpportunity, todayKey: string): { tag: SellerDayTag; daysLate: number } | null => {
+// Mesma regra do antigo bloco "Oportunidades críticas", em dias de Brasília. "Proposta sem retorno" é a regra
+// de packages/shared, a mesma da contagem do alerta e do filtro; o follow-up e o atraso têm precedência na etiqueta.
+const criticalTagOf = (opportunity: SellerDayOpportunity, todayKey: string, now: Date): { tag: SellerDayTag; daysLate: number } | null => {
   const followUpDays = daysSince(opportunity.followUpDate, todayKey);
   if (followUpDays !== null && followUpDays >= 0) {
     return { tag: followUpDays > 0 ? "followup_overdue" : "followup_today", daysLate: followUpDays };
   }
   const closeDays = daysSince(opportunity.expectedCloseDate, todayKey);
   if (closeDays !== null && closeDays > 0) return { tag: "opportunity_overdue", daysLate: closeDays };
-  const noActionDays = daysSince(opportunity.lastContactAt || opportunity.followUpDate, todayKey);
-  if (String(opportunity.stage || "").toLowerCase() === "proposta" && noActionDays !== null && noActionDays >= PROPOSAL_NO_RESPONSE_DAYS) {
-    return { tag: "proposal_no_response", daysLate: noActionDays };
+  if (isProposalWithoutResponse(opportunity, now)) {
+    return { tag: "proposal_no_response", daysLate: proposalDaysWithoutContact(opportunity, now)! };
   }
   return null;
 };
@@ -87,7 +87,8 @@ export const buildSellerDayList = (input: {
   excludeKey?: string | null;
   now?: Date;
 }): SellerDayItem[] => {
-  const todayKey = brazilTodayKey(input.now);
+  const now = input.now ?? new Date();
+  const todayKey = brazilTodayKey(now);
   const rankByKey = new Map<string, number>();
   input.priorities.forEach((priority, index) => {
     const key = sellerDayItemKey(priority);
@@ -119,7 +120,7 @@ export const buildSellerDayList = (input: {
   // Cliente em cobrança fica fora: aparece só na contagem de "Alertas da carteira".
   for (const opportunity of input.opportunities) {
     if (opportunity.clientInCollection) continue;
-    const critical = criticalTagOf(opportunity, todayKey);
+    const critical = criticalTagOf(opportunity, todayKey, now);
     if (!critical) continue;
     const client = clientOf(opportunity);
     add({ key: `opportunity:${opportunity.id}`, opportunityId: opportunity.id, ...client, title: opportunity.title, ...critical });

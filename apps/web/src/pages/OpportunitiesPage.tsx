@@ -2,7 +2,10 @@ import { DragEvent, FormEvent, PointerEvent, ReactNode, TouchEvent, useCallback,
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { MoreHorizontal, Search } from "lucide-react";
+import { isProposalWithoutResponse } from "@salesforce-pro/shared";
 import api from "../lib/apiClient";
+import { isNoResponseFilterInUrl } from "../lib/proposalsNoResponse";
+import { lastContactFormDayOf, lastContactPayloadOf } from "../lib/opportunityLastContact";
 import { formatCurrencyBRL, formatDateBR, formatPercentBR } from "../lib/formatters";
 import { useAuth } from "../context/AuthContext";
 import { triggerDashboardRefresh } from "../lib/dashboardRefresh";
@@ -94,6 +97,8 @@ type Filters = {
   dateFrom: string;
   dateTo: string;
   overdue: boolean;
+  // "Propostas sem retorno" (?noResponse=true, link da Central do Dia).
+  noResponse: boolean;
 };
 
 type DiscountType = "value" | "percent";
@@ -398,6 +403,8 @@ export default function OpportunitiesPage() {
   const [clients, setClients] = useState<Client[]>([]);
   const [sellerOptions, setSellerOptions] = useState<SellerOption[]>([]);
   const [editing, setEditing] = useState<string | null>(null);
+  // Dia do último contato ao abrir a edição: sem mudança, o campo não é reenviado.
+  const [editingLastContactDay, setEditingLastContactDay] = useState("");
   const [form, setForm] = useState<FormState>(emptyForm);
   const [isOpportunityModalOpen, setIsOpportunityModalOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
@@ -431,7 +438,8 @@ export default function OpportunitiesPage() {
     season: "",
     dateFrom: "",
     dateTo: "",
-    overdue: false
+    overdue: false,
+    noResponse: false
   });
   const [selectedOpportunity, setSelectedOpportunity] = useState<Opportunity | null>(null);
   const [isPipelineDrawerOpen, setIsPipelineDrawerOpen] = useState(false);
@@ -552,6 +560,7 @@ export default function OpportunitiesPage() {
       status: urlStatus === "open" || urlStatus === "closed" || urlStatus === "all" ? urlStatus : prev.status,
       stage: urlStage || prev.stage,
       overdue: urlOverdue === "true" ? true : prev.overdue,
+      noResponse: isNoResponseFilterInUrl(searchParams) ? true : prev.noResponse,
       ownerSellerId: urlOwnerSellerId || prev.ownerSellerId
     }));
 
@@ -603,6 +612,7 @@ export default function OpportunitiesPage() {
     stage: filters.stage,
     ownerSellerId: filters.ownerSellerId,
     overdueOnly: filters.overdue,
+    noResponse: filters.noResponse,
     search: debouncedSearch,
     clientId: filters.clientId,
     crop: filters.crop,
@@ -745,17 +755,12 @@ export default function OpportunitiesPage() {
         const todayStart = toDayStart(new Date().toISOString());
         const followUpDay = toDayStart(item.followUpDate);
         const expectedCloseDay = toDayStart(item.expectedCloseDate);
-        const lastActionDay = toDayStart(item.lastContactAt || item.followUpDate);
-        const stage = String(item.stage || "").toLowerCase();
 
         if (!todayStart) return false;
         if (followUpDay && followUpDay <= todayStart) return true;
         if (expectedCloseDay && expectedCloseDay < todayStart) return true;
-        if (stage === "proposta" && lastActionDay) {
-          const elapsed = Math.floor((todayStart.getTime() - lastActionDay.getTime()) / (1000 * 60 * 60 * 24));
-          return elapsed >= 7;
-        }
-        return false;
+        // Proposta sem retorno: a regra de packages/shared, a mesma do alerta e do filtro.
+        return isProposalWithoutResponse(item, new Date());
       })
       : items;
 
@@ -1147,7 +1152,7 @@ export default function OpportunitiesPage() {
       proposalDate: form.proposalEntryDate,
       followUpDate: form.expectedReturnDate,
       expectedCloseDate: form.expectedReturnDate,
-      lastContactAt: form.lastContactAt || undefined,
+      lastContactAt: lastContactPayloadOf(form.lastContactAt, editing ? editingLastContactDay : ""),
       notes: form.notes || undefined,
       clientId: form.clientId,
       ownerSellerId: form.ownerSellerId || undefined,
@@ -1275,6 +1280,7 @@ export default function OpportunitiesPage() {
 
   const onEdit = (item: Opportunity) => {
     setEditing(item.id);
+    setEditingLastContactDay(lastContactFormDayOf(item.lastContactAt));
     setOpportunityModalMode("edit");
     setForm({
       title: item.title,
@@ -1283,7 +1289,7 @@ export default function OpportunitiesPage() {
       probability: item.probability !== null && item.probability !== undefined ? String(item.probability) : "",
       proposalEntryDate: toDateInput(item.proposalDate),
       expectedReturnDate: toDateInput(item.followUpDate || item.expectedCloseDate),
-      lastContactAt: toDateInput(item.lastContactAt),
+      lastContactAt: lastContactFormDayOf(item.lastContactAt),
       crop: item.crop ?? "",
       season: item.season ?? "",
       areaHa: item.areaHa ? String(item.areaHa) : "",
@@ -1729,7 +1735,8 @@ export default function OpportunitiesPage() {
       season: "",
       dateFrom: "",
       dateTo: "",
-      overdue: false
+      overdue: false,
+      noResponse: false
     });
     setSearch("");
   };
@@ -1832,6 +1839,9 @@ export default function OpportunitiesPage() {
             </label>
             <label className="flex h-10 items-center gap-2 rounded-lg border border-slate-200 px-3 text-sm text-slate-700 lg:col-span-2">
               <input type="checkbox" checked={filters.overdue} onChange={(e) => setFilters((prev) => ({ ...prev, overdue: e.target.checked }))} />Somente atrasadas
+            </label>
+            <label className="flex h-10 items-center gap-2 rounded-lg border border-slate-200 px-3 text-sm text-slate-700 lg:col-span-2">
+              <input type="checkbox" checked={filters.noResponse} onChange={(e) => setFilters((prev) => ({ ...prev, noResponse: e.target.checked }))} />Propostas sem retorno
             </label>
             <div className="flex lg:col-span-4 lg:justify-end">
               <button type="button" className="h-10 rounded-lg bg-slate-100 px-4 text-sm font-medium text-slate-700 hover:bg-slate-200" onClick={clearFilters}>
@@ -2217,13 +2227,16 @@ export default function OpportunitiesPage() {
         </div>
       ) : (
         <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="grid gap-2 border-b border-slate-100 pb-3 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
+          <div className="grid gap-2 border-b border-slate-100 pb-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
             <input className="rounded-lg border border-slate-200 p-2" placeholder="Buscar título ou cliente" value={search} onChange={(e) => setSearch(e.target.value)} />
             <select className="rounded-lg border border-slate-200 p-2" value={filters.status} onChange={(e) => setFilters((prev) => ({ ...prev, status: e.target.value as OpportunityStatus }))}>
               {Object.entries(statusLabel).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </select>
             <label className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 text-sm text-slate-700">
               <input type="checkbox" checked={filters.overdue} onChange={(e) => setFilters((prev) => ({ ...prev, overdue: e.target.checked }))} />Somente atrasadas
+            </label>
+            <label className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 text-sm text-slate-700">
+              <input type="checkbox" checked={filters.noResponse} onChange={(e) => setFilters((prev) => ({ ...prev, noResponse: e.target.checked }))} />Propostas sem retorno
             </label>
             {canFilterByOwner ? (
               <select className="rounded-lg border border-slate-200 p-2" value={filters.ownerSellerId} onChange={(e) => setFilters((prev) => ({ ...prev, ownerSellerId: e.target.value }))}>

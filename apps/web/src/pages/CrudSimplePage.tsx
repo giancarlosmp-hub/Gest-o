@@ -1,7 +1,7 @@
 import { ChangeEvent, FormEvent, MouseEvent, useEffect, useMemo, useState } from "react";
 import { MoreHorizontal } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { ABC_CLASSES, CLIENT_IN_COLLECTION_LABEL, PORTFOLIO_STATUSES, PORTFOLIO_STATUS_LABELS, isAbcClass, isPortfolioStatus } from "@salesforce-pro/shared";
+import { ABC_CLASSES, CLIENT_IN_COLLECTION_LABEL, COOLING_STATUS_FILTER, COOLING_STATUS_FILTER_LABEL, PORTFOLIO_STATUSES, PORTFOLIO_STATUS_LABELS, isAbcClass, isClientStatusFilter, isPortfolioStatus } from "@salesforce-pro/shared";
 import api from "../lib/apiClient";
 import { toast } from "sonner";
 import { useAuth } from "../context/AuthContext";
@@ -284,8 +284,8 @@ export default function CrudSimplePage({
   >({});
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
-  // Situação da carteira vem de ?status= (links do donut do Dashboard); valor inválido é ignorado.
-  const urlPortfolioStatus = endpoint === "/clients" && isPortfolioStatus(searchParams.get("status")) ? searchParams.get("status")! : "";
+  // Situação da carteira vem de ?status= (links do donut do Dashboard e "Esfriando" da Central do Dia); valor inválido é ignorado.
+  const urlPortfolioStatus = endpoint === "/clients" && isClientStatusFilter(searchParams.get("status")) ? searchParams.get("status")! : "";
   // Vendedor vem de ?ownerSellerId= (donut do Dashboard com vendedor escolhido); só gerente e diretor.
   const urlOwnerSellerId = endpoint === "/clients" ? ownerSellerIdFromUrl(searchParams, user?.role) : "";
   // Curva ABC vem de ?abc= (links do donut "Curva ABC" do Dashboard); valor inválido é ignorado.
@@ -2043,6 +2043,8 @@ export default function CrudSimplePage({
                   {PORTFOLIO_STATUS_LABELS[status]}
                 </option>
               ))}
+              {/* Ativo há mais de 9 meses sem comprar, sem cliente em cobrança. */}
+              <option value={COOLING_STATUS_FILTER}>{COOLING_STATUS_FILTER_LABEL}</option>
             </select>
 
             <select

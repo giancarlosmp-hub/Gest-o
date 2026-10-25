@@ -823,9 +823,61 @@ pendentes que vencem hoje (`apps/web/src/lib/centralDayActivities.ts`, dias de B
 Teste: `test:seller-central` (web, dados fictícios). Não roda no CI.
 
 Pendente (fora deste PR):
-- "Clientes esfriando" leva à lista de ativos (`portfolioStatusClientsPath("ativo")`), não só aos esfriando; e
-  "Propostas sem retorno" leva a todas as propostas abertas. A lista de Clientes não tem filtro de esfriando.
-- A contagem "Propostas sem retorno" (mais de 7 dias da última atividade/atualização) e a etiqueta da lista (7 dias do
-  último contato) usam regras herdadas diferentes.
+- (Resolvido em “TD-COOLING-PROPOSALS-FILTERS”: os links de "Clientes esfriando" e "Propostas sem retorno" e a regra
+  única da contagem e da etiqueta.)
 - O texto "Comece por esta ação" dentro de "Comece por aqui" repete o título; mantido como estava.
 - Restos da gestão no código: o ramo `user?.role === "vendedor"` do Top 3 no desktop da gestão ficou sem uso.
+
+### TD-COOLING-PROPOSALS-FILTERS — links dos alertas abriam listas mais largas e regras divergentes
+
+**Resolvido no código, aguardando deploy.** "Clientes esfriando" abria todos os ativos e "Propostas sem retorno"
+abria todas as propostas abertas; a contagem de propostas (`lastActivityAt || updatedAt || lastContactAt ||
+followUpDate`, mais de 7×24h, contando cliente em cobrança) divergia da etiqueta da "Minha lista de hoje" (7 dias ou
+mais, sem cobrança) e do `pipelineOfDay` (dia do aparelho). Decisões do Giancarlos de 25/10/2026:
+
+- Esfriando: `GET /clients?status=esfriando` (constante `COOLING_STATUS_FILTER`, `packages/shared/src/portfolioStatus.ts`),
+  a regra oficial (`isClientCoolingActive`) no escopo do usuário, sem arquivados e **sem cliente em cobrança**, como o
+  alerta (`listPortfolioSegment`). Combina com UF, região, tipo, vendedor e ABC; com "Em cobrança" a lista fica vazia.
+  Na tela Clientes, opção "Esfriando" na Situação, lida da URL. O selo continua "Ativo" (esfriando não é 5ª situação).
+- Proposta sem retorno: uma função só, `isProposalWithoutResponse` (`packages/shared/src/proposalNoResponse.ts`):
+  etapa proposta e último contato (`lastContactAt`; sem ele, `followUpDate`) há **mais de 7 dias de Brasília** (7 não
+  entra, 8 entra). Usada pela contagem dos alertas (vendedor e gestão), pela etiqueta da lista, pelo `pipelineOfDay`,
+  pelo filtro `actionToday` da tela de Oportunidades e, como corte (`proposalNoResponseCutoff`), pelo filtro
+  `GET /opportunities?noResponse=true` (e `/opportunities/summary`). O filtro tira cliente arquivado e cliente em
+  cobrança, como a contagem. Na tela de Oportunidades, caixa "Propostas sem retorno" (painel e lista), lida da URL.
+- Origem do último contato: ao registrar atividade com oportunidade (`POST /activities`, "Concluir" do compromisso,
+  resultado "realizada" da parada de roteiro e contato por WhatsApp), a API leva `Opportunity.lastContactAt` para a
+  data da atividade quando ela é mais recente (`advanceOpportunityLastContactInTx`, `updateMany` condicional: nunca
+  volta a data).
+- Histórico: `apps/api/src/scripts/backfillOpportunityLastContact.ts`, simulação por padrão (transação READ ONLY, só
+  contagens) e `--apply --expect=N` (transação serializável, grava só se o total for N). Não foi rodado.
+
+Quem mais lê `lastContactAt`: o score de prioridade ("Sem contato na oportunidade há N dias"), as prioridades do dia,
+a timeline inteligente e o "último contato" do Cliente 360 já usam o maior valor entre `lastContactAt` e as
+atividades, então não mudam na prática. Mudam: `opportunityInsight` e a mensagem de venda da IA
+(`opportunitySalesMessage`, "N dias sem retorno"), que leem só `lastContactAt` e a timeline: a visita de parada de
+roteiro (que não grava timeline) passa a contar; e o "Último contato" do painel da oportunidade mostra a data real.
+
+Testes (dados fictícios): `test:cooling-proposals-filters`, `test:backfill-opportunity-last-contact` e
+`test:opportunity-last-contact-edit` (API), `test:agenda-activity-split` estendido (API), `test:proposals-no-response`
+e `test:opportunity-last-contact` (web). Não rodam no CI.
+
+Pendente (fora deste PR):
+- (Resolvido no mesmo PR: o contato por WhatsApp também avança `lastContactAt`; o formulário da oportunidade mostra o
+  dia de Brasília, só envia o campo quando o usuário muda o dia, com a hora atual de Brasília
+  (`apps/web/src/lib/opportunityLastContact.ts`), e `PUT /opportunities/:id` só avança a data: anterior ou vazia é
+  ignorada, e o resto da edição é gravado.)
+- Não existe fluxo para gerente ou diretor corrigir o último contato para uma data anterior: hoje ninguém volta a data
+  por edição. Se for preciso, criar uma correção explícita (com registro de quem corrigiu).
+- A importação de oportunidades (`POST /opportunities/import`, atualização de oportunidade existente) ainda grava o
+  `lastContactAt` da planilha e pode voltar a data.
+- Segurança, anterior a este PR: `PUT /opportunities/:id` lê e atualiza a oportunidade só pelo id, sem o escopo do
+  vendedor (`sellerWhere`) nem do tenant; o `GET` e o `DELETE` filtram. Um vendedor que souber o id edita a
+  oportunidade de outro. Corrigir em PR próprio.
+- A tela Clientes lê da URL só situação, vendedor, ABC e cobrança; UF, região e tipo não (o link com `uf=` não filtra).
+- Tela de Oportunidades: `overdue` e `noResponse` da URL só ligam o filtro; voltar no navegador não o desliga.
+- `HomePage.tsx`: os campos `updatedAt` e `lastActivityAt` do tipo `Opportunity` não vêm da API (sem uso agora).
+- Com a regra única, o filtro `actionToday` ("Follow-ups vencidos hoje/atrasados") passou de 7 para mais de 7 dias.
+- Os testes `test:agenda-activity-split`, `test:portfolio-without-purchase-cooling`, `test:commercial-automations` e
+  o `weeklyPlanActions.http.test.ts` (dentro de `test:portfolio-priority-planning`) não rodam no CI; os três últimos já
+  falham na `main` no Windows local, sem relação com este PR.

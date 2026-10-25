@@ -66,3 +66,12 @@ export const isCoolingActive = (lastErpPurchase: DateInput, lastSentCrmOrder: Da
   const lastPurchaseDay = lastPurchaseDayNumber(lastErpPurchase, lastSentCrmOrder)!;
   return lastPurchaseDay < brazilDayNumberMonthsBefore(now, COOLING_ACTIVE_MONTHS);
 };
+
+// Filtro "Esfriando" da lista de clientes (?status=esfriando): recorte de "ativo" pela regra acima, ao lado das
+// quatro situações no mesmo parâmetro. Como no alerta da Central do Dia, cliente em cobrança fica de fora.
+export const COOLING_STATUS_FILTER = "esfriando";
+export const COOLING_STATUS_FILTER_LABEL = "Esfriando";
+
+export type ClientStatusFilter = PortfolioStatus | typeof COOLING_STATUS_FILTER;
+
+export const isClientStatusFilter = (value: unknown): value is ClientStatusFilter => value === COOLING_STATUS_FILTER || isPortfolioStatus(value);
