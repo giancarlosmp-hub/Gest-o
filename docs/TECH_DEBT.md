@@ -764,9 +764,9 @@ Pendente (fora deste PR):
 - `GET /reports/weekly-discipline` não tem consumidor no web.
 - `getCurrentWeekRangeFromBrazilNow` fecha a semana em meia-noite UTC (domingo 21h de Brasília), não em Brasília.
 - O motivo de "não realizado" é texto livre: não dá para separar motivo justificável (chuva, estrada) sem categoria.
-- Central do Dia: a "Rotina Comercial do Dia" conta atividades de hoje ainda não concluídas como realizadas, e a lista
-  "Atividades do dia" do celular mostra atividades pendentes antigas. "Followups pendentes" e os alertas leem o
-  `followUpDate` da oportunidade, não os follow-ups da Agenda.
+- Central do Dia: "Followups pendentes" e os alertas leem o `followUpDate` da oportunidade, não os follow-ups da
+  Agenda. (A Rotina contando atividades não concluídas e a lista do celular com pendentes antigas foram corrigidas em
+  “TD-SELLER-CENTRAL-LEAN”.)
 - Os testes `test:agenda-discipline` (API) e `test:central-day-agenda` (web) não rodam no CI.
 
 ### TD-CLIENTS-ABC-FILTER — fatias da Curva ABC levavam a um filtro que não existia
@@ -801,3 +801,31 @@ Pendente (fora deste PR):
   `VALOR_ULTFATURA`), a primeira e o `VALOR_MEDIO`. Precisa de dado novo do ERP (notas ou vendas por cliente com
   data de emissão) e de regra para não contar em dobro o pedido do CRM já faturado.
 - O KPI "Classe A • X%" do Dashboard continua dividindo os clientes A pelo total da carteira (com quem não comprou).
+
+### TD-SELLER-CENTRAL-LEAN — Central do Dia do vendedor com blocos repetidos
+
+**Resolvido no código, aguardando deploy** (item 9 da investigação da visão do vendedor). A mesma oportunidade com
+follow-up vencido aparecia em até 5 lugares (faixa vermelha, Oportunidades críticas, Alertas Inteligentes,
+Prioridades do dia, Followups pendentes), "Minha IA Comercial" repetia a 1ª prioridade e "Followups pendentes"
+deixava os atrasados de fora. Agora o vendedor tem um retorno próprio em `HomePage.tsx`, igual no desktop e no
+celular: "Comece por aqui", "Minha lista de hoje", "Agenda de hoje" (com as atividades concluídas hoje, decisão do
+Giancarlos de 25/10/2026), "Meu ritmo" e "Alertas da carteira". A lista vem de `buildSellerDayList`
+(`apps/web/src/lib/sellerDayList.ts`): chave = oportunidade (ou cliente), as 5 primeiras prioridades do dia, as
+oportunidades críticas e os follow-ups vencidos e de hoje, em dias de Brasília; cliente em cobrança fica fora (só na
+contagem dos alertas); o item de "Comece por aqui" é excluído. Um motivo por item, na ordem follow-up vencido,
+follow-up hoje, proposta sem retorno, oportunidade atrasada, esfriando (motivo "Esfriando" da prioridade), prioridade;
+a lista segue essa ordem e, no mesmo motivo, a ordem das prioridades do dia. Mostra 8 itens e "Ver todas".
+
+Corrigido para todos os perfis (decisão do Giancarlos de 25/10/2026; o layout da gestão não muda): a Rotina Comercial
+do Dia conta só atividades concluídas hoje, e a lista "Atividades do dia" do celular mostra só as concluídas hoje e as
+pendentes que vencem hoje (`apps/web/src/lib/centralDayActivities.ts`, dias de Brasília; antes, fuso do aparelho).
+
+Teste: `test:seller-central` (web, dados fictícios). Não roda no CI.
+
+Pendente (fora deste PR):
+- "Clientes esfriando" leva à lista de ativos (`portfolioStatusClientsPath("ativo")`), não só aos esfriando; e
+  "Propostas sem retorno" leva a todas as propostas abertas. A lista de Clientes não tem filtro de esfriando.
+- A contagem "Propostas sem retorno" (mais de 7 dias da última atividade/atualização) e a etiqueta da lista (7 dias do
+  último contato) usam regras herdadas diferentes.
+- O texto "Comece por esta ação" dentro de "Comece por aqui" repete o título; mantido como estava.
+- Restos da gestão no código: o ramo `user?.role === "vendedor"` do Top 3 no desktop da gestão ficou sem uso.
