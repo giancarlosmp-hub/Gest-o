@@ -9,6 +9,8 @@ import {
   findDuplicateClientByLookupPayload
 } from "../../lib/clientDuplicateCheck";
 import ClientCnpjLookupField from "../opportunities/ClientCnpjLookupField";
+import { resolveOfficialAddress } from "../../lib/clientAddressCatalog";
+import ClientAddressFields from "./ClientAddressFields";
 
 type ClientOption = {
   id: string;
@@ -82,13 +84,15 @@ export default function QuickCreateClientSection({
     setDuplicateClient(null);
     setQuickCreateError(null);
 
+    // UF e cidade da Receita substituem o que foi digitado quando o município está na lista oficial do IBGE.
+    const officialAddress = await resolveOfficialAddress(state, city).catch(() => null);
     setQuickClient((currentQuickClient) => {
       const nextQuickClient = {
         ...currentQuickClient,
         cnpj,
         name: currentQuickClient.name || name,
-        city: currentQuickClient.city || city,
-        state: currentQuickClient.state || state
+        city: officialAddress?.city ?? currentQuickClient.city,
+        state: officialAddress?.state ?? currentQuickClient.state
       };
       quickClientRef.current = nextQuickClient;
       return nextQuickClient;
@@ -195,8 +199,17 @@ export default function QuickCreateClientSection({
               className={fieldClassName}
             />
             <input required className={fieldClassName} placeholder="Nome do cliente" value={quickClient.name} onChange={(e) => { setDuplicateClient(null); setQuickCreateError(null); updateQuickClient({ name: e.target.value }); }} />
-            <input required className={fieldClassName} placeholder="Cidade" value={quickClient.city} onChange={(e) => { setDuplicateClient(null); setQuickCreateError(null); updateQuickClient({ city: e.target.value }); }} />
-            <input required className={fieldClassName} placeholder="UF" value={quickClient.state} onChange={(e) => { setDuplicateClient(null); setQuickCreateError(null); updateQuickClient({ state: e.target.value.toUpperCase() }); }} maxLength={2} />
+            <div className="grid gap-2 sm:grid-cols-2">
+              <ClientAddressFields
+                idPrefix="quick-client-address"
+                state={quickClient.state}
+                city={quickClient.city}
+                required
+                disabled={isCreatingClient}
+                selectClassName={fieldClassName}
+                onChange={({ state, city }) => { setDuplicateClient(null); setQuickCreateError(null); updateQuickClient({ state, city }); }}
+              />
+            </div>
             <input className={fieldClassName} placeholder={`Região${requireRegion ? " *" : " (opcional)"}`} value={quickClient.region} onChange={(e) => { setDuplicateClient(null); setQuickCreateError(null); updateQuickClient({ region: e.target.value }); }} />
             {quickCreateError ? <p className="text-xs text-red-600">{quickCreateError}</p> : null}
             {duplicateClient ? (

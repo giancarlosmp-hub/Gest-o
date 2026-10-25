@@ -97,6 +97,7 @@
     "test:platform-health": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/services/platformHealthService.test.ts && tsx src/services/platformHealthProjection.test.ts",
     "test:orders-module": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/services/ordersModule.test.ts && tsx src/services/orderStatusProjection.test.ts",
     "test:seller-offboarding": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/services/sellerOffboarding.test.ts",
+    "test:client-address": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/routes/clientAddressCatalog.http.test.ts && tsx src/scripts/fixManualClientAddress.test.ts && tsx src/routes/clientCodeErpOnly.http.test.ts",
     "test:territory-config": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/services/territoryOfficialCities.test.ts && tsx src/routes/territoryConfig.http.test.ts && tsx src/scripts/backfillTerritoryCityTenant.test.ts && tsx src/services/sellerOffboarding.test.ts",
     "test:inactive-user-auth": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/security/inactiveUserAuth.test.ts",
     "test:route-authorization": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/security/routeAuthorization.http.test.ts",

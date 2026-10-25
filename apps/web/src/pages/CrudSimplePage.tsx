@@ -6,6 +6,7 @@ import api from "../lib/apiClient";
 import { toast } from "sonner";
 import { useAuth } from "../context/AuthContext";
 import { validateClientPayload, type ClientPayloadInput } from "../lib/validateClientPayload";
+import ClientAddressFields from "../components/clients/ClientAddressFields";
 import { formatCnpj, normalizeCnpjDigits } from "../lib/cnpj";
 import { loadXlsxLibrary, normalizeHeader, normalizeTextValue, parseDecimalValue, parseImportFile } from "../lib/import/parsers";
 import {
@@ -2821,6 +2822,31 @@ export default function CrudSimplePage({
                     const isRequired = endpoint === "/clients" ? ["name", "city", "state", "clientType"].includes(f.key) : true;
 
                     const isOwnerSellerField = endpoint === "/clients" && f.key === "ownerSellerId";
+
+                    // UF e cidade do cliente: listas oficiais do IBGE, desenhadas juntas no lugar do campo UF.
+                    if (endpoint === "/clients" && f.key === "city") return null;
+                    if (endpoint === "/clients" && f.key === "state") {
+                      // Cliente com código do ERP: UF e cidade vêm do ERP (dono do cadastro), somente leitura.
+                      const addressFromErp = Boolean(editing && typeof form.code === "string" && form.code.trim());
+                      return (
+                        <ClientAddressFields
+                          key="address"
+                          idPrefix="modal-address"
+                          state={typeof form.state === "string" ? form.state : ""}
+                          city={typeof form.city === "string" ? form.city : ""}
+                          required
+                          disabled={addressFromErp}
+                          note={addressFromErp ? "UF e cidade vêm do ERP. Para mudar, corrija o cadastro no ERP e aguarde a próxima sincronização." : undefined}
+                          selectClassName="w-full rounded-lg border border-slate-300 p-2 text-slate-800 disabled:bg-slate-100 disabled:text-slate-500"
+                          error={formFieldErrors.city || formFieldErrors.state}
+                          onChange={({ state, city }) => {
+                            setFormError(null);
+                            setFormFieldErrors((prev) => ({ ...prev, state: undefined, city: undefined }));
+                            setForm((currentForm: ClientPayloadInput) => ({ ...currentForm, state, city }));
+                          }}
+                        />
+                      );
+                    }
 
                     // Código do cliente: ausente no cadastro e somente leitura na edição (vem do ERP).
                     if (endpoint === "/clients" && f.key === "code") {

@@ -132,7 +132,8 @@ const call = async (userId: string, method: string, path: string, body?: unknown
   return { status: response.status, json };
 };
 
-const newClient = { name: "Cliente Novo Ficticio", city: "Outra Cidade", state: "MT", region: "Norte", clientType: "PJ" };
+// Cidade da lista oficial do IBGE (o cadastro recusa cidade fora dela).
+const newClient = { name: "Cliente Novo Ficticio", city: "Sinop", state: "MT", region: "Norte", clientType: "PJ" };
 const orderBody = { paymentMethodCode: "1", receivingConditionCode: "1", priceTableCode: "1", branchCode: "1", operationCode: "1", expectedDeliveryDate: "2026-12-01" };
 
 try {
@@ -165,7 +166,7 @@ try {
   const imported = await call("director-a", "POST", "/api/clients/import", {
     rows: [
       { ...newClient, ownerSellerId: "seller-a", code: "7406", erpUpdatedAt: "2026-01-02" },
-      { name: "Cliente Sem Codigo", city: "Cidade Ficticia", state: "GO", region: "Centro", clientType: "PJ", ownerSellerId: "seller-a", cnpj: "00000000000191", fantasyName: "Fantasia Ficticia", code: "7407", erpUpdatedAt: "2026-01-03" },
+      { name: "Cliente Sem Codigo", city: "Rio Verde", state: "GO", region: "Centro", clientType: "PJ", ownerSellerId: "seller-a", cnpj: "00000000000191", fantasyName: "Fantasia Ficticia", code: "7407", erpUpdatedAt: "2026-01-03" },
     ],
   });
   assert.equal(imported.status, 200, `importação deve responder 200: ${JSON.stringify(imported.json)}`);

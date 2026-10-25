@@ -1,3 +1,17 @@
+# Endereço do cliente pela lista oficial do IBGE (cadastro, edição e importações) — código pronto, aguardando deploy — 25/10/2026
+
+- Cadastro e edição manual de clientes com UF e cidade escolhidas de listas (catálogo do IBGE do Brasil inteiro, 5.571
+  municípios embutidos no código), gravadas com o nome oficial; a API recusa par fora da lista. Edição de outros campos
+  não exige corrigir endereço antigo; cliente sem tenant ganha o tenant de quem edita. A consulta de CNPJ preenche UF e
+  cidade da Receita quando o município está na lista. Cliente com código do ERP: UF e cidade somente leitura na tela e
+  recusadas pela API (o ERP é dono do cadastro); a planilha também não preenche o endereço dele.
+- Importação de clientes: linha com cidade fora da UF não entra e vai para os erros. Importação de oportunidades com
+  "criar cliente": novas colunas `cidade_cliente` e `uf_cliente`; sem par válido o cliente não é criado e a linha vai
+  para os erros; cliente criado com tenant (antes: "N/A"/"NA" e sem tenant).
+- Script `fixManualClientAddress` (simulação por padrão; `--apply --expect=N`), não rodado: corrige UF/cidade de
+  clientes sem código do ERP quando o nome existe numa única UF e preenche o tenant; o resto só no relatório.
+- Território comercial continua só PR, SC e MS. Sem migration. Detalhes: `TECH_DEBT.md`, “TD-CLIENT-ADDRESS-IBGE”.
+
 # Planejamento semanal: visitas agrupadas por cidades próximas — código pronto, aguardando deploy — 25/10/2026
 
 - Visita só entra num dia em que fica a no máximo o raio (padrão 70 km, em linha reta) de todas as visitas já colocadas
