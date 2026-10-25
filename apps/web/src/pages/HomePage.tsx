@@ -20,6 +20,7 @@ import {
   type CentralAgendaEvent
 } from "../lib/centralDayAgenda";
 import { isActivityDoneToday, isActivityOfToday } from "../lib/centralDayActivities";
+import { buildSellerDayList, SELLER_DAY_TAG_LABEL, sellerDayItemKey, type SellerDayTag } from "../lib/sellerDayList";
 
 type Activity = {
   id: string;
@@ -204,6 +205,17 @@ function formatActivityTime(activity: Pick<Activity, "dueDate"> & { date?: strin
 const PREVIOUS_DAYS_PENDING_PATH = "/agenda?pendentes=dias-anteriores";
 
 const blockClass = "rounded-xl border border-slate-200 bg-white p-4 shadow-sm";
+const ACTION_TODAY_OPPORTUNITIES_PATH = "/oportunidades?status=open&actionToday=true";
+// Itens visíveis de "Minha lista de hoje"; o resto fica em "Ver todas".
+const SELLER_DAY_LIST_LIMIT = 8;
+const SELLER_DAY_TAG_CLASS: Record<SellerDayTag, string> = {
+  followup_overdue: "bg-red-100 text-red-700",
+  followup_today: "bg-amber-100 text-amber-800",
+  proposal_no_response: "bg-amber-100 text-amber-800",
+  opportunity_overdue: "bg-red-100 text-red-700",
+  cooling: "bg-sky-100 text-sky-800",
+  priority: "bg-slate-100 text-slate-700"
+};
 const PANEL_ORDER_STORAGE_KEY = "central-do-dia-panel-order";
 const defaultPanelOrder = ["routine", "pipeline", "summary", "agenda", "followups", "critical", "alerts", "missions", "activities"] as const;
 type PanelId = (typeof defaultPanelOrder)[number];
@@ -685,12 +697,14 @@ export default function HomePage() {
       })
       .sort((a, b) => b.mainMissionProgress - a.mainMissionProgress || a.name.localeCompare(b.name, "pt-BR"));
 
-    const own = ranking.find((seller) => seller.userId === user?.id) ?? ranking[0] ?? null;
+    const ownRow = ranking.find((seller) => seller.userId === user?.id) ?? null;
+    // Vendedor: só a própria linha, nunca a de um colega.
+    const own = user?.role === "vendedor" ? ownRow : ownRow ?? ranking[0] ?? null;
     return {
       own,
       top3: ranking.slice(0, 3)
     };
-  }, [weeklyMissions, user?.id]);
+  }, [weeklyMissions, user?.id, user?.role]);
 
   const ownWeeklyMissions = useMemo(() => {
     const fallback = weeklyMissionSummary.own;
@@ -790,6 +804,16 @@ export default function HomePage() {
     return null;
   }, [isSeller, opportunities, pipelineOfDay.topFive, smartAlerts.items, todayPriorities]);
 
+  // "Minha lista de hoje": cada oportunidade uma vez só, sem o item de "Comece por aqui".
+  const sellerDayList = useMemo(() => {
+    if (!isSeller) return [];
+    return buildSellerDayList({
+      priorities: todayPriorities,
+      opportunities,
+      excludeKey: sellerOperationalInsight ? sellerDayItemKey(sellerOperationalInsight) : null
+    });
+  }, [isSeller, opportunities, sellerOperationalInsight, todayPriorities]);
+
   useEffect(() => {
     window.localStorage.setItem(PANEL_ORDER_STORAGE_KEY, JSON.stringify(panelOrder));
   }, [panelOrder]);
@@ -849,7 +873,7 @@ export default function HomePage() {
         <div className="flex items-start gap-2">
           <Bot className="mt-0.5 text-brand-700" size={20} />
           <div className="min-w-0 flex-1">
-            <h2 className="text-base font-semibold text-slate-900 md:text-lg">Minha IA Comercial</h2>
+            <h2 className="text-base font-semibold text-slate-900 md:text-lg">Comece por aqui</h2>
             <p className="text-sm text-slate-500">Próxima melhor ação para hoje</p>
           </div>
           {sellerOperationalInsight ? (
@@ -899,16 +923,6 @@ export default function HomePage() {
     );
   };
 
-  const renderSellerCollectionBlock = () => {
-    if (!isSeller || collectionClientsCount === null) return null;
-    return (
-      <section className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm shadow-sm">
-        <p className="font-semibold text-red-800">Clientes em cobrança: {collectionClientsCount}</p>
-        <Link to={collectionClientsPath()} className="font-semibold text-red-800 underline hover:text-red-900">Ver lista</Link>
-      </section>
-    );
-  };
-
   const renderCommercialInsightsCard = () => {
     if (!canViewCommercialInsights) return null;
     return (
@@ -953,6 +967,83 @@ export default function HomePage() {
     );
   };
 
+  // Faixas de aviso do desktop; o vendedor não recebe a de follow-ups vencidos (vira etiqueta na lista).
+  const renderTopBanners = (showOverdueFollowUpAlert: boolean) => (
+    <section className="space-y-2">
+      {showOverdueFollowUpAlert && alerts.showOverdueFollowUpAlert && (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-medium text-red-700">
+          Atenção: existem follow-ups vencidos.
+        </div>
+      )}
+      {alerts.showUpcomingMeetingBanner && (
+        <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm font-medium text-blue-700">
+          Lembrete: você possui {reminders.upcomingMeetingsCount} reunião(ões) nas próximas 2 horas.
+        </div>
+      )}
+      {alerts.showNoActivitiesWarning && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-medium text-amber-700">
+          Você ainda não registrou atividades hoje.
+        </div>
+      )}
+      {routineMetrics.shouldShowWarning && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-medium text-amber-700">
+          Atenção leve: você está abaixo de 50% da rotina comercial esperada até este horário.
+        </div>
+      )}
+    </section>
+  );
+
+  const renderRoutineMetric = (metric: (typeof routineMetrics.metrics)[number]) => {
+    const barColorClass = metric.achieved ? "bg-green-500" : "bg-red-500";
+    const clampedProgress = Math.max(0, Math.min(metric.progressPercent, 100));
+
+    return (
+      <div key={metric.label} className="rounded-lg border border-slate-200 px-3 py-2">
+        <div className="mb-1 flex items-center justify-between gap-2 text-sm">
+          <p className="font-medium text-slate-900">{metric.label}</p>
+          <p className="text-slate-600">
+            {metric.realized} /{" "}
+            {metric.dailyTarget.toLocaleString("pt-BR", {
+              maximumFractionDigits: 1,
+              minimumFractionDigits: 1
+            })}
+          </p>
+        </div>
+        <div className="h-2 rounded-full bg-slate-100">
+          <div
+            className={`h-2 rounded-full transition-all ${barColorClass}`}
+            style={{ width: `${clampedProgress}%` }}
+          />
+        </div>
+      </div>
+    );
+  };
+
+  const renderMissionCard = (mission: WeeklyMission) => {
+    const progress = Number(mission.progress || 0);
+    const target = Number(mission.target || 0);
+    const safePercent = target > 0 ? Math.max(0, Math.min((progress / target) * 100, 100)) : mission.done ? 100 : 0;
+    const motivational = mission.done
+      ? "Concluída! Excelente consistência. 🚀"
+      : `Falta ${Math.max(target - progress, 0)} para completar.`;
+
+    return (
+      <div key={mission.key} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+        <p className="text-xs font-medium text-slate-700">{mission.title}</p>
+        <p className="mt-1 text-lg font-bold text-slate-900">
+          {progress}/{target}
+        </p>
+        <div className="mt-1 h-1.5 rounded-full bg-slate-200">
+          <div className="h-1.5 rounded-full bg-brand-600" style={{ width: `${safePercent}%` }} />
+        </div>
+        {mission.key === "visits_25" && mission.medal && (
+          <p className={`mt-1 text-xs font-medium ${getMedalTone(mission.medal)}`}>{getMedalLabel(mission.medal)}</p>
+        )}
+        <p className={`mt-1 text-xs ${mission.done ? "text-emerald-700" : "text-slate-600"}`}>{motivational}</p>
+      </div>
+    );
+  };
+
   // Planejado de hoje em itens (cada parada de roteiro conta 1), como na disciplina.
   const renderAgendaTodayCounter = () => (
     <p className="mt-1 text-xs text-slate-500">
@@ -981,6 +1072,158 @@ export default function HomePage() {
         {previousDaysPending === 1 ? "1 compromisso de dias anteriores sem conclusão" : `${previousDaysPending} compromissos de dias anteriores sem conclusão`}
       </Link>
     ) : null;
+
+  const renderSellerTodayList = () => (
+    <section className={blockClass}>
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-base font-semibold text-slate-900 md:text-lg">Minha lista de hoje</h2>
+        <Link to={ACTION_TODAY_OPPORTUNITIES_PATH} className="rounded-md border border-brand-200 px-3 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-50">
+          Ver todas
+        </Link>
+      </div>
+      <div className="mt-3 space-y-2">
+        {pipelineError ? (
+          <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700">{pipelineError}</p>
+        ) : loading ? (
+          <p className="text-sm text-slate-500">Carregando sua lista...</p>
+        ) : sellerDayList.length === 0 ? (
+          <p className="text-sm text-slate-500">Nada pendente para hoje.</p>
+        ) : (
+          sellerDayList.slice(0, SELLER_DAY_LIST_LIMIT).map((item) => (
+            <Link
+              key={item.key}
+              to={item.opportunityId ? `/oportunidades/${item.opportunityId}` : `/clientes/${item.clientId}`}
+              className="flex items-start justify-between gap-2 rounded-lg border border-slate-200 px-3 py-2 hover:bg-slate-50"
+            >
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-slate-900">{item.clientName}</p>
+                <p className="truncate text-xs text-slate-600">
+                  {item.title || "Oportunidade"}
+                  {item.daysLate > 0 ? ` · há ${item.daysLate} dia(s)` : ""}
+                </p>
+              </div>
+              <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${SELLER_DAY_TAG_CLASS[item.tag]}`}>{SELLER_DAY_TAG_LABEL[item.tag]}</span>
+            </Link>
+          ))
+        )}
+      </div>
+      {!loading && sellerDayList.length > SELLER_DAY_LIST_LIMIT ? (
+        <p className="mt-2 text-xs text-slate-500">Mais {sellerDayList.length - SELLER_DAY_LIST_LIMIT} em "Ver todas".</p>
+      ) : null}
+    </section>
+  );
+
+  // Compromissos de hoje (Agenda) e, abaixo, o que já foi concluído hoje (Atividades).
+  const renderSellerAgendaToday = () => (
+    <section className={blockClass}>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h2 className="text-base font-semibold text-slate-900 md:text-lg">Agenda de hoje</h2>
+          {renderAgendaTodayCounter()}
+        </div>
+        <Link to="/agenda/roteiro" className="rounded-lg bg-brand-700 px-3 py-2 text-xs font-semibold text-white hover:bg-brand-800">
+          Iniciar roteiro
+        </Link>
+      </div>
+      {renderPreviousDaysPending()}
+      <div className="mt-3 space-y-2">
+        {loading ? (
+          <p className="text-sm text-slate-500">Carregando agenda...</p>
+        ) : agendaToday.length === 0 ? (
+          <p className="text-sm text-slate-500">Nenhum compromisso na Agenda para hoje.</p>
+        ) : (
+          agendaToday.map((item) => {
+            const startsAt = item.startsAt || item.startDateTime;
+            return (
+              <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 px-3 py-2">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-slate-900">
+                    {startsAt ? new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(new Date(startsAt)) : "Sem horário"}
+                  </p>
+                  <p className="text-xs text-slate-600">{item.title || "Compromisso"}</p>
+                </div>
+                {renderAgendaItemStatus(item)}
+              </div>
+            );
+          })
+        )}
+      </div>
+      <div className="mt-4 border-t border-slate-100 pt-3">
+        <p className="text-sm font-medium text-slate-900">
+          {doneActivitiesToday.length === 1 ? "1 atividade concluída hoje" : `${doneActivitiesToday.length} atividades concluídas hoje`}
+        </p>
+        {doneActivitiesToday.length > 0 ? (
+          <ul className="mt-2 space-y-1">
+            {doneActivitiesToday.map((activity) => (
+              <li key={activity.id} className="flex items-center justify-between gap-2 text-xs text-slate-600">
+                <span className="min-w-0 truncate">
+                  {activity.notes || "Atividade"}
+                  {activity.opportunity?.title ? ` · ${activity.opportunity.title}` : ""}
+                </span>
+                <span className="inline-flex shrink-0 items-center gap-1 text-slate-500">
+                  <Clock3 size={12} />
+                  {formatActivityTime(activity)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
+    </section>
+  );
+
+  // Rotina do Dia e Missões da Semana do próprio vendedor, sem colegas.
+  const renderSellerRhythm = () => (
+    <section className={blockClass}>
+      <h2 className="text-base font-semibold text-slate-900 md:text-lg">Meu ritmo</h2>
+      <div className="mt-3 grid gap-4 md:grid-cols-2">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-700">Rotina do Dia</h3>
+          <div className="mt-2 space-y-2">{routineMetrics.metrics.map(renderRoutineMetric)}</div>
+        </div>
+        <div>
+          <h3 className="text-sm font-semibold text-slate-700">Missões da Semana</h3>
+          {weeklyMissionSummary.own ? (
+            <div className="mt-2 grid grid-cols-2 gap-2">{ownWeeklyMissions.map(renderMissionCard)}</div>
+          ) : (
+            <p className="mt-2 text-sm text-slate-500">Ainda não há visitas concluídas nesta semana. Bora começar com tudo!</p>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+
+  // Só contagens, cada uma levando à sua lista.
+  const renderSellerPortfolioAlerts = () => {
+    const cooling = smartAlerts.items.find((item) => item.id === "cooling_clients");
+    const proposals = smartAlerts.items.find((item) => item.id === "proposals_no_response");
+    const items = [
+      cooling ? { id: "cooling", label: "Clientes esfriando", count: cooling.count, to: cooling.to, unavailable: cooling.unavailable } : null,
+      proposals ? { id: "proposals", label: "Propostas sem retorno", count: proposals.count, to: proposals.to, unavailable: false } : null,
+      collectionClientsCount === null ? null : { id: "collection", label: "Clientes em cobrança", count: collectionClientsCount, to: collectionClientsPath(), unavailable: false }
+    ].filter((item): item is NonNullable<typeof item> => item !== null);
+
+    return (
+      <section className={blockClass}>
+        <h2 className="text-base font-semibold text-slate-900 md:text-lg">Alertas da carteira</h2>
+        <div className="mt-3 grid grid-cols-3 gap-2">
+          {items.map((item) =>
+            item.unavailable || !item.to ? (
+              <div key={item.id} className="rounded-lg border border-slate-200 px-3 py-2">
+                <p className="text-base font-semibold text-slate-400">—</p>
+                <p className="text-xs text-slate-500">{item.label} · indisponível</p>
+              </div>
+            ) : (
+              <Link key={item.id} to={item.to} className="rounded-lg border border-slate-200 px-3 py-2 hover:bg-slate-50">
+                <p className="text-base font-semibold text-slate-900">{item.count.toLocaleString("pt-BR")}</p>
+                <p className="text-xs text-slate-600">{item.label}</p>
+              </Link>
+            )
+          )}
+        </div>
+      </section>
+    );
+  };
 
   const renderCentralDayHero = (showStartRoute: boolean) => (
     <section className="rounded-xl border border-brand-100 bg-brand-50 p-5">
@@ -1027,12 +1270,25 @@ export default function HomePage() {
     </section>
   );
 
+  // Vendedor: a mesma ordem no desktop e no celular, sem os painéis arrastáveis.
+  if (isSeller) {
+    return (
+      <div className={`flex flex-col ${isMobile ? "gap-3 pb-4" : "gap-4"}`}>
+        {isMobile ? null : renderTopBanners(false)}
+        {renderCentralDayHero(false)}
+        {renderSellerOperationalAiCard()}
+        {renderSellerTodayList()}
+        {renderSellerAgendaToday()}
+        {renderSellerRhythm()}
+        {renderSellerPortfolioAlerts()}
+      </div>
+    );
+  }
+
   if (isMobile) {
     return (
       <div className="flex flex-col gap-5 pb-4">
         {renderCentralDayHero(false)}
-        {renderSellerOperationalAiCard()}
-        {renderSellerCollectionBlock()}
         {renderCommercialInsightsCard()}
 
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -1145,32 +1401,9 @@ export default function HomePage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <section className="space-y-2">
-        {alerts.showOverdueFollowUpAlert && (
-          <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-medium text-red-700">
-            Atenção: existem follow-ups vencidos.
-          </div>
-        )}
-        {alerts.showUpcomingMeetingBanner && (
-          <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm font-medium text-blue-700">
-            Lembrete: você possui {reminders.upcomingMeetingsCount} reunião(ões) nas próximas 2 horas.
-          </div>
-        )}
-        {alerts.showNoActivitiesWarning && (
-          <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-medium text-amber-700">
-            Você ainda não registrou atividades hoje.
-          </div>
-        )}
-        {routineMetrics.shouldShowWarning && (
-          <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-medium text-amber-700">
-            Atenção leve: você está abaixo de 50% da rotina comercial esperada até este horário.
-          </div>
-        )}
-      </section>
+      {renderTopBanners(true)}
 
       {renderCentralDayHero(true)}
-      {renderSellerOperationalAiCard()}
-      {renderSellerCollectionBlock()}
       {renderCommercialInsightsCard()}
 
       <section className="flex flex-col gap-4">
@@ -1184,31 +1417,7 @@ export default function HomePage() {
           </div>
 
           <div className="space-y-3">
-            {routineMetrics.metrics.map((metric) => {
-              const barColorClass = metric.achieved ? "bg-green-500" : "bg-red-500";
-              const clampedProgress = Math.max(0, Math.min(metric.progressPercent, 100));
-
-              return (
-                <div key={metric.label} className="rounded-lg border border-slate-200 px-3 py-2">
-                  <div className="mb-1 flex items-center justify-between gap-2 text-sm">
-                    <p className="font-medium text-slate-900">{metric.label}</p>
-                    <p className="text-slate-600">
-                      {metric.realized} /{" "}
-                      {metric.dailyTarget.toLocaleString("pt-BR", {
-                        maximumFractionDigits: 1,
-                        minimumFractionDigits: 1
-                      })}
-                    </p>
-                  </div>
-                  <div className="h-2 rounded-full bg-slate-100">
-                    <div
-                      className={`h-2 rounded-full transition-all ${barColorClass}`}
-                      style={{ width: `${clampedProgress}%` }}
-                    />
-                  </div>
-                </div>
-              );
-            })}
+            {routineMetrics.metrics.map(renderRoutineMetric)}
           </div>
         </article>
 
@@ -1224,30 +1433,7 @@ export default function HomePage() {
           {weeklyMissionSummary.own ? (
             <>
               <div className="grid gap-2 sm:grid-cols-2">
-                {ownWeeklyMissions.map((mission) => {
-                  const progress = Number(mission.progress || 0);
-                  const target = Number(mission.target || 0);
-                  const safePercent = target > 0 ? Math.max(0, Math.min((progress / target) * 100, 100)) : mission.done ? 100 : 0;
-                  const motivational = mission.done
-                    ? "Concluída! Excelente consistência. 🚀"
-                    : `Falta ${Math.max(target - progress, 0)} para completar.`;
-
-                  return (
-                    <div key={mission.key} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                      <p className="text-xs font-medium text-slate-700">{mission.title}</p>
-                      <p className="mt-1 text-lg font-bold text-slate-900">
-                        {progress}/{target}
-                      </p>
-                      <div className="mt-1 h-1.5 rounded-full bg-slate-200">
-                        <div className="h-1.5 rounded-full bg-brand-600" style={{ width: `${safePercent}%` }} />
-                      </div>
-                      {mission.key === "visits_25" && mission.medal && (
-                        <p className={`mt-1 text-xs font-medium ${getMedalTone(mission.medal)}`}>{getMedalLabel(mission.medal)}</p>
-                      )}
-                      <p className={`mt-1 text-xs ${mission.done ? "text-emerald-700" : "text-slate-600"}`}>{motivational}</p>
-                    </div>
-                  );
-                })}
+                {ownWeeklyMissions.map(renderMissionCard)}
               </div>
 
               {/* Vendedor recebe só a própria linha da API: sem Top 3 dos colegas. */}
