@@ -14,6 +14,8 @@ type PlanningDay = {
   label: string;
   existingAppointments: Appointment[];
   suggestedActions: PlanningAction[];
+  // Google Maps com as cidades do dia na ordem; mais de um quando o dia passa de 4 cidades.
+  routeLinks?: string[];
 };
 
 type WeeklyPlan = {
@@ -22,6 +24,7 @@ type WeeklyPlan = {
   weekEnd: string;
   summary: string;
   workload: { plannedActions: number; visits: number; calls: number; proposals: number; followUps: number; capacityStatus: "balanced" | "light" | "overloaded" };
+  visitRadiusKm?: number;
   days: PlanningDay[];
   warnings: string[];
   source: "ai" | "deterministic";
@@ -104,6 +107,7 @@ function ActionCard({ action, date, sellerId, canAct, scheduling, onSchedule }: 
         <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-800">Sugerido</span>
         <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${priorityClass[action.priorityLevel]}`}>{action.priorityLevel} · {action.score} pontos</span>
         <span className="rounded-full border border-slate-200 px-2 py-0.5 text-[11px] font-semibold text-slate-600">{actionLabel[action.type]}</span>
+        {action.outsideTerritory ? <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800">Fora do território</span> : null}
       </div>
       <h4 className="mt-2 text-sm font-semibold text-slate-900">{action.title}</h4>
       <p className="mt-1 text-xs text-slate-600"><strong>Motivo:</strong> {action.reason}</p>
@@ -123,6 +127,20 @@ function ActionCard({ action, date, sellerId, canAct, scheduling, onSchedule }: 
         {open ? <Link to={open} className="inline-flex items-center rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">Abrir</Link> : null}
       </div>
     </article>
+  );
+}
+
+// Abre o Google Maps (app no celular) com a rota; sem chave e sem mapa embutido.
+function RouteLinks({ links }: { links?: string[] }) {
+  if (!links?.length) return null;
+  return (
+    <div className="flex flex-wrap gap-2">
+      {links.map((link, index) => (
+        <a key={link} href={link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-brand-700 hover:bg-slate-50">
+          {links.length === 1 ? "Ver rota do dia" : `Rota ${index + 1}/${links.length}`}
+        </a>
+      ))}
+    </div>
   );
 }
 
@@ -198,6 +216,7 @@ export default function WeeklyCommercialPlan({ sellerId, weekStart }: Props) {
           <p className="text-xs font-semibold uppercase tracking-wide text-brand-700">Planejamento Comercial Inteligente</p>
           <h3 className="text-lg font-semibold text-slate-900">Próximos dias úteis: {formatDay(plan.weekStart)} a {formatDay(plan.weekEnd)}</h3>
           <p className="mt-1 text-sm text-slate-600">{plan.summary}</p>
+          {plan.visitRadiusKm ? <p className="mt-1 text-xs text-slate-500">Visitas do mesmo dia em cidades a até {plan.visitRadiusKm} km uma da outra (em linha reta).</p> : null}
         </div>
         <span className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600">{plan.source === "ai" ? "Sugestão da IA" : "Sugestão do sistema"}</span>
       </div>
@@ -215,6 +234,7 @@ export default function WeeklyCommercialPlan({ sellerId, weekStart }: Props) {
           <div key={day.date} className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-2">
             <h4 className="text-sm font-semibold text-slate-900">{day.label}</h4>
             <p className="text-[11px] text-slate-500">{formatDay(day.date)}</p>
+            <RouteLinks links={day.routeLinks} />
             {day.existingAppointments.map((appointment) => <div key={appointment.id} className="rounded-lg border border-sky-200 bg-sky-50 p-2 text-xs text-sky-900"><strong>Já agendado</strong><br />{formatHour(appointment.startsAt)} · {appointment.title}</div>)}
             {renderActions(day)}
           </div>
@@ -226,6 +246,7 @@ export default function WeeklyCommercialPlan({ sellerId, weekStart }: Props) {
           <details key={day.date} open={openDay === day.date} onToggle={(event) => (event.currentTarget.open ? setOpenDay(day.date) : null)} className="rounded-xl border border-slate-200 bg-slate-50 p-2">
             <summary className="cursor-pointer text-sm font-semibold text-slate-900">{day.label} {formatDay(day.date)} · {day.suggestedActions.length} ações · {day.existingAppointments.length} agendado(s)</summary>
             <div className="mt-2 space-y-2">
+              <RouteLinks links={day.routeLinks} />
               {day.existingAppointments.map((appointment) => <div key={appointment.id} className="rounded-lg border border-sky-200 bg-sky-50 p-2 text-xs text-sky-900"><strong>Já agendado</strong><br />{formatHour(appointment.startsAt)} · {appointment.title}</div>)}
               {renderActions(day)}
             </div>
