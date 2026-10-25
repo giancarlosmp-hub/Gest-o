@@ -37,7 +37,7 @@ import { DASHBOARD_REFRESH_EVENT } from "../lib/dashboardRefresh";
 import { normalizeActivityType, toLabel } from "../constants/activityTypes";
 import DonutLegendChips from "../components/DonutLegendChips";
 import { brazilMonthKey, brazilTodayKey } from "../lib/brazilDate";
-import { portfolioStatusClientsPath } from "../lib/clientListFilters";
+import { abcClientsPath, portfolioStatusClientsPath } from "../lib/clientListFilters";
 import { buildSellerWeekMetrics, sellerWeekRanges, type SellerWeekData, type SellerWeekDiscipline } from "../lib/sellerWeek";
 
 ChartJS.register(
@@ -720,9 +720,9 @@ export default function DashboardPage() {
     () =>
       buildInteractiveDoughnutOptions(
         {
-          0: "/clientes?classe=A",
-          1: "/clientes?classe=B",
-          2: "/clientes?classe=C",
+          0: abcClientsPath("A", debouncedSellerId),
+          1: abcClientsPath("B", debouncedSellerId),
+          2: abcClientsPath("C", debouncedSellerId),
         },
         {
           tooltip: {
@@ -742,7 +742,7 @@ export default function DashboardPage() {
           },
         }
       ),
-    [abcTotal, buildInteractiveDoughnutOptions]
+    [abcTotal, buildInteractiveDoughnutOptions, debouncedSellerId]
   );
 
   const salesPace = useMemo(() => {
