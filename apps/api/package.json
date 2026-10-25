@@ -54,6 +54,7 @@
     "test:dashboard-portfolio-ranking": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/routes/dashboardPortfolioRanking.http.test.ts",
     "test:seller-score-scope": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/routes/sellerScoreScope.http.test.ts",
     "test:agenda-discipline": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/routes/agendaDiscipline.http.test.ts",
+    "test:seller-dashboard-scope": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/routes/sellerDashboardScope.http.test.ts",
     "test:client-portfolio-status-filter": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/routes/clientPortfolioStatusFilter.http.test.ts",
     "test:client-list-filters": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/routes/clientListFilters.http.test.ts",
     "test:portfolio-without-purchase-cooling": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/routes/portfolioWithoutPurchaseCooling.http.test.ts",
