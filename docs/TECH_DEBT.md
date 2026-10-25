@@ -929,3 +929,29 @@ Pendente (fora deste PR):
 - A prévia do KML/KMZ continua bloqueando a importação inteira quando há conflito com vendedor ativo.
 - Para um nome ambíguo, só dá para escolher candidato livre (ou já vinculado); candidato de outro vendedor aparece
   desabilitado.
+
+### TD-PLANNING-VISIT-PROXIMITY — planejamento semanal agrupava visitas só pelo nome igual da cidade
+
+**Resolvido no código, aguardando deploy.** O planejamento da Agenda colocava no mesmo dia visitas em cidades distantes
+(ex.: Francisco Beltrão e Pitanga, 203 km em linha reta). Decisões do Giancarlos de 25/10/2026: dados públicos do IBGE
+(sem Google, sem custo); raio ajustável, começando em 70 km em linha reta, medido entre todas as visitas do dia; visita
+fora do território agrupada normalmente, com aviso; gerente e diretor alteram o raio; rota por link do Google Maps.
+
+- Conferência dos clientes ativos com o catálogo (SELECT só leitura de 25/10/2026, só UF, cidade e contagem): 2.175
+  clientes; 2.116 achados; 25 com "d oeste" sem apóstrofo, resolvidos pela normalização; 24 fora de PR/SC/MS (SP, MG,
+  RS), sem coordenada; 10 com UF ou nome a corrigir no ERP (lista abaixo), sem coordenada até a correção.
+- Cadastro do ERP a corrigir (não corrigido no CRM; o sistema não adivinha a UF): PR "caarapó" (5), PR "naviraí" (3) e
+  PR "sete quedas" (1), municípios do MS; PR "são sebastião" (1), não existe no PR.
+
+Pendente (fora deste PR):
+
+- O centroide é o centro geométrico do município, não a sede; em municípios grandes (principalmente MS) a distância
+  real até a cidade pode ser bem diferente.
+- Roteiro com várias paradas usa só a cidade do compromisso (ou da primeira parada) no agrupamento e na rota.
+- Compromisso da agenda e atividade sem cliente não têm UF: o município é achado pelo nome quando é único em PR/SC/MS ou
+  desempatado pelo território; senão fica sem coordenada. Atividade com cidade própria usa a UF do cliente.
+- As visitas que ficam "sem dia" (`unallocatedPriorities`) não aparecem na tela do planejamento.
+- O link da rota é montado na API; depois de "Agendar" para outro dia, a rota do dia de origem só se atualiza ao
+  recarregar.
+- A chave `planning.visitClusterRadiusKm` é única no `AppConfig` (vale para a empresa toda, não por tenant), como as
+  demais configurações.
