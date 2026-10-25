@@ -4,8 +4,8 @@ import { once } from "node:events";
 // Dados fictícios. Dashboard na visão do vendedor: nenhuma rota que o Dashboard chama entrega dados de
 // colegas ao vendedor, e "Minha semana" bate com a regra planejado × concluído da Agenda. Os fakes aplicam
 // os filtros de vendedor que a rota manda (como o banco faria); rotas que calculam sobre o time e filtram
-// a resposta recebem o time inteiro. Relógio fixo: sexta 06/11/2026 12:00 de Brasília, depois do corte.
-const FIXED_NOW = Date.parse("2026-11-06T15:00:00.000Z");
+// a resposta recebem o time inteiro. Relógio fixo: quarta 04/11/2026 15:00 de Brasília, depois do corte.
+const FIXED_NOW = Date.parse("2026-11-04T18:00:00.000Z");
 const RealDate = Date;
 class FixedDate extends RealDate {
   constructor(...args: unknown[]) {
@@ -26,9 +26,12 @@ const { signAccessToken } = await import("../utils/jwt.js");
 type Row = Record<string, any>;
 const br = (dayTime: string) => new Date(`${dayTime}:00.000-03:00`);
 const MONTH = "2026-11";
-// Semanas como o Dashboard pede (segunda a domingo): a atual e a anterior.
-const CURRENT_WEEK = { from: "2026-11-02", to: "2026-11-08" };
-const PREVIOUS_WEEK = { from: "2026-10-26", to: "2026-11-01" };
+// Períodos como o Dashboard pede numa quarta: segunda a quarta desta semana e da semana passada.
+const CURRENT_WEEK = { from: "2026-11-02", to: "2026-11-04" };
+const PREVIOUS_WEEK = { from: "2026-10-26", to: "2026-10-28" };
+// Semanas inteiras do /reports/weekly-visits (Execução Comercial), que continua contando pela dueDate.
+const CURRENT_MONDAY = "2026-11-02";
+const PREVIOUS_MONDAY = "2026-10-26";
 
 const users: Row[] = [
   { id: "director-x", name: "Diretora Ficticia", role: "diretor", isActive: true },
@@ -51,26 +54,36 @@ const event = (sellerId: string, type: string, status: string, start: string, en
 });
 
 const agendaEvents: Row[] = [
-  // Semana atual, vendedor A.
+  // Semana atual até hoje (quarta), vendedor A.
   event("seller-a", "roteiro_visita", "agendado", "2026-11-03T08:00", "2026-11-03T18:00", {
     stops: [stop("realizada", "2026-11-03T10:00"), stop("realizada", "2026-11-04T09:00"), stop("nao_realizada"), stop(null)]
   }),
   event("seller-a", "visita", "realizado", "2026-11-04T09:00", "2026-11-04T10:00", { activities: [{ date: br("2026-11-04T10:00") }] }),
-  event("seller-a", "ligacao", "agendado", "2026-11-05T09:00", "2026-11-05T09:30"),
-  event("seller-a", "visita", "agendado", "2026-11-07T09:00", "2026-11-07T10:00"),
-  // Semana anterior, vendedor A.
+  event("seller-a", "ligacao", "agendado", "2026-11-04T11:00", "2026-11-04T11:30"),
+  event("seller-a", "visita", "agendado", "2026-11-04T17:00", "2026-11-04T18:00"),
+  // Quinta desta semana: fora do período (ainda não chegou).
+  event("seller-a", "visita", "agendado", "2026-11-05T09:00", "2026-11-05T10:00"),
+  // Semana passada, segunda a quarta, vendedor A.
   event("seller-a", "visita", "realizado", "2026-10-27T09:00", "2026-10-27T10:00", { activities: [{ date: br("2026-10-27T10:00") }] }),
   event("seller-a", "visita", "nao_realizado", "2026-10-28T09:00", "2026-10-28T10:00"),
+  // Quinta e sexta da semana passada: fora do mesmo período.
+  event("seller-a", "visita", "realizado", "2026-10-29T09:00", "2026-10-29T10:00", { activities: [{ date: br("2026-10-29T10:00") }] }),
+  event("seller-a", "ligacao", "nao_realizado", "2026-10-30T09:00", "2026-10-30T09:30"),
   // Vendedora B: tudo concluído nas duas semanas.
   ...["2026-10-27", "2026-11-03", "2026-11-04"].map((day) =>
     event("seller-b", "visita", "realizado", `${day}T09:00`, `${day}T10:00`, { activities: [{ date: br(`${day}T10:00`) }] })
   )
 ];
 
-// Visitas feitas: A tem 3 na semana atual e 1 na anterior; B tem 27.
-const visit = (ownerSellerId: string, when: string) => ({ id: `act-${ownerSellerId}-${when}`, ownerSellerId, type: "visita", done: true, date: br(when), dueDate: br(when), agendaEventId: null, opportunityId: null, createdAt: br(when) });
+// Visitas concluídas. A: 03/11 e 04/11 no dia previsto; uma prevista para 28/10 e feita em 03/11 (conta na semana em
+// que foi feita); 27/10 no dia previsto; 29/10 (quinta passada, fora do mesmo período). B tem 27.
+const visit = (ownerSellerId: string, when: string, dueWhen = when) => ({ id: `act-${ownerSellerId}-${when}-${dueWhen}`, ownerSellerId, type: "visita", done: true, date: br(when), dueDate: br(dueWhen), agendaEventId: null, opportunityId: null, createdAt: br(when) });
 const activities: Row[] = [
-  ...["2026-11-03T10:00", "2026-11-04T10:00", "2026-11-05T16:00", "2026-10-27T10:00"].map((when) => visit("seller-a", when)),
+  visit("seller-a", "2026-11-03T10:00"),
+  visit("seller-a", "2026-11-04T10:00"),
+  visit("seller-a", "2026-11-03T16:00", "2026-10-28T09:00"),
+  visit("seller-a", "2026-10-27T10:00"),
+  visit("seller-a", "2026-10-29T10:00"),
   ...Array.from({ length: 27 }, (_, index) => visit("seller-b", `2026-11-0${2 + (index % 5)}T${String(8 + (index % 9)).padStart(2, "0")}:00`))
 ];
 
@@ -171,7 +184,7 @@ const get = async (path: string, userId: string) => {
 };
 
 // Todas as rotas que o Dashboard chama (as de ranking só para gestão, mas o vendedor também não pode
-// receber colegas se chamar direto) e as de "Minha semana".
+// receber colegas se chamar direto), as de "Minha semana" e o weekly-visits (Execução Comercial).
 const dashboardRoutes: Array<{ path: string; sellerIds: (json: any) => string[] }> = [
   { path: `/dashboard/summary?month=${MONTH}`, sellerIds: (json) => json.performance.map((row: Row) => row.sellerId) },
   { path: `/dashboard/sales-series?month=${MONTH}`, sellerIds: () => [] },
@@ -180,9 +193,8 @@ const dashboardRoutes: Array<{ path: string; sellerIds: (json: any) => string[] 
   { path: `/activities?month=${MONTH}&done=true`, sellerIds: (json) => json.map((row: Row) => row.ownerSellerId) },
   { path: `/reports/discipline-ranking?from=${CURRENT_WEEK.from}&to=${CURRENT_WEEK.to}`, sellerIds: (json) => json.map((row: Row) => row.sellerId) },
   { path: `/reports/discipline-ranking?from=${PREVIOUS_WEEK.from}&to=${PREVIOUS_WEEK.to}`, sellerIds: (json) => json.map((row: Row) => row.sellerId) },
-  { path: `/reports/weekly-visits?weekStart=${CURRENT_WEEK.from}`, sellerIds: (json) => json.map((row: Row) => row.userId) },
-  { path: `/reports/weekly-visits?weekStart=${PREVIOUS_WEEK.from}`, sellerIds: (json) => json.map((row: Row) => row.userId) },
-  { path: `/reports/weekly-highlights?weekStart=${CURRENT_WEEK.from}`, sellerIds: (json) => Object.values(json).filter(Boolean).map((row: any) => row.sellerId) },
+  { path: `/reports/weekly-visits?weekStart=${CURRENT_MONDAY}`, sellerIds: (json) => json.map((row: Row) => row.userId) },
+  { path: `/reports/weekly-highlights?weekStart=${CURRENT_MONDAY}`, sellerIds: (json) => Object.values(json).filter(Boolean).map((row: any) => row.sellerId) },
   { path: "/reports/consistency", sellerIds: (json) => json.ranking.map((row: Row) => row.sellerId) },
   { path: `/reports/score-monthly?month=${MONTH}`, sellerIds: (json) => json.items.map((row: Row) => row.userId) }
 ];
@@ -209,7 +221,7 @@ try {
     assert.deepEqual(ranking.map((row: Row) => row.sellerId).sort(), ["seller-a", "seller-b"], viewer);
     const score = (await get(`/reports/score-monthly?month=${MONTH}`, viewer)).json.items;
     assert.deepEqual(score.map((row: Row) => [row.userId, row.rank]).sort(), [["seller-a", 2], ["seller-b", 1]], viewer);
-    const visits = (await get(`/reports/weekly-visits?weekStart=${CURRENT_WEEK.from}`, viewer)).json;
+    const visits = (await get(`/reports/weekly-visits?weekStart=${CURRENT_MONDAY}`, viewer)).json;
     assert.deepEqual(visits.map((row: Row) => row.userId).sort(), ["seller-a", "seller-b"], viewer);
   }
 
@@ -242,18 +254,27 @@ try {
       week.from
     );
   }
-  // Semana atual: roteiro com 4 paradas (2 concluídas, 1 não realizada, 1 sem conclusão), visita concluída,
-  // ligação sem conclusão e visita de sábado a fazer. 1 não realizado ≤ 20% de 6 elegíveis: neutro. 3 ÷ 5.
+  // Segunda a quarta desta semana: roteiro com 4 paradas (2 concluídas, 1 não realizada, 1 sem conclusão), visita
+  // concluída, ligação da manhã sem conclusão e visita do fim da tarde a fazer; a visita de quinta fica fora.
+  // 1 não realizado ≤ 20% de 6 elegíveis: neutro. 3 ÷ 5.
   const [current] = (await get(`/reports/discipline-ranking?from=${CURRENT_WEEK.from}&to=${CURRENT_WEEK.to}`, "seller-a")).json;
   assert.deepEqual([current.planned, current.executed, current.notDone, current.unresolved, current.upcoming], [7, 3, 1, 2, 1]);
   assert.equal(Math.round(current.executionRate * 100) / 100, 60);
   // Pontual: 2 de 3 concluídos no mesmo dia planejado.
   assert.equal(Math.round(current.punctualRate * 100) / 100, 66.67);
+  // Segunda a quarta da semana passada: só a visita concluída e a não realizada (quinta e sexta ficam fora).
+  // 1 não realizado, 0,4 neutro (20% de 2): 1 ÷ 1,6.
+  const [previous] = (await get(`/reports/discipline-ranking?from=${PREVIOUS_WEEK.from}&to=${PREVIOUS_WEEK.to}`, "seller-a")).json;
+  assert.deepEqual([previous.planned, previous.executed, previous.notDone, previous.unresolved], [2, 1, 1, 0]);
+  assert.equal(previous.executionRate, 62.5);
 
-  // Visitas da semana: só as do vendedor, atual e anterior.
-  const [currentVisits] = (await get(`/reports/weekly-visits?weekStart=${CURRENT_WEEK.from}`, "seller-a")).json;
-  const [previousVisits] = (await get(`/reports/weekly-visits?weekStart=${PREVIOUS_WEEK.from}`, "seller-a")).json;
-  assert.deepEqual([currentVisits.visitsDone, previousVisits.visitsDone, currentVisits.goal], [3, 1, 25]);
+  // Visitas de "Minha semana" pela data informada (date): a visita prevista para 28/10 e feita em 03/11 conta nesta
+  // semana; a de quinta passada fica fora do mesmo período.
+  assert.deepEqual([current.visitsDone, previous.visitsDone, current.visitGoal], [3, 1, 25]);
+  // O weekly-visits (Execução Comercial) não mudou: conta pela dueDate, semana inteira.
+  const [currentWeekVisits] = (await get(`/reports/weekly-visits?weekStart=${CURRENT_MONDAY}`, "seller-a")).json;
+  const [previousWeekVisits] = (await get(`/reports/weekly-visits?weekStart=${PREVIOUS_MONDAY}`, "seller-a")).json;
+  assert.deepEqual([currentWeekVisits.visitsDone, previousWeekVisits.visitsDone], [2, 3]);
 } finally {
   server.close();
   await (prisma as any).$disconnect?.();
