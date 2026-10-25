@@ -3449,9 +3449,13 @@ router.get("/reports/score-monthly", async (req, res) => {
       rank: index + 1
     }));
 
-  // Vendedor vê só a própria linha: nada dos colegas. O score continua calculado sobre o time.
+  // Vendedor vê só a própria linha: nada dos colegas, nem a posição (rank sai da comparação com eles).
+  // O score continua calculado sobre o time.
   if (role === "vendedor") {
-    return res.json({ month, items: rankedItems.filter((item) => item.userId === req.user!.id) });
+    return res.json({
+      month,
+      items: rankedItems.filter((item) => item.userId === req.user!.id).map(({ rank: _rank, ...item }) => item)
+    });
   }
 
   if (userIdFilter) {
