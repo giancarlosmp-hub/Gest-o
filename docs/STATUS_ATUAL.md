@@ -1,3 +1,20 @@
+# Central do Dia enxuta para o vendedor — código pronto, aguardando deploy — 25/10/2026
+
+- Vendedor, desktop e celular na mesma ordem: "Comece por aqui" (a prioridade nº 1, com Abrir, Registrar interação e
+  WhatsApp), "Minha lista de hoje", "Agenda de hoje", "Meu ritmo" e "Alertas da carteira".
+- "Minha lista de hoje": lista única, sem repetir a oportunidade (ou o cliente, sem oportunidade), juntando as 5
+  prioridades do dia, as oportunidades críticas e os follow-ups vencidos e de hoje, com etiqueta do motivo e "Ver
+  todas". O item de "Comece por aqui" não se repete.
+- "Agenda de hoje": compromissos com status e progresso do roteiro, "Iniciar roteiro", pendências de dias anteriores
+  e, abaixo, as atividades concluídas hoje. "Meu ritmo": Rotina do Dia e Missões da Semana, sem colegas. "Alertas da
+  carteira": só contagens com link (esfriando, propostas sem retorno, em cobrança).
+- Saem do vendedor: a faixa vermelha de follow-ups vencidos, os blocos Oportunidades críticas, Followups pendentes,
+  Prioridades do dia, Alertas Inteligentes e Resumo do Dia, os rótulos "Origem: Agenda/Activities" e os painéis
+  arrastáveis.
+- Todos os perfis: a Rotina Comercial do Dia conta só atividades concluídas hoje, e a lista "Atividades do dia" do
+  celular mostra só as concluídas hoje e as pendentes que vencem hoje. Fora isso, gerente e diretor sem mudança.
+- Sem migration e sem mudança na API. Detalhes e pendências: `TECH_DEBT.md`, “TD-SELLER-CENTRAL-LEAN”.
+
 # Clientes: filtro da Curva ABC (o link do Dashboard passa a funcionar) — código pronto, aguardando deploy — 24/10/2026
 
 - Tela Clientes: filtro "Curva ABC" (todas, A, B, C), lido da URL (`?abc=A`); com o filtro ativo, cada cliente mostra
