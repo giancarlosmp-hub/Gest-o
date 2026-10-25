@@ -38,6 +38,8 @@ const resetData = () => {
   clients = [
     // Cadastro manual antigo, fora da lista (cidade do MS com UF PR) e sem tenant.
     { id: "client-legacy", tenantId: null, ownerSellerId: "seller-a", name: "Cliente Antigo Ficticio", nameNormalized: "cliente antigo ficticio", city: "CAARAPO", cityNormalized: "caarapo", state: "PR", region: "Oeste", code: null, cnpj: null, cnpjNormalized: null, fantasyName: null, isArchived: false },
+    // Cliente do ERP (código fictício): o ERP é dono do cadastro.
+    { id: "client-erp", tenantId: "tenant-a", ownerSellerId: "seller-a", name: "Cliente Erp Ficticio", nameNormalized: "cliente erp ficticio", city: "Toledo", cityNormalized: "toledo", state: "PR", region: "Oeste", code: "90001", cnpj: null, cnpjNormalized: null, fantasyName: null, isArchived: false },
   ];
   opportunities = [];
 };
@@ -129,7 +131,7 @@ try {
     assert.equal(wrong.status, 400);
     assert.equal(wrong.json.message, "Cidade \"CAARAPO\" não encontrada na UF PR. Escolha a UF e a cidade da lista oficial do IBGE.");
     assert.equal((await call("seller-a", "POST", "/api/clients", { ...newClient, city: "Toledo", state: "XX" })).status, 400, "UF inválida");
-    assert.equal(clients.length, 1, "nada gravado");
+    assert.equal(clients.length, 2, "nada gravado");
     const created = await call("seller-a", "POST", "/api/clients", { ...newClient, city: "caarapo", state: "ms" });
     assert.equal(created.status, 201, JSON.stringify(created.json));
     const row = clients.find((client) => client.id === created.json.id)!;
@@ -155,6 +157,22 @@ try {
     legacy = clients.find((client) => client.id === "client-legacy")!;
     assert.deepEqual([legacy.city, legacy.state], ["Caarapó", "MS"]);
     results.push("manual_edit=PASS");
+
+    // Cliente com código do ERP: UF e cidade não mudam pelo CRM (nem para um par válido); outros campos seguem
+    // editáveis e o endereço reenviado com outra grafia não é regravado.
+    const erpMessage = "UF e cidade de cliente com código do ERP vêm somente do ERP e não podem ser alteradas no CRM. Corrija o cadastro no ERP e aguarde a próxima sincronização.";
+    for (const body of [{ city: "Cascavel", state: "PR" }, { city: "Toledo", state: "SP" }, { city: "Cascavel" }, { state: "MS" }]) {
+      const blocked = await call("director-a", "PUT", "/api/clients/client-erp", { name: "Cliente Erp Renomeado", ...body });
+      assert.equal(blocked.status, 400, JSON.stringify(body));
+      assert.equal(blocked.json.message, erpMessage);
+    }
+    let erp = clients.find((client) => client.id === "client-erp")!;
+    assert.deepEqual([erp.name, erp.city, erp.state], ["Cliente Erp Ficticio", "Toledo", "PR"], "nada gravado");
+    const sameAddress = await call("seller-a", "PUT", "/api/clients/client-erp", { name: "Cliente Erp Renomeado", city: "TOLEDO", state: "pr" });
+    assert.equal(sameAddress.status, 200, JSON.stringify(sameAddress.json));
+    erp = clients.find((client) => client.id === "client-erp")!;
+    assert.deepEqual([erp.name, erp.city, erp.state, erp.code], ["Cliente Erp Renomeado", "Toledo", "PR", "90001"], "endereço do ERP intacto");
+    results.push("erp_address_read_only=PASS");
   }
 
   // 5. Importação de clientes: linha com cidade fora da UF não entra e aparece nos erros (prévia e importação).
@@ -175,6 +193,19 @@ try {
     assert.equal(clients.some((client) => client.name === "Cliente Planilha Invalido"), false, "linha inválida não entra");
     const created = clients.find((client) => client.name === "Cliente Planilha Valido")!;
     assert.deepEqual([created.city, created.state, created.tenantId], ["Naviraí", "MS", "tenant-a"]);
+
+    // Cliente do ERP com cidade vazia: a planilha não preenche o endereço (o ERP é dono); sem código, preenche.
+    resetData();
+    Object.assign(clients.find((client) => client.id === "client-erp")!, { city: "", cnpj: "00000000000191", cnpjNormalized: "00000000000191" });
+    Object.assign(clients.find((client) => client.id === "client-legacy")!, { tenantId: "tenant-a", city: "", cnpj: "00000000000272", cnpjNormalized: "00000000000272" });
+    await call("director-a", "POST", "/api/clients/import", { rows: [
+      { ...newClient, name: "Cliente Erp Ficticio", city: "Cascavel", state: "PR", ownerSellerId: "seller-a", cnpj: "00000000000191", fantasyName: "Fantasia Ficticia" },
+      { ...newClient, name: "Cliente Antigo Ficticio", city: "Cascavel", state: "PR", ownerSellerId: "seller-a", cnpj: "00000000000272" },
+    ] });
+    const erpAfterImport = clients.find((client) => client.id === "client-erp")!;
+    assert.deepEqual([erpAfterImport.city, erpAfterImport.state, erpAfterImport.fantasyName], ["", "PR", "Fantasia Ficticia"], "outros campos vazios enriquecidos; endereço do ERP não");
+    const legacyAfterImport = clients.find((client) => client.id === "client-legacy")!;
+    assert.deepEqual([legacyAfterImport.city, legacyAfterImport.state], ["Cascavel", "PR"], "sem código: endereço vazio preenchido");
     results.push("client_import=PASS");
   }
 
@@ -191,7 +222,7 @@ try {
     const preview = await call("director-a", "POST", "/api/opportunities/import", { rows, options: { createClientIfMissing: true, dryRun: true } });
     assert.equal(preview.status, 200, JSON.stringify(preview.json));
     assert.deepEqual(preview.json.rowResults.filter((item: Row) => item.status === "error").map((item: Row) => [item.row, item.reason]), [[2, "client_invalid_address"], [3, "client_invalid_address"]]);
-    assert.equal(clients.length, 1, "prévia não cria cliente");
+    assert.equal(clients.length, 2, "prévia não cria cliente");
 
     const imported = await call("director-a", "POST", "/api/opportunities/import", { rows, options: { createClientIfMissing: true } });
     assert.equal(imported.status, 200, JSON.stringify(imported.json));
@@ -211,6 +242,7 @@ try {
     const quickSource = readFileSync(new URL("../../../web/src/components/clients/QuickCreateClientSection.tsx", import.meta.url), "utf8");
     const importSource = readFileSync(new URL("../../../web/src/components/opportunities/OpportunityImportModal.tsx", import.meta.url), "utf8");
     assert(crudSource.includes("<ClientAddressFields") && quickSource.includes("<ClientAddressFields"));
+    assert(crudSource.includes('const addressFromErp = Boolean(editing && typeof form.code === "string" && form.code.trim());') && crudSource.includes("disabled={addressFromErp}"), "UF e cidade somente leitura para cliente do ERP");
     assert(!quickSource.includes('placeholder="UF"') && !quickSource.includes('placeholder="Cidade"'), "sem texto livre na criação rápida");
     assert(quickSource.includes("resolveOfficialAddress(state, city)"), "consulta de CNPJ preenche UF e cidade oficiais");
     assert(importSource.includes('"cidade_cliente",') && importSource.includes('"uf_cliente",'));

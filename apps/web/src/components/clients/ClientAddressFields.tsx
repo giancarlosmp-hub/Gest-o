@@ -10,11 +10,13 @@ type Props = {
   required?: boolean;
   disabled?: boolean;
   error?: string;
+  // Explicação embaixo da cidade (ex.: endereço que vem do ERP, somente leitura).
+  note?: string;
 };
 
 // UF e cidade do cliente escolhidas da lista oficial do IBGE (sem texto livre). Cadastro antigo com cidade fora da
 // lista aparece como está, marcado, até ser trocado.
-export default function ClientAddressFields({ idPrefix, state, city, onChange, selectClassName, required, disabled, error }: Props) {
+export default function ClientAddressFields({ idPrefix, state, city, onChange, selectClassName, required, disabled, error, note }: Props) {
   const [states, setStates] = useState<string[]>([]);
   const [municipalities, setMunicipalities] = useState<CatalogMunicipality[]>([]);
   const [loading, setLoading] = useState(false);
@@ -74,7 +76,8 @@ export default function ClientAddressFields({ idPrefix, state, city, onChange, s
           {outsideList ? <option value={city}>{city} (fora da lista oficial)</option> : null}
           {municipalities.map((item) => <option key={item.ibgeCode} value={item.city}>{item.city}</option>)}
         </select>
-        {outsideList ? <p className="text-xs text-amber-700">Cidade fora da lista oficial do IBGE para {uf}: escolha a cidade certa.</p> : null}
+        {outsideList && !disabled ? <p className="text-xs text-amber-700">Cidade fora da lista oficial do IBGE para {uf}: escolha a cidade certa.</p> : null}
+        {note ? <p className="text-xs text-slate-500">{note}</p> : null}
         {loadError ? <p className="text-xs text-rose-600">Não foi possível carregar a lista de cidades.</p> : null}
         {error ? <p className="text-xs text-rose-600">{error}</p> : null}
       </div>

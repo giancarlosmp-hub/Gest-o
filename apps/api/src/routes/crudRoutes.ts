@@ -1904,8 +1904,10 @@ const resolveImportUpdateData = (payload: z.infer<typeof clientImportRowSchema>,
   const data: Record<string, unknown> = {};
   const fantasyName = payload.fantasyName?.trim();
 
-  // Cidade e UF andam juntas (par validado no catálogo): cadastro sem uma delas recebe as duas da planilha.
-  if (isMeaningfulImportString(payload.city) && isMeaningfulImportString(payload.state) && (isEmptyValue(existingClient.city) || isEmptyValue(existingClient.state))) {
+  // Cidade e UF andam juntas (par validado no catálogo): cadastro sem uma delas recebe as duas da planilha. Cliente
+  // com código do ERP não: o ERP é dono do endereço.
+  const addressFromErp = Boolean(String(existingClient.code ?? "").trim());
+  if (!addressFromErp && isMeaningfulImportString(payload.city) && isMeaningfulImportString(payload.state) && (isEmptyValue(existingClient.city) || isEmptyValue(existingClient.state))) {
     data.city = payload.city.trim();
     data.state = payload.state.trim();
   }
@@ -4727,6 +4729,8 @@ router.post("/clients/exists-bulk", async (req, res) => {
 
 // O ERP é o dono do código do cliente: só a sincronização de parceiros grava Client.code.
 // Recusa explícita (e não descarte silencioso) para quem ainda enviar o campo.
+const CLIENT_ADDRESS_ERP_ONLY_MESSAGE =
+  "UF e cidade de cliente com código do ERP vêm somente do ERP e não podem ser alteradas no CRM. Corrija o cadastro no ERP e aguarde a próxima sincronização.";
 const CLIENT_CODE_ERP_ONLY_MESSAGE =
   "O código do cliente vem somente do ERP e não pode ser informado nem alterado no CRM. Cadastre o cliente no ERP e aguarde a próxima sincronização.";
 const rejectClientCodeInBody = (req: any, res: any, next: any) => {
@@ -5048,16 +5052,20 @@ router.put("/clients/:id", rejectClientCodeInBody, validateBody(clientSchema.par
     const nextCity = req.body.city ?? old.city;
     const nextState = req.body.state ?? old.state;
     const addressChanged = normalizeState(nextState) !== normalizeState(old.state) || normalizeTerritoryCityKey(nextCity) !== normalizeTerritoryCityKey(old.city);
+    // Cliente com código do ERP: o ERP é dono do cadastro; UF e cidade não mudam pelo CRM.
+    if (addressChanged && old.code?.trim()) return res.status(400).json({ message: CLIENT_ADDRESS_ERP_ONLY_MESSAGE, field: "city" });
     const municipality = addressChanged ? findBrazilMunicipality(nextState, nextCity) : null;
     if (addressChanged && !municipality) return res.status(400).json({ message: invalidClientAddressMessage(nextState, nextCity), field: "city" });
     const address = municipality ? { city: municipality.city, state: municipality.state } : {};
     // Cliente antigo sem tenant recebe o tenant de quem edita, quando ele tem um único tenant ativo (senão segue sem).
     const tenantId = old.tenantId ? null : await resolveUniqueActiveTenantForUser(req.user!.id).catch(() => null);
 
+    // Sem mudança de endereço fica o gravado (o formulário reenvia UF e cidade, às vezes com outra grafia).
+    const { city: _bodyCity, state: _bodyState, ...bodyWithoutAddress } = req.body;
     const mergedClientForValidation = {
       name: req.body.name ?? old.name,
-      city: municipality?.city ?? nextCity,
-      state: municipality?.state ?? nextState,
+      city: municipality?.city ?? old.city,
+      state: municipality?.state ?? old.state,
       cnpj: req.body.cnpj ?? old.cnpj,
       code: req.body.code ?? old.code
     };
@@ -5072,7 +5080,7 @@ router.put("/clients/:id", rejectClientCodeInBody, validateBody(clientSchema.par
 
     const data = await prisma.$transaction(async (tx) => {
       const changed = await tx.client.update({ where: { id: req.params.id }, data: {
-        ...req.body,
+        ...bodyWithoutAddress,
         ...address,
         ...(tenantId ? { tenantId } : {}),
         state: normalized.state,

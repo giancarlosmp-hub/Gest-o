@@ -3,7 +3,8 @@
 - Cadastro e edição manual de clientes com UF e cidade escolhidas de listas (catálogo do IBGE do Brasil inteiro, 5.571
   municípios embutidos no código), gravadas com o nome oficial; a API recusa par fora da lista. Edição de outros campos
   não exige corrigir endereço antigo; cliente sem tenant ganha o tenant de quem edita. A consulta de CNPJ preenche UF e
-  cidade da Receita quando o município está na lista.
+  cidade da Receita quando o município está na lista. Cliente com código do ERP: UF e cidade somente leitura na tela e
+  recusadas pela API (o ERP é dono do cadastro); a planilha também não preenche o endereço dele.
 - Importação de clientes: linha com cidade fora da UF não entra e vai para os erros. Importação de oportunidades com
   "criar cliente": novas colunas `cidade_cliente` e `uf_cliente`; sem par válido o cliente não é criado e a linha vai
   para os erros; cliente criado com tenant (antes: "N/A"/"NA" e sem tenant).

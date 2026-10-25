@@ -2826,6 +2826,8 @@ export default function CrudSimplePage({
                     // UF e cidade do cliente: listas oficiais do IBGE, desenhadas juntas no lugar do campo UF.
                     if (endpoint === "/clients" && f.key === "city") return null;
                     if (endpoint === "/clients" && f.key === "state") {
+                      // Cliente com código do ERP: UF e cidade vêm do ERP (dono do cadastro), somente leitura.
+                      const addressFromErp = Boolean(editing && typeof form.code === "string" && form.code.trim());
                       return (
                         <ClientAddressFields
                           key="address"
@@ -2833,6 +2835,8 @@ export default function CrudSimplePage({
                           state={typeof form.state === "string" ? form.state : ""}
                           city={typeof form.city === "string" ? form.city : ""}
                           required
+                          disabled={addressFromErp}
+                          note={addressFromErp ? "UF e cidade vêm do ERP. Para mudar, corrija o cadastro no ERP e aguarde a próxima sincronização." : undefined}
                           selectClassName="w-full rounded-lg border border-slate-300 p-2 text-slate-800 disabled:bg-slate-100 disabled:text-slate-500"
                           error={formFieldErrors.city || formFieldErrors.state}
                           onChange={({ state, city }) => {
