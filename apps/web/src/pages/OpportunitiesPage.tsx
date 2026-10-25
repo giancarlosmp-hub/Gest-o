@@ -5,6 +5,7 @@ import { MoreHorizontal, Search } from "lucide-react";
 import { isProposalWithoutResponse } from "@salesforce-pro/shared";
 import api from "../lib/apiClient";
 import { isNoResponseFilterInUrl } from "../lib/proposalsNoResponse";
+import { lastContactFormDayOf, lastContactPayloadOf } from "../lib/opportunityLastContact";
 import { formatCurrencyBRL, formatDateBR, formatPercentBR } from "../lib/formatters";
 import { useAuth } from "../context/AuthContext";
 import { triggerDashboardRefresh } from "../lib/dashboardRefresh";
@@ -402,6 +403,8 @@ export default function OpportunitiesPage() {
   const [clients, setClients] = useState<Client[]>([]);
   const [sellerOptions, setSellerOptions] = useState<SellerOption[]>([]);
   const [editing, setEditing] = useState<string | null>(null);
+  // Dia do último contato ao abrir a edição: sem mudança, o campo não é reenviado.
+  const [editingLastContactDay, setEditingLastContactDay] = useState("");
   const [form, setForm] = useState<FormState>(emptyForm);
   const [isOpportunityModalOpen, setIsOpportunityModalOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
@@ -1149,7 +1152,7 @@ export default function OpportunitiesPage() {
       proposalDate: form.proposalEntryDate,
       followUpDate: form.expectedReturnDate,
       expectedCloseDate: form.expectedReturnDate,
-      lastContactAt: form.lastContactAt || undefined,
+      lastContactAt: lastContactPayloadOf(form.lastContactAt, editing ? editingLastContactDay : ""),
       notes: form.notes || undefined,
       clientId: form.clientId,
       ownerSellerId: form.ownerSellerId || undefined,
@@ -1277,6 +1280,7 @@ export default function OpportunitiesPage() {
 
   const onEdit = (item: Opportunity) => {
     setEditing(item.id);
+    setEditingLastContactDay(lastContactFormDayOf(item.lastContactAt));
     setOpportunityModalMode("edit");
     setForm({
       title: item.title,
@@ -1285,7 +1289,7 @@ export default function OpportunitiesPage() {
       probability: item.probability !== null && item.probability !== undefined ? String(item.probability) : "",
       proposalEntryDate: toDateInput(item.proposalDate),
       expectedReturnDate: toDateInput(item.followUpDate || item.expectedCloseDate),
-      lastContactAt: toDateInput(item.lastContactAt),
+      lastContactAt: lastContactFormDayOf(item.lastContactAt),
       crop: item.crop ?? "",
       season: item.season ?? "",
       areaHa: item.areaHa ? String(item.areaHa) : "",
