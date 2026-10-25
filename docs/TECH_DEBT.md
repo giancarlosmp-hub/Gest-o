@@ -954,3 +954,25 @@ Pendente (fora deste PR):
   recarregar.
 - A chave `planning.visitClusterRadiusKm` é única no `AppConfig` (vale para a empresa toda, não por tenant), como as
   demais configurações.
+
+### TD-CLIENT-ADDRESS-IBGE — UF e cidade do cliente em texto livre (cidades do MS gravadas com UF PR)
+
+**Resolvido no código, aguardando deploy.** Diagnóstico de 25/10/2026 (SELECTs só leitura, sem dados de cliente): 10
+clientes ativos com UF PR e cidade de outro estado ou inexistente no PR (Caarapó 5, Naviraí 3, Sete Quedas 1, São
+Sebastião 1) — todos criados à mão no CRM, sem código do ERP, sem tenant e fora do `/partners`; 8 deles em 31/05/2026,
+sem documento e digitados no formulário de Clientes (UF em texto livre). A sincronização de parceiros não é a causa
+(ela grava UF e cidade do ERP quando processa o parceiro). Decisões do Giancarlos de 25/10/2026: catálogo do IBGE do
+Brasil inteiro para o cliente (território segue PR/SC/MS); as duas importações validam o par; script com simulação.
+
+- Script: `node dist/scripts/fixManualClientAddress.js` (simulação) e `--apply --expect=N`. Alvo: clientes não
+  arquivados, sem código do ERP, com par fora da lista; corrige quando o nome existe numa única UF (esperado: os 9 do MS)
+  e preenche o tenant; "São Sebastião" (várias UFs) só no relatório.
+
+Pendente (fora deste PR):
+
+- Clientes sem `tenantId` em produção (SELECT de 25/10/2026, 1 tenant ativo): 1.973 de 5.665 — 71 ativos sem código
+  do ERP, 241 arquivados sem código e 1.661 arquivados com código. O script só cuida dos que têm endereço fora da lista.
+- A rota `POST /companies` (sem uso pelo web) ainda cria cliente com "Não informado"/"NI"; código morto a decidir.
+- Clientes com código do ERP e endereço fora da lista (ex.: "NI" da sincronização) seguem como o ERP manda.
+- A janela de edição de cliente mostra o título "Novo cliente" (título fixo em `App.tsx`).
+- `routeAuthorization.http.test.ts` já falha na `main` (falta simular `erpOrderSync`), sem relação com este PR.
