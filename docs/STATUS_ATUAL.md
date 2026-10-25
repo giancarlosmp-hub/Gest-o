@@ -1,3 +1,16 @@
+# Territórios comerciais: configuração, importação KML/KMZ e transferência — código pronto, aguardando deploy — 25/10/2026
+
+- A configuração e a prévia do KML/KMZ passam a enxergar as cidades gravadas sem `tenantId` (344 em produção, pelo
+  SELECT de 25/10/2026), só quando há um único tenant ativo. As rotas de cadastro manual, lote e "Salvar" passam a
+  gravar o `tenantId`. Script `backfillTerritoryCityTenant` (simulação por padrão; `--apply --expect=N`), não rodado.
+- Importação nunca falha por duplicidade: cidade já vinculada (por IBGE ou nome) aparece como "Já vinculada" e é pulada.
+- Catálogo oficial do IBGE embutido no código (PR 399, SC 295, MS 79), sem depender de rede. Nome que existe em mais
+  de uma UF (ex.: Irati PR/SC): UF escrita no marcador; senão a UF da maioria do arquivo; empate fica "Ambígua" para
+  escolha na prévia. Nome do arquivo com acento correto.
+- Transferência de vendedor inativo: "Serão transferidas" mudam de dono (mesma linha, `tenantId` preenchido); "Já é do
+  destino" tem a linha da origem retirada na confirmação; conflito com terceiro ativo fica na origem e não bloqueia.
+- Sem migration. Detalhes e pendências: `TECH_DEBT.md`, “TD-TERRITORY-CONFIG-TENANT”.
+
 # Filtros "Esfriando" e "Propostas sem retorno" (links dos alertas da Central do Dia) — código pronto, aguardando deploy — 25/10/2026
 
 - Clientes: filtro "Esfriando" na Situação (`?status=esfriando`), pela regra oficial (ativo sem comprar há mais de 9
