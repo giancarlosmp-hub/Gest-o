@@ -19,6 +19,7 @@ import {
   summarizeAgendaToday,
   type CentralAgendaEvent
 } from "../lib/centralDayAgenda";
+import { isActivityDoneToday, isActivityOfToday } from "../lib/centralDayActivities";
 
 type Activity = {
   id: string;
@@ -169,14 +170,6 @@ function getGreeting() {
   return "Boa noite";
 }
 
-function getTodayBoundaries() {
-  const start = new Date();
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(start);
-  end.setDate(end.getDate() + 1);
-  return { start, end };
-}
-
 function getCurrentWeekStartDate() {
   const today = new Date();
   const day = today.getDay();
@@ -201,15 +194,6 @@ function getMonthBusinessDays(date: Date) {
   }
 
   return businessDays;
-}
-
-function isSameDay(dateValue: string, start: Date, end: Date) {
-  const date = new Date(dateValue);
-  return date >= start && date < end;
-}
-
-function getActivityExecutionDate(activity: Pick<Activity, "createdAt" | "dueDate"> & { date?: string }) {
-  return activity.date || activity.createdAt || activity.dueDate;
 }
 
 // Horário exibido: a data informada na atividade (date), não o momento do cadastro.
@@ -447,7 +431,7 @@ export default function HomePage() {
   const inspirationalQuote = useMemo(() => getSessionMotivationalQuote(), [user?.id]);
 
   const { agendaToday, agendaTodaySummary, doneActivitiesToday, visitsToday, pendingFollowUps } = useMemo(() => {
-    const { start, end } = getTodayBoundaries();
+    const now = new Date();
     const visitActivityTypes = new Set(["visita", "visita_tecnica"]);
 
     // Planejado de hoje: todos os compromissos do dia, com o status de cada um.
@@ -455,7 +439,7 @@ export default function HomePage() {
 
     // Feito hoje: todas as atividades concluídas; as visitas ficam numa contagem à parte.
     const doneToday = activities
-      .filter((item) => item.done && isSameDay(getActivityExecutionDate(item), start, end))
+      .filter((item) => isActivityDoneToday(item, now))
       .sort((a, b) => new Date(a.date || a.dueDate).getTime() - new Date(b.date || b.dueDate).getTime());
 
     const toFollowUpDate = (value?: string | null) => {
@@ -464,10 +448,11 @@ export default function HomePage() {
       return Number.isNaN(parsed.getTime()) ? null : parsed;
     };
 
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const pending = opportunities
       .filter((item) => {
         const followUpDate = toFollowUpDate(item.followUpDate);
-        return followUpDate !== null && followUpDate >= start;
+        return followUpDate !== null && followUpDate >= todayStart;
       })
       .sort((a, b) => {
         const aDate = toFollowUpDate(a.followUpDate);
@@ -486,17 +471,17 @@ export default function HomePage() {
     };
   }, [activities, agendaEventsToday, opportunities]);
 
+  // Concluídas hoje e pendentes que vencem hoje; pendente de dia anterior fica fora.
   const activitiesForMobileList = useMemo(() => {
-    const { start, end } = getTodayBoundaries();
+    const now = new Date();
     return activities
-      .filter((item) => isSameDay(getActivityExecutionDate(item), start, end))
+      .filter((item) => isActivityOfToday(item, now))
       .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
   }, [activities]);
 
   const routineMetrics = useMemo(() => {
     const now = new Date();
     const monthBusinessDays = getMonthBusinessDays(now);
-    const { start, end } = getTodayBoundaries();
 
     const targetKeys = {
       ligacao: ["ligacao"],
@@ -511,7 +496,8 @@ export default function HomePage() {
     }, {});
 
     const todayCountByType = activities.reduce<Record<string, number>>((accumulator, item) => {
-      if (!isSameDay(getActivityExecutionDate(item), start, end)) {
+      // Só a atividade concluída hoje conta como realizada.
+      if (!isActivityDoneToday(item, now)) {
         return accumulator;
       }
       const normalized = normalizeActivityType(item.type);
