@@ -31,8 +31,12 @@ import {
   knowledgeDocumentCreateSchema,
   knowledgeDocumentUpdateSchema,
   COOLING_ACTIVE_MONTHS,
+  COOLING_STATUS_FILTER,
   isAbcClass,
   isPortfolioStatus,
+  PROPOSAL_NO_RESPONSE_STAGE,
+  PROPOSAL_NO_RESPONSE_URL_PARAM,
+  proposalNoResponseCutoff,
   isVisibleInRanking,
   rankingSellerName,
   computeDisciplineRates,
@@ -672,6 +676,7 @@ type OpportunityFilterParams = {
   period?: { from?: string; to?: string };
   overdueOnly: boolean;
   excludeArchivedClients: boolean;
+  noResponseOnly: boolean;
 };
 
 const parseOpportunityFilterParams = (req: Request) => {
@@ -701,7 +706,9 @@ const parseOpportunityFilterParams = (req: Request) => {
       period: dateFrom || dateTo ? { from: dateFrom, to: dateTo } : undefined,
       overdueOnly: req.query.overdue === "true" || req.query.overdueOnly === "true" || req.query.somenteAtrasadas === "true",
       // Central do Dia (follow-ups, alertas e "Oportunidades críticas"): sem oportunidades de cliente arquivado.
-      excludeArchivedClients: req.query.excludeArchivedClients === "true"
+      excludeArchivedClients: req.query.excludeArchivedClients === "true",
+      // "Propostas sem retorno" (?noResponse=true): a regra de packages/shared/src/proposalNoResponse.ts.
+      noResponseOnly: req.query[PROPOSAL_NO_RESPONSE_URL_PARAM] === "true"
     } satisfies OpportunityFilterParams
   } as const;
 };
@@ -729,8 +736,25 @@ const buildOpportunityWhere = (req: Request, params: OpportunityFilterParams, to
       OR: [{ title: { contains: params.search, mode: "insensitive" } }, { client: { name: { contains: params.search, mode: "insensitive" } } }]
     });
   }
+  if (params.noResponseOnly) {
+    // Último contato (lastContactAt; sem ele, followUpDate) antes do corte; sem cliente arquivado, como na Central do Dia.
+    const cutoff = proposalNoResponseCutoff(new Date());
+    whereFilters.push(
+      { stage: PROPOSAL_NO_RESPONSE_STAGE },
+      { client: { isArchived: false } },
+      { OR: [{ lastContactAt: { lt: cutoff } }, { lastContactAt: null, followUpDate: { lt: cutoff } }] }
+    );
+  }
 
   return { AND: whereFilters } satisfies Prisma.OpportunityWhereInput;
+};
+
+// "Propostas sem retorno" é sugestão: proposta de cliente em cobrança sai do filtro, como da contagem do alerta.
+const withoutNoResponseCollection = async (where: { AND: Prisma.OpportunityWhereInput[] }, params: OpportunityFilterParams) => {
+  if (!params.noResponseOnly) return where;
+  const candidates = await prisma.opportunity.findMany({ where, distinct: ["clientId"], select: { clientId: true } });
+  const inCollection = candidates.length ? await loadClientIdsInCollection({ id: { in: candidates.map((candidate) => candidate.clientId) } }) : new Set<string>();
+  return inCollection.size ? { AND: [...where.AND, { clientId: { notIn: [...inCollection] } }] } : where;
 };
 
 const getDaysOverdue = (expectedCloseDate: Date, stage: string, todayStart: Date) => {
@@ -2694,14 +2718,14 @@ router.get("/reports/agro-crm", async (req, res) => {
   if ("error" in parsedFilters) return res.status(400).json({ message: parsedFilters.error });
 
   const todayStart = getUtcTodayStart();
-  const where = buildOpportunityWhere(
+  const where = await withoutNoResponseCollection(buildOpportunityWhere(
     req,
     {
       ...parsedFilters.params,
       status: "open"
     },
     todayStart
-  );
+  ), parsedFilters.params);
 
   const opportunities = await prisma.opportunity.findMany({
     where,
@@ -4051,6 +4075,8 @@ router.get("/clients", async (req, res) => {
   const ownerSellerIdFilter = String(req.query.ownerSellerId || req.query.vendedorId || "").trim();
   // Situação da carteira (?status=ativo|inativoRecente|exCliente|prospect); valor inválido é ignorado.
   const portfolioStatusFilter = isPortfolioStatus(req.query.status) ? req.query.status : null;
+  // "Esfriando" (?status=esfriando): a mesma regra e o mesmo recorte do alerta "Clientes esfriando" (listPortfolioSegment).
+  const coolingFilter = req.query.status === COOLING_STATUS_FILTER;
   // Só clientes em cobrança (?cobranca=1), com os dias do título vencido mais antigo e o total vencido.
   const collectionFilter = ["1", "true"].includes(String(req.query.cobranca || ""));
   // Curva ABC (?abc=A|B|C), a mesma do Dashboard; valor inválido é ignorado.
@@ -4100,7 +4126,7 @@ router.get("/clients", async (req, res) => {
     where.AND = [{ id: { in: abcIds } }];
   }
 
-  const hasAdvancedQuery = Boolean(portfolioStatusFilter) || collectionFilter || Boolean(abcFilter) || ["q", "uf", "regiao", "tipo", "ownerSellerId", "vendedorId", "page", "pageSize", "sort"].some(
+  const hasAdvancedQuery = Boolean(portfolioStatusFilter) || coolingFilter || collectionFilter || Boolean(abcFilter) || ["q", "uf", "regiao", "tipo", "ownerSellerId", "vendedorId", "page", "pageSize", "sort"].some(
     (key) => req.query[key] !== undefined
   );
 
@@ -4150,6 +4176,8 @@ router.get("/clients", async (req, res) => {
     // Com "Mostrar arquivados" a lista fica vazia, como no filtro de situação.
     const collection = showArchivedOnly ? new Map() : await loadClientCollection(where, now, orderBy);
     let matchingIds = [...collection.keys()];
+    // Esfriando não inclui cliente em cobrança: com os dois filtros a lista fica vazia.
+    if (coolingFilter) matchingIds = [];
     if (portfolioStatusFilter && matchingIds.length) {
       const [candidates, lastSentCrmOrderByClient] = await Promise.all([
         prisma.client.findMany({ where: { ...where, id: { in: matchingIds } }, select: { id: true, lastPurchaseDate: true, financialProfile: true } }),
@@ -4180,17 +4208,21 @@ router.get("/clients", async (req, res) => {
     });
   }
 
-  if (portfolioStatusFilter) {
+  if (portfolioStatusFilter || coolingFilter) {
     // Mesma regra e mesmo recorte do card do Dashboard (só não arquivados): a situação não é coluna, então
     // classifica em memória os clientes que passam nos demais filtros, na ordem pedida, e pagina os ids.
     // Com "Mostrar arquivados" a lista fica vazia: arquivado nunca entra na carteira.
-    const [candidates, lastSentCrmOrderByClient] = await Promise.all([
+    // Esfriando também tira quem está em cobrança, como o alerta: a contagem do alerta e a lista batem.
+    const [candidates, lastSentCrmOrderByClient, inCollection] = await Promise.all([
       prisma.client.findMany({ where, orderBy, select: { id: true, lastPurchaseDate: true, financialProfile: true } }),
-      loadLastSentCrmOrderByClient(where)
+      loadLastSentCrmOrderByClient(where),
+      coolingFilter && !showArchivedOnly ? loadClientIdsInCollection(where, now) : Promise.resolve(new Set<string>())
     ]);
-    const matchingIds = showArchivedOnly
-      ? []
-      : candidates.filter((client) => portfolioStatusOf(client, lastSentCrmOrderByClient, now) === portfolioStatusFilter).map((client) => client.id);
+    const isMatch = (client: (typeof candidates)[number]) =>
+      coolingFilter
+        ? isClientCoolingActive(client, lastSentCrmOrderByClient, now) && !inCollection.has(client.id)
+        : portfolioStatusOf(client, lastSentCrmOrderByClient, now) === portfolioStatusFilter;
+    const matchingIds = showArchivedOnly ? [] : candidates.filter(isMatch).map((client) => client.id);
     const pageIds = matchingIds.slice((page - 1) * pageSize, page * pageSize);
     const pageRows = pageIds.length
       ? await prisma.client.findMany({ where: { ...where, id: { in: pageIds } }, include: ownerSellerInclude })
@@ -4202,7 +4234,8 @@ router.get("/clients", async (req, res) => {
     return res.json({
       items: pageIds.flatMap((id) => {
         const row = rowsById.get(id);
-        return row ? [{ ...withCollection(row), portfolioStatus: portfolioStatusFilter }] : [];
+        // Esfriando é sempre ativo: o selo mostra a situação.
+        return row ? [{ ...withCollection(row), portfolioStatus: portfolioStatusFilter ?? "ativo" }] : [];
       }),
       total: matchingIds.length,
       page,
@@ -5756,7 +5789,7 @@ router.get("/opportunities", async (req, res) => {
   const page = parsePositiveInt(req.query.page, 1);
   const pageSize = parsePositiveInt(req.query.pageSize, 20);
   const todayStart = getUtcTodayStart();
-  const where = buildOpportunityWhere(req, parsedFilters.params, todayStart);
+  const where = await withoutNoResponseCollection(buildOpportunityWhere(req, parsedFilters.params, todayStart), parsedFilters.params);
 
   if (shouldLogOpportunityDiagnostics) {
     console.info("[diag-opportunities-api][list][request]", {
@@ -5880,7 +5913,7 @@ router.get("/opportunities/summary", async (req, res) => {
   const shouldLogOpportunityDiagnostics = process.env.NODE_ENV !== "production";
 
   const todayStart = getUtcTodayStart();
-  const where = buildOpportunityWhere(req, parsedFilters.params, todayStart);
+  const where = await withoutNoResponseCollection(buildOpportunityWhere(req, parsedFilters.params, todayStart), parsedFilters.params);
 
   if (shouldLogOpportunityDiagnostics) {
     console.info("[diag-opportunities-api][summary][request]", {
@@ -8345,6 +8378,16 @@ const createNextStepAgendaEvent = async (
   return event;
 };
 
+// Último contato da oportunidade (lastContactAt, base de "Proposta sem retorno"): avança para a data da atividade
+// registrada e nunca volta para trás.
+const advanceOpportunityLastContactInTx = async (tx: Prisma.TransactionClient, opportunityId: string | null | undefined, contactAt: Date | null | undefined) => {
+  if (!opportunityId || !contactAt || Number.isNaN(contactAt.getTime())) return;
+  await tx.opportunity.updateMany({
+    where: { id: opportunityId, OR: [{ lastContactAt: null }, { lastContactAt: { lt: contactAt } }] },
+    data: { lastContactAt: contactAt }
+  });
+};
+
 // Toda atividade criada é realizada. Usada pela criação direta e pelo "Concluir" do compromisso.
 const createExecutedActivityInTx = async (
   tx: Prisma.TransactionClient,
@@ -8352,6 +8395,7 @@ const createExecutedActivityInTx = async (
   extras: { nextStep?: NextStepBody; opportunityTitle?: string | null }
 ) => {
   const activity = await tx.activity.create({ data: { ...data, done: true } });
+  await advanceOpportunityLastContactInTx(tx, activity.opportunityId, activity.date);
   if (activity.clientId) {
     await tx.timelineEvent.create({
       data: {
@@ -9346,6 +9390,7 @@ router.patch(["/agenda-events/:id/result", "/agenda/events/:id/result"], validat
       } else {
         await tx.activity.create({ data: activityData });
       }
+      await advanceOpportunityLastContactInTx(tx, activityData.opportunityId, executionDate);
 
       if (req.body.nextStepEvent) {
         const nextStepEvent = await createNextStepAgendaEvent(tx, req.body.nextStepEvent, {

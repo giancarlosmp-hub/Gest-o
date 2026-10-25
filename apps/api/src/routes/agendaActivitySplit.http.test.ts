@@ -35,7 +35,7 @@ const clients: Row[] = [
   { id: "cli-b", name: "Cliente Ficticio B", ownerSellerId: "seller-b" },
 ];
 const opportunities: Row[] = [
-  { id: "opp-open", title: "Oportunidade ficticia aberta", clientId: "cli-a", ownerSellerId: "seller-a", stage: "negociacao" },
+  { id: "opp-open", title: "Oportunidade ficticia aberta", clientId: "cli-a", ownerSellerId: "seller-a", stage: "negociacao", lastContactAt: daysAgo(12) },
   { id: "opp-won", title: "Oportunidade ficticia ganha", clientId: "cli-a", ownerSellerId: "seller-a", stage: "ganho" },
   { id: "opp-other", title: "Oportunidade ficticia de outro cliente", clientId: "cli-b", ownerSellerId: "seller-b", stage: "negociacao" },
 ];
@@ -131,6 +131,11 @@ setModel("tenantMembership", { findMany: async ({ where }: any) => (users.some((
 setModel("opportunity", {
   findFirst: async ({ where }: any) => opportunities.find((row) => matches(row, where)) ?? null,
   findUnique: async ({ where }: any) => byId(opportunities, where.id),
+  updateMany: async ({ where, data }: any) => {
+    const rows = opportunities.filter((row) => matches(row, where));
+    for (const row of rows) Object.assign(row, data);
+    return { count: rows.length };
+  },
 });
 setModel("activity", {
   findMany: async ({ where }: any) => activities.filter((row) => matches(row, where)).map((row) => ({
@@ -236,6 +241,8 @@ try {
   assert.equal(nextStepEvent.title, "Visita: Oportunidade ficticia aberta");
   assert.equal(byId(activities, withNextStep.json.id)!.agendaEventId ?? null, null, "a atividade não fica vinculada ao próprio próximo passo");
   assert(timelineEvents.some((row) => row.description === "Visita agendada: Visita: Oportunidade ficticia aberta"), "próximo passo na timeline");
+  // Último contato da oportunidade avança para a data da atividade registrada.
+  assert.equal(byId(opportunities, "opp-open")!.lastContactAt.toISOString(), "2026-10-23T14:00:00.000Z", "POST /activities avança o último contato");
   const pastNextStep = await call("POST", "/activities", "seller-a", activityBody({ nextStep: { type: "ligacao", startsAt: "2026-10-22T13:00:00.000Z" } }));
   assert.equal(pastNextStep.status, 400);
   assert.equal(pastNextStep.json.message, "O próximo passo não pode ficar em dia passado.");
@@ -250,6 +257,9 @@ try {
   const openWithReason = await call("POST", "/activities", "seller-a", activityBody({ opportunityId: "opp-open", noNextStepReason: "Cliente ficticio pediu para aguardar" }));
   assert.equal(openWithReason.status, 201);
   assert.equal(byId(activities, openWithReason.json.id)!.noNextStepReason, "Cliente ficticio pediu para aguardar");
+  const olderActivity = await call("POST", "/activities", "seller-a", activityBody({ opportunityId: "opp-open", noNextStepReason: "Motivo ficticio", date: "2026-10-20T14:00:00.000Z" }));
+  assert.equal(olderActivity.status, 201);
+  assert.equal(byId(opportunities, "opp-open")!.lastContactAt.toISOString(), "2026-10-23T14:00:00.000Z", "atividade mais antiga não volta o último contato");
   assert.equal((await call("POST", "/activities", "seller-a", activityBody({ opportunityId: "opp-won" }))).status, 201);
   results.push("open_opportunity_requires_reason=PASS");
 
@@ -268,6 +278,7 @@ try {
   );
   assert.equal(completed.json.agendaEvent.linkedActivityId, createdByComplete.id);
   assert.equal(byId(agendaEvents, completed.json.nextStepAgendaEventId)!.type, "proposta");
+  assert.equal(byId(opportunities, "opp-open")!.lastContactAt.getTime(), NOW, "Concluir avança o último contato");
   assert.equal((await call("POST", "/agenda/events/evt-call/complete", "seller-a", { description: "De novo" })).status, 400, "já concluído");
   const linked = await call("POST", "/agenda/events/evt-link/complete", "seller-a", { activityId: "act-free" });
   assert.equal(linked.status, 201);
@@ -362,6 +373,7 @@ try {
     "oportunidade de outro cliente"
   );
   const eventsBeforeStop = agendaEvents.length;
+  byId(opportunities, "opp-open")!.lastContactAt = daysAgo(10);
   const stop1 = await call("PATCH", "/agenda-events/stop-1/result", "seller-a", {
     status: "realizada",
     summary: "Visita ficticia feita",
@@ -375,8 +387,9 @@ try {
   const stopVisit = activities.find((row) => row.agendaEventId === "evt-route" && String(row.description).includes("[AUTO_AGENDA_STOP:stop-1]"))!;
   assert.deepEqual([stopVisit.type, stopVisit.done, stopVisit.opportunityId, stopVisit.notes], ["visita", true, "opp-open", "Visita ficticia feita"]);
   assert.equal(stopVisit.date.toISOString(), "2026-10-23T13:50:00.000Z", "visita na hora do check-out");
+  assert.equal(byId(opportunities, "opp-open")!.lastContactAt.toISOString(), "2026-10-23T13:50:00.000Z", "resultado da parada avança o último contato");
   assert.equal(byId(agendaEvents, "evt-route")!.status, "agendado", "faltam paradas");
-  results.push("done_requires_check_in_and_summary=PASS stop_next_step=PASS");
+  results.push("done_requires_check_in_and_summary=PASS stop_next_step=PASS last_contact_advances=PASS");
 
   const notDoneNoReason = await call("PATCH", "/agenda-events/stop-2/result", "seller-a", { status: "nao_realizada" });
   assert.equal(notDoneNoReason.status, 400);
