@@ -1,3 +1,5 @@
+import { COOLING_STATUS_FILTER } from "@salesforce-pro/shared";
+
 // Filtros da lista de clientes: nomes que GET /clients lê, parâmetros vindos da URL e links do Dashboard.
 export type ClientQuickFilters = {
   uf: string;
@@ -54,6 +56,9 @@ export const withUrlFilters = (current: URLSearchParams, values: Record<string, 
 // Fatia do donut "Carteira de clientes": com vendedor escolhido, a lista abre na carteira dele.
 export const portfolioStatusClientsPath = (status: string, sellerId?: string) =>
   `/clientes?${withUrlFilters(new URLSearchParams(), { status, ownerSellerId: sellerId ?? "" }).toString()}`;
+
+// Alerta "Clientes esfriando" da Central do Dia: a lista com o filtro de situação "Esfriando".
+export const coolingClientsPath = () => portfolioStatusClientsPath(COOLING_STATUS_FILTER);
 
 // Fatia do donut "Curva ABC de clientes": mesma regra de vendedor do donut da carteira.
 export const abcClientsPath = (abc: string, sellerId?: string) =>

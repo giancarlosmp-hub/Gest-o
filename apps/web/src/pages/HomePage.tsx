@@ -1,3 +1,4 @@
+import { isProposalWithoutResponse, proposalDaysWithoutContact } from "@salesforce-pro/shared";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Bot, CalendarClock, CheckSquare, Clock3, GripVertical, MessageCircleWarning, RefreshCw, SunMoon, UsersRound } from "lucide-react";
 import { Link } from "react-router-dom";
@@ -10,7 +11,8 @@ import { normalizeActivityType } from "../constants/activityTypes";
 import { getApiErrorMessage } from "../lib/apiError";
 import { DASHBOARD_REFRESH_EVENT } from "../lib/dashboardRefresh";
 import { brazilMonthKey, brazilTodayKey } from "../lib/brazilDate";
-import { collectionClientsPath, portfolioStatusClientsPath } from "../lib/clientListFilters";
+import { collectionClientsPath, coolingClientsPath } from "../lib/clientListFilters";
+import { countProposalsWithoutResponse, proposalsNoResponsePath } from "../lib/proposalsNoResponse";
 import {
   AGENDA_STATUS_LABEL,
   agendaEventsOfToday,
@@ -553,7 +555,6 @@ export default function HomePage() {
   const pipelineOfDay = useMemo(() => {
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const noResponseDays = 7;
     const msPerDay = 1000 * 60 * 60 * 24;
 
     const getDayDiff = (dateValue?: string | null) => {
@@ -577,10 +578,8 @@ export default function HomePage() {
           return { ...item, priorityType: "opportunity_overdue" as const, daysLate: expectedCloseLateDays };
         }
 
-        const stage = String(item.stage || "").toLowerCase();
-        const noActionDays = getDayDiff(item.lastContactAt || item.followUpDate);
-        if (stage === "proposta" && noActionDays >= noResponseDays) {
-          return { ...item, priorityType: "proposal_no_response" as const, daysLate: noActionDays };
+        if (isProposalWithoutResponse(item, now)) {
+          return { ...item, priorityType: "proposal_no_response" as const, daysLate: proposalDaysWithoutContact(item, now)! };
         }
 
         return null;
@@ -612,7 +611,6 @@ export default function HomePage() {
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const tomorrow = new Date(today);
     tomorrow.setDate(today.getDate() + 1);
-    const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
 
     const toValidDate = (value?: string | null) => {
       if (!value) return null;
@@ -634,13 +632,8 @@ export default function HomePage() {
       return closeIsLate && (noFollowUp || followUpAfterToday);
     }).length;
 
-    const proposalsNoResponse = opportunities.filter((item) => {
-      const stage = String(item.stage || "").toLowerCase();
-      if (stage !== "proposta") return false;
-      const lastActivityDate = toValidDate(item.lastActivityAt || item.updatedAt || item.lastContactAt || item.followUpDate);
-      if (!lastActivityDate) return false;
-      return now.getTime() - lastActivityDate.getTime() > sevenDaysMs;
-    }).length;
+    // Mesma regra da etiqueta da "Minha lista de hoje" e do filtro da tela de Oportunidades, sem cliente em cobrança.
+    const proposalsNoResponse = countProposalsWithoutResponse(opportunities, now);
 
     const items: SmartAlertItem[] = [
       {
@@ -662,7 +655,7 @@ export default function HomePage() {
         label: "Propostas sem retorno",
         helper: "Propostas sem interação há mais de 7 dias.",
         count: proposalsNoResponse,
-        to: "/oportunidades?status=open&stage=proposta"
+        to: proposalsNoResponsePath()
       },
       {
         id: "cooling_clients",
@@ -671,7 +664,7 @@ export default function HomePage() {
           ? "Alerta indisponível no momento."
           : "Clientes ativos há mais de 9 meses sem comprar.",
         count: coolingClients.count,
-        to: portfolioStatusClientsPath("ativo"),
+        to: coolingClientsPath(),
         unavailable: coolingClients.unavailable
       }
     ];
