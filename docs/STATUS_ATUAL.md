@@ -1,3 +1,15 @@
+# Filtros "Esfriando" e "Propostas sem retorno" (links dos alertas da Central do Dia) — código pronto, aguardando deploy — 25/10/2026
+
+- Clientes: filtro "Esfriando" na Situação (`?status=esfriando`), pela regra oficial (ativo sem comprar há mais de 9
+  meses), sem arquivados e sem clientes em cobrança, combinável com os demais filtros. O link "Clientes esfriando" da
+  Central do Dia (vendedor e gestão) abre essa lista; a contagem do alerta bate com a lista.
+- Oportunidades: filtro "Propostas sem retorno" (`?noResponse=true`) com uma regra só para a contagem do alerta, a
+  etiqueta da "Minha lista de hoje" e o filtro: etapa proposta, último contato há mais de 7 dias de Brasília, sem
+  cliente em cobrança nem arquivado.
+- Registrar atividade com oportunidade (direta, "Concluir" e parada de roteiro) passa a atualizar o último contato da
+  oportunidade, sem nunca voltar a data. Script de histórico pronto (`backfillOpportunityLastContact`), não rodado.
+- Sem migration. Detalhes e pendências: `TECH_DEBT.md`, “TD-COOLING-PROPOSALS-FILTERS”.
+
 # Central do Dia enxuta para o vendedor — código pronto, aguardando deploy — 25/10/2026
 
 - Vendedor, desktop e celular na mesma ordem: "Comece por aqui" (a prioridade nº 1, com Abrir, Registrar interação e
