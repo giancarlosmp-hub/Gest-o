@@ -6,8 +6,8 @@
 - Oportunidades: filtro "Propostas sem retorno" (`?noResponse=true`) com uma regra só para a contagem do alerta, a
   etiqueta da "Minha lista de hoje" e o filtro: etapa proposta, último contato há mais de 7 dias de Brasília, sem
   cliente em cobrança nem arquivado.
-- Registrar atividade com oportunidade (direta, "Concluir" e parada de roteiro) passa a atualizar o último contato da
-  oportunidade, sem nunca voltar a data. Script de histórico pronto (`backfillOpportunityLastContact`), não rodado.
+- Registrar atividade com oportunidade (direta, "Concluir", parada de roteiro e contato por WhatsApp) passa a
+  atualizar o último contato da oportunidade, sem nunca voltar a data; editar a oportunidade também só avança a data. Script de histórico pronto (`backfillOpportunityLastContact`), não rodado.
 - Sem migration. Detalhes e pendências: `TECH_DEBT.md`, “TD-COOLING-PROPOSALS-FILTERS”.
 
 # Central do Dia enxuta para o vendedor — código pronto, aguardando deploy — 25/10/2026

@@ -845,9 +845,10 @@ mais, sem cobrança) e do `pipelineOfDay` (dia do aparelho). Decisões do Gianca
   pelo filtro `actionToday` da tela de Oportunidades e, como corte (`proposalNoResponseCutoff`), pelo filtro
   `GET /opportunities?noResponse=true` (e `/opportunities/summary`). O filtro tira cliente arquivado e cliente em
   cobrança, como a contagem. Na tela de Oportunidades, caixa "Propostas sem retorno" (painel e lista), lida da URL.
-- Origem do último contato: ao registrar atividade com oportunidade (`POST /activities`, "Concluir" do compromisso e
-  resultado "realizada" da parada de roteiro), a API leva `Opportunity.lastContactAt` para a data da atividade quando
-  ela é mais recente (`advanceOpportunityLastContactInTx`, `updateMany` condicional: nunca volta a data).
+- Origem do último contato: ao registrar atividade com oportunidade (`POST /activities`, "Concluir" do compromisso,
+  resultado "realizada" da parada de roteiro e contato por WhatsApp), a API leva `Opportunity.lastContactAt` para a
+  data da atividade quando ela é mais recente (`advanceOpportunityLastContactInTx`, `updateMany` condicional: nunca
+  volta a data).
 - Histórico: `apps/api/src/scripts/backfillOpportunityLastContact.ts`, simulação por padrão (transação READ ONLY, só
   contagens) e `--apply --expect=N` (transação serializável, grava só se o total for N). Não foi rodado.
 
@@ -857,14 +858,22 @@ atividades, então não mudam na prática. Mudam: `opportunityInsight` e a mensa
 (`opportunitySalesMessage`, "N dias sem retorno"), que leem só `lastContactAt` e a timeline: a visita de parada de
 roteiro (que não grava timeline) passa a contar; e o "Último contato" do painel da oportunidade mostra a data real.
 
-Testes (dados fictícios): `test:cooling-proposals-filters` e `test:backfill-opportunity-last-contact` (API),
-`test:agenda-activity-split` estendido (API) e `test:proposals-no-response` (web). Não rodam no CI.
+Testes (dados fictícios): `test:cooling-proposals-filters`, `test:backfill-opportunity-last-contact` e
+`test:opportunity-last-contact-edit` (API), `test:agenda-activity-split` estendido (API), `test:proposals-no-response`
+e `test:opportunity-last-contact` (web). Não rodam no CI.
 
 Pendente (fora deste PR):
-- `POST /assistant-whatsapp/contact` cria atividade realizada com oportunidade e não avança `lastContactAt` (não
-  estava entre os três caminhos pedidos); o script de histórico conta essas atividades.
-- O formulário da oportunidade reenvia `lastContactAt` como data sem hora (meia-noite UTC = 21h do dia anterior em
-  Brasília): editar a oportunidade pode voltar o último contato em até um dia. "Nunca voltar" vale só para a atividade.
+- (Resolvido no mesmo PR: o contato por WhatsApp também avança `lastContactAt`; o formulário da oportunidade mostra o
+  dia de Brasília, só envia o campo quando o usuário muda o dia, com a hora atual de Brasília
+  (`apps/web/src/lib/opportunityLastContact.ts`), e `PUT /opportunities/:id` só avança a data: anterior ou vazia é
+  ignorada, e o resto da edição é gravado.)
+- Não existe fluxo para gerente ou diretor corrigir o último contato para uma data anterior: hoje ninguém volta a data
+  por edição. Se for preciso, criar uma correção explícita (com registro de quem corrigiu).
+- A importação de oportunidades (`POST /opportunities/import`, atualização de oportunidade existente) ainda grava o
+  `lastContactAt` da planilha e pode voltar a data.
+- Segurança, anterior a este PR: `PUT /opportunities/:id` lê e atualiza a oportunidade só pelo id, sem o escopo do
+  vendedor (`sellerWhere`) nem do tenant; o `GET` e o `DELETE` filtram. Um vendedor que souber o id edita a
+  oportunidade de outro. Corrigir em PR próprio.
 - A tela Clientes lê da URL só situação, vendedor, ABC e cobrança; UF, região e tipo não (o link com `uf=` não filtra).
 - Tela de Oportunidades: `overdue` e `noResponse` da URL só ligam o filtro; voltar no navegador não o desliga.
 - `HomePage.tsx`: os campos `updatedAt` e `lastActivityAt` do tipo `Opportunity` não vêm da API (sem uso agora).
