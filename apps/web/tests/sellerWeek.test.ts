@@ -1,17 +1,30 @@
 import assert from "node:assert/strict";
 
-// Aparelho em outro fuso: a semana continua sendo de segunda a domingo em Brasília. Dados fictícios.
+// Aparelho em outro fuso: os períodos continuam em dias de Brasília. Dados fictícios.
 process.env.TZ = "Asia/Tokyo";
 
 const { buildSellerWeekMetrics, sellerWeekRanges } = await import("../src/lib/sellerWeek");
 
-// Sexta, domingo e segunda: a semana atual começa na segunda e a anterior é a semana inteira de antes.
-assert.deepEqual(sellerWeekRanges("2026-11-06"), {
+// Quarta: segunda a quarta desta semana contra segunda a quarta da semana passada.
+assert.deepEqual(sellerWeekRanges("2026-11-04"), {
+  current: { from: "2026-11-02", to: "2026-11-04" },
+  previous: { from: "2026-10-26", to: "2026-10-28" },
+});
+// Segunda: compara só a segunda.
+assert.deepEqual(sellerWeekRanges("2026-11-09"), {
+  current: { from: "2026-11-09", to: "2026-11-09" },
+  previous: { from: "2026-11-02", to: "2026-11-02" },
+});
+// Domingo: a semana inteira contra a semana passada inteira.
+assert.deepEqual(sellerWeekRanges("2026-11-08"), {
   current: { from: "2026-11-02", to: "2026-11-08" },
   previous: { from: "2026-10-26", to: "2026-11-01" },
 });
-assert.deepEqual(sellerWeekRanges("2026-11-08").current, { from: "2026-11-02", to: "2026-11-08" });
-assert.deepEqual(sellerWeekRanges("2026-11-09").current, { from: "2026-11-09", to: "2026-11-15" });
+// Virada de mês: segunda 30/11 a quarta 02/12 contra 23/11 a 25/11.
+assert.deepEqual(sellerWeekRanges("2026-12-02"), {
+  current: { from: "2026-11-30", to: "2026-12-02" },
+  previous: { from: "2026-11-23", to: "2026-11-25" },
+});
 
 // Os números da disciplina são os da rota (regra planejado × concluído), sem recálculo no front.
 const current = {
@@ -30,20 +43,20 @@ const byKey = Object.fromEntries(metrics.map((metric) => [metric.key, metric]));
 assert.deepEqual(metrics.map((metric) => metric.key), ["completed", "executionRate", "notDone", "unresolved", "punctualRate", "visits"]);
 assert.equal(byKey.completed.value, "3/7");
 assert.equal(byKey.completed.detail, "1 ainda a fazer");
-assert.equal(byKey.completed.comparison, "Semana anterior: 1/2");
+assert.equal(byKey.completed.comparison, "vs. mesmo período da semana passada: 1/2");
 assert.equal(byKey.completed.tone, "better");
 assert.equal(byKey.executionRate.value, "60,0%");
-assert.equal(byKey.executionRate.comparison, "Semana anterior: 100,0% (−40,0 p.p.)");
+assert.equal(byKey.executionRate.comparison, "vs. mesmo período da semana passada: 100,0% (−40,0 p.p.)");
 assert.equal(byKey.executionRate.tone, "worse");
 // Não realizado igual; sem conclusão subiu, e mais sem conclusão é pior.
-assert.equal(byKey.notDone.comparison, "Semana anterior: 1 (igual)");
+assert.equal(byKey.notDone.comparison, "vs. mesmo período da semana passada: 1 (igual)");
 assert.equal(byKey.notDone.tone, "same");
-assert.equal(byKey.unresolved.comparison, "Semana anterior: 0 (+2)");
+assert.equal(byKey.unresolved.comparison, "vs. mesmo período da semana passada: 0 (+2)");
 assert.equal(byKey.unresolved.tone, "worse");
 assert.equal(byKey.punctualRate.value, "66,7%");
 assert.equal(byKey.visits.value, "3");
 assert.equal(byKey.visits.detail, "Meta semanal: 25");
-assert.equal(byKey.visits.comparison, "Semana anterior: 1 (+2)");
+assert.equal(byKey.visits.comparison, "vs. mesmo período da semana passada: 1 (+2)");
 assert.equal(byKey.visits.tone, "better");
 
 // Sem nada planejado na semana (vendedor sem linha na rota): zeros, sem quebrar.

@@ -140,8 +140,6 @@ type MonthlyScoreResponse = {
   items: MonthlyScoreItem[];
 };
 
-type WeeklyVisitsItem = { userId: string; visitsDone: number; goal: number };
-
 type SellerWeek = { current: SellerWeekData; previous: SellerWeekData };
 
 const palette = {
@@ -418,8 +416,6 @@ export default function DashboardPage() {
         ? Promise.all([
             api.get<SellerWeekDiscipline[]>(`/reports/discipline-ranking?from=${weeks.current.from}&to=${weeks.current.to}`, { signal }),
             api.get<SellerWeekDiscipline[]>(`/reports/discipline-ranking?from=${weeks.previous.from}&to=${weeks.previous.to}`, { signal }),
-            api.get<WeeklyVisitsItem[]>(`/reports/weekly-visits?weekStart=${weeks.current.from}`, { signal }),
-            api.get<WeeklyVisitsItem[]>(`/reports/weekly-visits?weekStart=${weeks.previous.from}`, { signal }),
           ])
         : skip,
     ])
@@ -436,11 +432,13 @@ export default function DashboardPage() {
         setConsistencyReport(consistencyResponse?.data ?? null);
         setMonthlyScore(monthlyScoreResponse?.data ?? null);
         if (sellerWeekResponses) {
-          const [currentDiscipline, previousDiscipline, currentVisits, previousVisits] = sellerWeekResponses;
-          setSellerWeek({
-            current: { discipline: currentDiscipline.data[0] ?? null, visitsDone: currentVisits.data[0]?.visitsDone ?? 0, visitGoal: currentVisits.data[0]?.goal ?? null },
-            previous: { discipline: previousDiscipline.data[0] ?? null, visitsDone: previousVisits.data[0]?.visitsDone ?? 0, visitGoal: previousVisits.data[0]?.goal ?? null },
+          const toWeekData = (row: SellerWeekDiscipline | undefined): SellerWeekData => ({
+            discipline: row ?? null,
+            visitsDone: row?.visitsDone ?? 0,
+            visitGoal: row?.visitGoal ?? null,
           });
+          const [currentDiscipline, previousDiscipline] = sellerWeekResponses;
+          setSellerWeek({ current: toWeekData(currentDiscipline.data[0]), previous: toWeekData(previousDiscipline.data[0]) });
         } else {
           setSellerWeek(null);
         }
@@ -1073,7 +1071,7 @@ export default function DashboardPage() {
   const myWeekCard = (
     <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
       <h3 className="text-base font-semibold text-slate-900">Minha semana</h3>
-      <p className="mt-1 text-sm text-slate-500">Minha disciplina na Agenda: planejado × concluído desta semana (segunda a domingo), comparado com a semana anterior.</p>
+      <p className="mt-1 text-sm text-slate-500">Minha disciplina na Agenda: planejado × concluído desta semana até hoje, comparado com o mesmo período da semana passada.</p>
       <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {sellerWeekMetrics.map((metric) => (
           <div key={metric.key} className={cardClass}>

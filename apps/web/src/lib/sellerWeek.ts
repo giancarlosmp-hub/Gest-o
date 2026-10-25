@@ -2,15 +2,16 @@ import { brazilTodayKey, brazilWeekday, shiftBrazilDayKey } from "./brazilDate";
 import { formatNumberBR, formatPercentBR } from "./formatters";
 
 // "Minha semana" do vendedor no Dashboard: só os números dele, sem posição, medalha ou colegas.
-// A disciplina vem de /reports/discipline-ranking (regra planejado × concluído da Agenda) e as visitas
-// de /reports/weekly-visits; as duas rotas já devolvem ao vendedor só a própria linha.
+// Disciplina (regra planejado × concluído da Agenda) e visitas feitas (pela data informada) vêm de
+// /reports/discipline-ranking, que já devolve ao vendedor só a própria linha.
 
-// Semana de segunda a domingo em dias de Brasília: a atual e a anterior, inteiras.
+// Semana atual de segunda até hoje e o mesmo período da semana passada (segunda até o mesmo dia da
+// semana), em dias de Brasília. Na segunda-feira, compara só a segunda.
 export const sellerWeekRanges = (todayKey = brazilTodayKey()) => {
   const monday = shiftBrazilDayKey(todayKey, -((brazilWeekday(todayKey) + 6) % 7));
   return {
-    current: { from: monday, to: shiftBrazilDayKey(monday, 6) },
-    previous: { from: shiftBrazilDayKey(monday, -7), to: shiftBrazilDayKey(monday, -1) },
+    current: { from: monday, to: todayKey },
+    previous: { from: shiftBrazilDayKey(monday, -7), to: shiftBrazilDayKey(todayKey, -7) },
   };
 };
 
@@ -22,6 +23,8 @@ export type SellerWeekDiscipline = {
   upcoming?: number;
   executionRate: number;
   punctualRate: number;
+  visitsDone?: number;
+  visitGoal?: number;
 };
 
 export type SellerWeekData = {
@@ -44,6 +47,8 @@ export type SellerWeekMetric = {
 
 const EMPTY_DISCIPLINE: SellerWeekDiscipline = { planned: 0, executed: 0, notDone: 0, unresolved: 0, upcoming: 0, executionRate: 0, punctualRate: 0 };
 
+const COMPARISON_LABEL = "vs. mesmo período da semana passada";
+
 const toneOf = (current: number, previous: number, higherIsBetter: boolean): SellerWeekTone => {
   const diff = Math.round((current - previous) * 10) / 10;
   if (diff === 0) return "same";
@@ -54,13 +59,13 @@ const signed = (value: string, diff: number) => (diff > 0 ? `+${value}` : diff <
 
 const countComparison = (current: number, previous: number) => {
   const diff = current - previous;
-  return `Semana anterior: ${formatNumberBR(previous)} (${diff === 0 ? "igual" : signed(formatNumberBR(Math.abs(diff)), diff)})`;
+  return `${COMPARISON_LABEL}: ${formatNumberBR(previous)} (${diff === 0 ? "igual" : signed(formatNumberBR(Math.abs(diff)), diff)})`;
 };
 
 const rateComparison = (current: number, previous: number) => {
   const diff = Math.round((current - previous) * 10) / 10;
   const points = `${formatPercentBR(Math.abs(diff)).replace("%", "")} p.p.`;
-  return `Semana anterior: ${formatPercentBR(previous)} (${diff === 0 ? "igual" : signed(points, diff)})`;
+  return `${COMPARISON_LABEL}: ${formatPercentBR(previous)} (${diff === 0 ? "igual" : signed(points, diff)})`;
 };
 
 export const buildSellerWeekMetrics = (current: SellerWeekData, previous: SellerWeekData): SellerWeekMetric[] => {
@@ -74,7 +79,7 @@ export const buildSellerWeekMetrics = (current: SellerWeekData, previous: Seller
       label: "Concluído / planejado",
       value: `${formatNumberBR(now.executed)}/${formatNumberBR(now.planned)}`,
       detail: upcoming > 0 ? `${formatNumberBR(upcoming)} ainda a fazer` : null,
-      comparison: `Semana anterior: ${formatNumberBR(before.executed)}/${formatNumberBR(before.planned)}`,
+      comparison: `${COMPARISON_LABEL}: ${formatNumberBR(before.executed)}/${formatNumberBR(before.planned)}`,
       tone: toneOf(now.executed, before.executed, true),
     },
     {
