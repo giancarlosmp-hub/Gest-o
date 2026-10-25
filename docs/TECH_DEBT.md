@@ -881,3 +881,51 @@ Pendente (fora deste PR):
 - Os testes `test:agenda-activity-split`, `test:portfolio-without-purchase-cooling`, `test:commercial-automations` e
   o `weeklyPlanActions.http.test.ts` (dentro de `test:portfolio-priority-planning`) não rodam no CI; os três últimos já
   falham na `main` no Windows local, sem relação com este PR.
+
+### TD-TERRITORY-CONFIG-TENANT — cidades sem tenant fora da configuração, KML/KMZ com erro de duplicidade e transferência travada
+
+**Resolvido no código, aguardando deploy.** Sintomas em produção (21/10/2026): vendedores com "0 cidades" na
+configuração, mas com as cidades no mapa; confirmação do KML/KMZ com `Unique constraint failed on the fields:
+(sellerId, state, city)`; município do PR como "não encontrado"; nome do arquivo com acento quebrado; transferência de
+vendedor inativo que não finalizava. Causas e decisões do Giancarlos de 25/10/2026:
+
+- `tenantId` vazio: a configuração, a contagem e a prévia filtravam `SellerTerritoryCity` por `tenantId`; o mapa
+  (`/territories/coverage`) não. Cadastro manual, lote e "Salvar" (`PUT /territories/config/sellers/:id/cities`)
+  gravavam sem `tenantId`. SELECT de 25/10/2026: 344 cidades sem tenant, todas com código IBGE. Agora as rotas gravam
+  o `tenantId`, e a leitura (`getTerritoryTenantScope`) inclui as linhas sem tenant **só quando há exatamente um tenant
+  ativo**; com mais de um, vale apenas o `tenantId` exato. É uma exceção consciente à regra de TD-MT-EXPAND-ROOTS
+  ("NULL não gera fallback"): não há fallback em instalação ambígua e a API não grava nada sozinha.
+- Script `apps/api/src/scripts/backfillTerritoryCityTenant.ts`: preenche o `tenantId` das cidades sem tenant com o
+  único tenant ativo (recusa se houver zero ou mais de um). Simulação por padrão (transação READ ONLY, só contagens) e
+  `--apply --expect=N` (transação serializável, grava só se o total for N; `updateMany` com `tenantId: null`). Não foi
+  rodado; na produção a simulação deve mostrar 344.
+- Duplicidade: a confirmação montava as chaves do vendedor só com linhas do tenant e comparava por IBGE **ou** nome,
+  conforme a linha tivesse código. Agora casa por IBGE ou nome normalizado, pula as já vinculadas (contadas em
+  `alreadyLinked`) e usa `createMany` com `skipDuplicates`.
+- Catálogo: era baixado em tempo de execução de um GeoJSON público (sem 2 municípios de SC e 1 de MS) e, se a rede
+  falhasse, caía para 9 cidades até reiniciar. Agora é a lista do IBGE embutida
+  (`apps/api/src/services/territoryOfficialCities.data.ts`, PR 399, SC 295, MS 79). "Irati" estava no catálogo, mas
+  existe no PR e em SC e a prévia descartava nomes repetidos. Regra: UF escrita no marcador ("Irati - PR", "Irati/PR",
+  "Irati (PR)", "Irati, PR" ou o estado por extenso); senão a UF com mais cidades resolvidas no arquivo; empate fica
+  "Ambígua (PR/SC)" com escolha na prévia. Repetidos entre PR, SC e MS: Bandeirantes, Catanduvas, Douradina, Irati,
+  Palmeira, Rio Negro, Santa Helena e Turvo.
+- Nome do arquivo: o corpo do upload é lido como latin1; o nome agora é decodificado em UTF-8.
+- Transferência: a busca de terceiro usava `OR: [{ ibgeCode: city.ibgeCode || undefined }, …]` (sem IBGE, casaria
+  qualquer linha da UF); o botão Confirmar ficava desabilitado com qualquer conflito; e o token da prévia cobria todas as
+  cidades enquanto a confirmação enviava só as transferíveis. Agora (`planTerritoryTransfer`): cidade que o destino já
+  tem é "Já é do destino" e a linha da origem é **retirada (`deleteMany`) só na confirmação** feita por gerente ou
+  diretor na tela, na mesma transação, com auditoria na timeline; cidade de terceiro ativo é conflito, fica na origem e
+  não bloqueia; as demais mudam de dono na mesma linha, com `tenantId` preenchido. O token cobre as linhas da origem e
+  a classificação de cada uma; qualquer mudança entre prévia e confirmação devolve 409 sem aplicar nada.
+
+Testes (dados fictícios): `test:territory-config` (API: catálogo, rotas HTTP com Prisma simulado e índice único,
+script e `sellerOffboarding`). Não roda no CI.
+
+Pendente (fora deste PR):
+- O mapa da tela Territórios desenha os contornos pelo GeoJSON público (`TerritoriosPage.tsx`): os 3 municípios que
+  faltam nele (Balneário Rincão, Pescaria Brava, Paraíso das Águas) ficam sem contorno no mapa.
+- `findTerritoryCityLinkedToOtherSeller` e `findExistingTerritoryCityByNormalizedKey` (cadastro manual e edição) e o
+  `PUT` de substituição não filtram por tenant; com um único tenant não muda nada.
+- A prévia do KML/KMZ continua bloqueando a importação inteira quando há conflito com vendedor ativo.
+- Para um nome ambíguo, só dá para escolher candidato livre (ou já vinculado); candidato de outro vendedor aparece
+  desabilitado.

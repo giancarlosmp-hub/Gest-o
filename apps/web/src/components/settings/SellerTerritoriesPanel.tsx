@@ -26,7 +26,7 @@ type TerritoryCity = {
 };
 
 type TerritoryCityLink = TerritoryCity & { sellerName: string };
-type TransferPreview = { source: SellerOption; destination: SellerOption; requested: number; transferable: TerritoryCity[]; conflicts: Array<{ cityId: string; city: string; state: string; sellerName: string }>; snapshotToken: string };
+type TransferPreview = { source: SellerOption; destination: SellerOption; requested: number; cityIds: string[]; transferable: TerritoryCity[]; alreadyDestination: TerritoryCity[]; conflicts: Array<{ cityId: string; city: string; state: string; sellerName: string }>; snapshotToken: string };
 
 type OfficialCity = {
   city: string;
@@ -36,7 +36,9 @@ type OfficialCity = {
 
 type DraftCity = TerritoryCity & { draftId: string; isNew?: boolean };
 
-type KmlImportItemStatus = "to_add" | "already_seller" | "inactive_transfer" | "conflict" | "not_found" | "duplicate_file";
+type KmlImportItemStatus = "to_add" | "already_seller" | "inactive_transfer" | "conflict" | "not_found" | "duplicate_file" | "ambiguous";
+
+type KmlImportCandidate = { city: string; state: string; ibgeCode: string | null; status: KmlImportItemStatus; message: string; sellerName?: string };
 
 type KmlImportPreview = {
   fileName: string;
@@ -48,6 +50,7 @@ type KmlImportPreview = {
     linkedToOtherSeller: number;
     transferableFromInactive: number;
     notFound: number;
+    ambiguous?: number;
     duplicateInFile?: number;
     toAdd: number;
   };
@@ -59,6 +62,7 @@ type KmlImportPreview = {
     status: KmlImportItemStatus;
     message: string;
     sellerName?: string;
+    candidates?: KmlImportCandidate[];
   }>;
   citiesToAdd: Array<{ city: string; state: string; ibgeCode?: string | null }>;
   transferableCityIds: string[];
@@ -116,6 +120,8 @@ export default function SellerTerritoriesPanel() {
   const [importPreview, setImportPreview] = useState<KmlImportPreview | null>(null);
   const [importingPreview, setImportingPreview] = useState(false);
   const [confirmingImport, setConfirmingImport] = useState(false);
+  // Escolha de UF dos nomes ambíguos da prévia: índice do item → código IBGE do candidato escolhido.
+  const [ambiguousChoices, setAmbiguousChoices] = useState<Record<number, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [selectedCityIds, setSelectedCityIds] = useState<string[]>([]);
   const [destinationSellerId, setDestinationSellerId] = useState("");
@@ -260,11 +266,17 @@ export default function SellerTerritoriesPanel() {
     if (!transferPreview) return;
     setTransferring(true);
     try {
-      const { data } = await api.post<{ moved: number; idempotent: boolean }>("/territories/config/transfers/confirm", { sourceSellerId: selectedSellerId, destinationSellerId, cityIds: transferPreview.transferable.map((city) => city.id), snapshotToken: transferPreview.snapshotToken });
-      toast.success(data.idempotent ? "Transferência já aplicada anteriormente." : `${data.moved} cidade(s) transferida(s) com auditoria.`);
+      const { data } = await api.post<{ moved: number; removedAlreadyDestination: number; keptConflicts: number; idempotent: boolean }>("/territories/config/transfers/confirm", { sourceSellerId: selectedSellerId, destinationSellerId, cityIds: transferPreview.cityIds, snapshotToken: transferPreview.snapshotToken });
+      toast.success(data.idempotent
+        ? "Nada a transferir: as cidades selecionadas estão em conflito com outro vendedor."
+        : `${data.moved} cidade(s) transferida(s), ${data.removedAlreadyDestination} retirada(s) da origem por já serem do destino, ${data.keptConflicts} conflito(s) mantido(s). Registrado na auditoria.`);
       setTransferPreview(null); setSelectedCityIds([]);
-      const refreshed = await api.get<TerritoryCity[]>("/territories/config/cities", { params: { sellerId: selectedSellerId } });
+      const [refreshed, refreshedSellers] = await Promise.all([
+        api.get<TerritoryCity[]>("/territories/config/cities", { params: { sellerId: selectedSellerId } }),
+        api.get<SellerOption[]>("/territories/config/sellers")
+      ]);
       setCities(refreshed.data.map((city) => ({ ...city, draftId: city.id })));
+      if (Array.isArray(refreshedSellers.data)) setSellers(refreshedSellers.data);
     } catch (err) { toast.error(getApiErrorMessage(err, "Não foi possível confirmar a transferência.")); }
     finally { setTransferring(false); }
   };
@@ -394,6 +406,7 @@ export default function SellerTerritoriesPanel() {
   const resetImportModal = () => {
     setImportFile(null);
     setImportPreview(null);
+    setAmbiguousChoices({});
     setImportingPreview(false);
     setConfirmingImport(false);
   };
@@ -428,6 +441,7 @@ export default function SellerTerritoriesPanel() {
     try {
       const { data } = await api.post<KmlImportPreview>("/territories/config/import-kml-preview", formData);
       setImportPreview(data);
+      setAmbiguousChoices({});
       toast.success(`${data.summary.totalRead} Placemark(s) lido(s) do arquivo.`);
     } catch (err) {
       toast.error(getApiErrorMessage(err, "Não foi possível processar o arquivo KML/KMZ."));
@@ -436,18 +450,26 @@ export default function SellerTerritoriesPanel() {
     }
   };
 
+  // Candidato escolhido para cada nome ambíguo; só entra na importação quando ainda não está com ninguém.
+  const chosenAmbiguousCities = (importPreview?.items ?? []).flatMap((item, index) => {
+    const chosen = item.status === "ambiguous" ? item.candidates?.find((candidate) => candidate.ibgeCode === ambiguousChoices[index]) : undefined;
+    return chosen?.status === "to_add" ? [{ city: chosen.city, state: chosen.state, ibgeCode: chosen.ibgeCode }] : [];
+  });
+  const kmlCitiesToAdd = [...(importPreview?.citiesToAdd ?? []), ...chosenAmbiguousCities];
+
   const confirmKmlImport = async () => {
-    if (!selectedSellerId || !importPreview || (importPreview.citiesToAdd.length === 0 && importPreview.transferableCityIds.length === 0) || importPreview.summary.linkedToOtherSeller > 0) return;
+    if (!selectedSellerId || !importPreview || (kmlCitiesToAdd.length === 0 && importPreview.transferableCityIds.length === 0) || importPreview.summary.linkedToOtherSeller > 0) return;
     setConfirmingImport(true);
     try {
-      const { data } = await api.post<{ created: number; cities: TerritoryCity[] }>("/territories/config/import-kml-confirm", {
+      const { data } = await api.post<{ created: number; alreadyLinked: number; transferred: number; cities: TerritoryCity[] }>("/territories/config/import-kml-confirm", {
         sellerId: selectedSellerId,
-        cities: importPreview.citiesToAdd,
+        cities: kmlCitiesToAdd,
         transferableCityIds: importPreview.transferableCityIds,
         snapshotToken: importPreview.snapshotToken
       });
       setCities(data.cities.map((city) => ({ ...city, draftId: city.id })));
-      toast.success(`${data.created} cidade(s) importada(s) para ${selectedSeller?.name ?? "o vendedor"}.`);
+      const skipped = data.alreadyLinked ? ` ${data.alreadyLinked} já vinculada(s) foram puladas.` : "";
+      toast.success(`${data.created} cidade(s) importada(s) para ${selectedSeller?.name ?? "o vendedor"}.${skipped}`);
       closeImportModal();
     } catch (err) {
       toast.error(getApiErrorMessage(err, "Não foi possível confirmar a importação."));
@@ -462,8 +484,27 @@ export default function SellerTerritoriesPanel() {
     inactive_transfer: "Transferível de vendedor inativo",
     conflict: "Conflito",
     not_found: "Não encontrada",
-    duplicate_file: "Duplicada no arquivo"
+    duplicate_file: "Duplicada no arquivo",
+    ambiguous: "Ambígua"
   };
+
+  const renderAmbiguousChoice = (item: KmlImportPreview["items"][number], index: number) => item.status === "ambiguous" && item.candidates?.length ? (
+    <label className="mt-2 block text-xs font-semibold text-slate-700">
+      UF desta cidade
+      <select
+        className="mt-1 w-full rounded-lg border border-violet-200 bg-white px-2 py-1.5 text-sm"
+        value={ambiguousChoices[index] ?? ""}
+        onChange={(event) => setAmbiguousChoices((current) => ({ ...current, [index]: event.target.value }))}
+      >
+        <option value="">Não importar</option>
+        {item.candidates.map((candidate) => (
+          <option key={candidate.ibgeCode ?? candidate.state} value={candidate.ibgeCode ?? ""} disabled={candidate.status !== "to_add" && candidate.status !== "already_seller"}>
+            {candidate.city}/{candidate.state} — {importStatusLabel[candidate.status]}{candidate.sellerName ? ` (${candidate.sellerName})` : ""}
+          </option>
+        ))}
+      </select>
+    </label>
+  ) : null;
 
   const importStatusClass: Record<KmlImportItemStatus, string> = {
     to_add: "bg-emerald-50 text-emerald-700 ring-emerald-100",
@@ -471,7 +512,8 @@ export default function SellerTerritoriesPanel() {
     inactive_transfer: "bg-blue-50 text-blue-700 ring-blue-100",
     conflict: "bg-red-50 text-red-700 ring-red-100",
     not_found: "bg-amber-50 text-amber-700 ring-amber-100",
-    duplicate_file: "bg-orange-50 text-orange-700 ring-orange-100"
+    duplicate_file: "bg-orange-50 text-orange-700 ring-orange-100",
+    ambiguous: "bg-violet-50 text-violet-700 ring-violet-100"
   };
 
   return (
@@ -712,12 +754,37 @@ export default function SellerTerritoriesPanel() {
 
     {transferPreview ? (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4">
-        <div className="w-full max-w-xl rounded-2xl bg-white p-5 shadow-2xl">
+        <div className="flex max-h-[92vh] w-full max-w-xl flex-col rounded-2xl bg-white p-5 shadow-2xl">
           <h3 className="text-lg font-bold">Confirmar transferência de território</h3>
-          <p className="mt-2 text-sm">Transferir {transferPreview.transferable.length} cidade(s) de <b>{transferPreview.source.name}</b> para <b>{transferPreview.destination.name}</b>.</p>
-          {transferPreview.conflicts.length ? <div className="mt-3 rounded-xl bg-red-50 p-3 text-sm text-red-800">{transferPreview.conflicts.length} conflito(s) real(is) com terceiros não serão transferidos.</div> : null}
-          <ul className="mt-3 max-h-56 overflow-auto text-sm">{transferPreview.transferable.map((city) => <li key={city.id}>{city.city}/{city.state}</li>)}</ul>
-          <div className="mt-5 flex justify-end gap-2"><button onClick={() => setTransferPreview(null)} className="rounded-lg border px-3 py-2">Cancelar</button><button onClick={confirmTransfer} disabled={!transferPreview.transferable.length || transferPreview.conflicts.length > 0 || transferring} className="rounded-lg bg-blue-700 px-3 py-2 font-semibold text-white disabled:bg-slate-300">Confirmar transferência</button></div>
+          <p className="mt-2 text-sm">De <b>{transferPreview.source.name}</b> para <b>{transferPreview.destination.name}</b>: {transferPreview.requested} cidade(s) selecionada(s).</p>
+          <div className="mt-3 grid grid-cols-3 gap-2 text-center text-xs">
+            <div className="rounded-xl bg-emerald-50 p-2 text-emerald-800"><p className="text-lg font-bold">{transferPreview.transferable.length}</p>Serão transferidas</div>
+            <div className="rounded-xl bg-slate-100 p-2 text-slate-700"><p className="text-lg font-bold">{transferPreview.alreadyDestination.length}</p>Já é do destino</div>
+            <div className="rounded-xl bg-red-50 p-2 text-red-800"><p className="text-lg font-bold">{transferPreview.conflicts.length}</p>Conflitos</div>
+          </div>
+          <div className="mt-3 min-h-0 space-y-3 overflow-auto text-sm">
+            {transferPreview.transferable.length ? (
+              <section>
+                <h4 className="font-bold text-emerald-800">Serão transferidas</h4>
+                <ul className="mt-1 text-slate-700">{transferPreview.transferable.map((city) => <li key={city.id}>{city.city}/{city.state}</li>)}</ul>
+              </section>
+            ) : null}
+            {transferPreview.alreadyDestination.length ? (
+              <section>
+                <h4 className="font-bold text-slate-800">Já é do destino</h4>
+                <p className="text-xs text-slate-500">O destino já tem estas cidades; o vínculo da origem será retirado.</p>
+                <ul className="mt-1 text-slate-700">{transferPreview.alreadyDestination.map((city) => <li key={city.id}>{city.city}/{city.state}</li>)}</ul>
+              </section>
+            ) : null}
+            {transferPreview.conflicts.length ? (
+              <section>
+                <h4 className="font-bold text-red-800">Conflitos com outro vendedor ativo</h4>
+                <p className="text-xs text-slate-500">Não serão transferidas e continuam na origem; o restante segue normalmente.</p>
+                <ul className="mt-1 text-slate-700">{transferPreview.conflicts.map((conflict) => <li key={conflict.cityId}>{conflict.city}/{conflict.state} — {conflict.sellerName}</li>)}</ul>
+              </section>
+            ) : null}
+          </div>
+          <div className="mt-5 flex justify-end gap-2"><button onClick={() => setTransferPreview(null)} className="rounded-lg border px-3 py-2">Cancelar</button><button onClick={confirmTransfer} disabled={(!transferPreview.transferable.length && !transferPreview.alreadyDestination.length) || transferring} className="rounded-lg bg-blue-700 px-3 py-2 font-semibold text-white disabled:bg-slate-300">Confirmar transferência</button></div>
         </div>
       </div>
     ) : null}
@@ -749,6 +816,7 @@ export default function SellerTerritoriesPanel() {
                   onChange={(event) => {
                     setImportFile(event.target.files?.[0] ?? null);
                     setImportPreview(null);
+                    setAmbiguousChoices({});
                   }}
                 />
               </label>
@@ -764,7 +832,7 @@ export default function SellerTerritoriesPanel() {
 
             {importPreview ? (
               <>
-                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-6">
+                <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
                   {[
                     ["Total lido", importPreview.summary.totalRead],
                     ["Cidades válidas", importPreview.summary.valid],
@@ -772,7 +840,8 @@ export default function SellerTerritoriesPanel() {
                     ["Conflitos ativos", importPreview.summary.linkedToOtherSeller],
                     ["Transferíveis (inativo)", importPreview.summary.transferableFromInactive],
                     ["Não encontradas", importPreview.summary.notFound],
-                    ["Serão adicionadas", importPreview.summary.toAdd]
+                    ["Ambíguas", importPreview.summary.ambiguous ?? 0],
+                    ["Serão adicionadas", importPreview.summary.toAdd + chosenAmbiguousCities.length]
                   ].map(([label, value]) => (
                     <div key={label} className="rounded-2xl border border-slate-200 bg-white p-3 text-center">
                       <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
@@ -792,7 +861,7 @@ export default function SellerTerritoriesPanel() {
                     <h4 className="text-sm font-bold text-slate-900">Prévia do arquivo {importPreview.fileName}</h4>
                     <span className="text-xs font-semibold text-slate-500">{importPreview.items.length} item(ns)</span>
                   </div>
-                  <div className="max-h-[380px] overflow-auto">
+                  <div className="hidden max-h-[380px] overflow-auto sm:block">
                     <table className="min-w-full divide-y divide-slate-100 text-sm">
                       <thead className="sticky top-0 bg-white">
                         <tr className="text-left text-xs font-bold uppercase tracking-wide text-slate-500">
@@ -816,12 +885,31 @@ export default function SellerTerritoriesPanel() {
                                 {importStatusLabel[item.status]}
                               </span>
                             </td>
-                            <td className="px-4 py-3 text-slate-600">{item.message}</td>
+                            <td className="px-4 py-3 text-slate-600">
+                              {item.message}
+                              {renderAmbiguousChoice(item, index)}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
+                  {/* Celular: um cartão por marcador, com a mesma escolha de UF. */}
+                  <ul className="max-h-[380px] divide-y divide-slate-100 overflow-auto sm:hidden">
+                    {importPreview.items.map((item, index) => (
+                      <li key={`${item.sourceName}-${index}`} className={`space-y-1 px-4 py-3 text-sm ${item.status === "to_add" ? "bg-emerald-50/40" : "bg-white"}`}>
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="font-semibold text-slate-900">{item.sourceName}</p>
+                          <span className={`inline-flex shrink-0 rounded-full px-2 py-1 text-xs font-bold ring-1 ${importStatusClass[item.status]}`}>
+                            {importStatusLabel[item.status]}
+                          </span>
+                        </div>
+                        {item.city ? <p className="text-slate-700">{item.city}/{item.state} <span className="text-slate-500">· IBGE {item.ibgeCode || "—"}</span></p> : null}
+                        <p className="text-slate-600">{item.message}</p>
+                        {renderAmbiguousChoice(item, index)}
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               </>
             ) : null}
@@ -834,7 +922,7 @@ export default function SellerTerritoriesPanel() {
             <button
               type="button"
               onClick={confirmKmlImport}
-              disabled={!importPreview || (importPreview.citiesToAdd.length === 0 && importPreview.transferableCityIds.length === 0) || importPreview.summary.linkedToOtherSeller > 0 || confirmingImport}
+              disabled={!importPreview || (kmlCitiesToAdd.length === 0 && importPreview.transferableCityIds.length === 0) || importPreview.summary.linkedToOtherSeller > 0 || confirmingImport}
               className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
             >
               <CheckCircle2 size={16} /> {confirmingImport ? "Importando..." : "Confirmar importação"}

@@ -8,22 +8,22 @@ const transfer = (rows: City[], source: string, destination: string, selected: s
   return movable.length;
 };
 
-const rows: City[] = [{ id: "a", sellerId: "edirlei" }, { id: "b", sellerId: "edirlei" }, { id: "c", sellerId: "terceiro", thirdParty: true }];
-assert.equal(transfer(rows, "edirlei", "vitor", ["a"]), 1, "transferência parcial");
-assert.equal(rows.find((row) => row.id === "b")?.sellerId, "edirlei", "cidade não selecionada permanece na origem");
-assert.equal(transfer(rows, "edirlei", "vitor", ["a"]), 0, "repetição é idempotente");
-assert.equal(transfer(rows, "edirlei", "vitor", ["b"]), 1, "transferência total restante");
+const rows: City[] = [{ id: "a", sellerId: "vendedor-ficticio-desligado" }, { id: "b", sellerId: "vendedor-ficticio-desligado" }, { id: "c", sellerId: "terceiro", thirdParty: true }];
+assert.equal(transfer(rows, "vendedor-ficticio-desligado", "vendedor-ficticio-destino", ["a"]), 1, "transferência parcial");
+assert.equal(rows.find((row) => row.id === "b")?.sellerId, "vendedor-ficticio-desligado", "cidade não selecionada permanece na origem");
+assert.equal(transfer(rows, "vendedor-ficticio-desligado", "vendedor-ficticio-destino", ["a"]), 0, "repetição é idempotente");
+assert.equal(transfer(rows, "vendedor-ficticio-desligado", "vendedor-ficticio-destino", ["b"]), 1, "transferência total restante");
 assert.equal(rows.find((row) => row.id === "c")?.sellerId, "terceiro", "terceiro é preservado");
 
 const routes = fs.readFileSync(new URL("../routes/crudRoutes.ts", import.meta.url), "utf8");
 const auth = fs.readFileSync(new URL("../middlewares/auth.ts", import.meta.url), "utf8");
 const sync = fs.readFileSync(new URL("./ultraFv3SyncService.ts", import.meta.url), "utf8");
 assert.match(routes, /Território vinculado a vendedor inativo — transferência necessária/, "KML/KMZ sinaliza território inativo");
-assert.match(routes, /status: existing\.seller\.isActive \? "conflict" : "inactive_transfer"/, "prévia distingue conflito ativo de origem inativa transferível");
+assert.match(routes, /const active = linkedRows\.find\(\(row\) => row\.seller\.isActive\);\s*if \(active\) return \{ status: "conflict"[\s\S]{0,400}status: "inactive_transfer"/, "prévia distingue conflito ativo de origem inativa transferível");
 assert.match(routes, /territorySnapshotToken[\s\S]*O território mudou após a prévia/, "snapshot divergente aborta a confirmação");
 assert.match(routes, /cities\.length !== cityIds\.length/, "seleção incompleta aborta sem transferência parcial");
 assert.match(routes, /destinationNow[\s\S]*foi desativado ou mudou de tenant/, "destino é revalidado dentro da transação");
-assert.match(routes, /isActive: false, territoryCities: \{ some: \{ tenantId \} \}/, "inativo com território aparece como origem");
+assert.match(routes, /isActive: false, territoryCities: \{ some: territoryScope \}/, "inativo com território aparece como origem");
 assert.match(routes, /isActive: true, tenantMemberships: \{ some: \{ tenantId, status: "active" \} \}/, "destino exige vendedor ativo no tenant");
 assert.match(routes, /tenantMemberships: \{ create:/, "novo vendedor recebe membership no mesmo cadastro");
 assert.match(routes, /Auditoria de transferência territorial \[\$\{correlationId\}\]/, "auditoria inclui correlação sem credenciais");
