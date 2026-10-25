@@ -127,6 +127,7 @@ import { buildErpHealthcheckResponse } from "../services/erpOrderOperationalSumm
 import { COMMERCIAL_AUTOMATIONS_CONFIG_KEY, DEFAULT_COMMERCIAL_AUTOMATIONS_CONFIG, getCommercialAutomationsStatus, loadCommercialAutomationsHistory, parseCommercialAutomationsConfig, runCommercialAutomations, simulateCommercialAutomations } from "../services/commercialAutomationsService.js";
 import { recordClientCodeChange } from "../services/clientCodeAuditService.js";
 import { buildClientCreditAlert, projectClientForResponse } from "../services/clientErpProjection.js";
+import { findBrazilMunicipality, invalidClientAddressMessage, listBrazilMunicipalities, BRAZIL_STATES } from "../services/brazilMunicipalities.js";
 import { findOfficialTerritoryCity, isTerritoryAllowedState, listOfficialTerritoryCities, normalizeTerritoryCityKey, resolvePlacemarkCities, type OfficialTerritoryCity, type TerritoryAllowedState } from "../services/territoryOfficialCities.js";
 import { ensureInitialKnowledgeDocuments, getKnowledgeContextForAi, searchKnowledgeDocuments } from "../services/knowledgeBaseService.js";
 import { formatTenantReadPilotMarker, isTenantReadPilotActive, runClientListShadowPilot } from "../tenancy/tenantReadPilot.js";
@@ -1532,6 +1533,9 @@ const opportunityImportRowSchema = z
     city: z.string().optional(),
     cidade: z.string().optional(),
     cidade_cliente: z.string().optional(),
+    state: z.string().optional(),
+    uf: z.string().optional(),
+    uf_cliente: z.string().optional(),
     vendedor_responsavel: z.string().optional(),
     email_responsavel: z.string().email().optional(),
     responsavelEmail: z.string().email().optional(),
@@ -1562,6 +1566,7 @@ const opportunityImportRowSchema = z
     ownerSellerName: row.ownerSellerName ?? row.vendedor_responsavel,
     cnpj: row.cnpj ?? row.cnpj_cliente ?? row.documento_cliente,
     city: row.city ?? row.cidade ?? row.cidade_cliente,
+    state: row.state ?? row.uf ?? row.uf_cliente,
     followUpDate: row.followUpDate ?? row.followUp,
     proposalDate: row.proposalDate ?? row.data_entrada,
     expectedCloseDate: row.expectedCloseDate ?? row.fechamento_previsto,
@@ -1899,8 +1904,11 @@ const resolveImportUpdateData = (payload: z.infer<typeof clientImportRowSchema>,
   const data: Record<string, unknown> = {};
   const fantasyName = payload.fantasyName?.trim();
 
-  if (isMeaningfulImportString(payload.city) && isEmptyValue(existingClient.city)) data.city = payload.city.trim();
-  if (isMeaningfulImportString(payload.state) && isEmptyValue(existingClient.state)) data.state = payload.state.trim();
+  // Cidade e UF andam juntas (par validado no catálogo): cadastro sem uma delas recebe as duas da planilha.
+  if (isMeaningfulImportString(payload.city) && isMeaningfulImportString(payload.state) && (isEmptyValue(existingClient.city) || isEmptyValue(existingClient.state))) {
+    data.city = payload.city.trim();
+    data.state = payload.state.trim();
+  }
   if (isMeaningfulImportString(payload.region) && isEmptyValue(existingClient.region)) data.region = payload.region.trim();
   if (fantasyName && isEmptyValue(existingClient.fantasyName)) data.fantasyName = fantasyName;
   if (!existingClient.lastPurchaseDate) {
@@ -2053,7 +2061,13 @@ const buildImportPreview = async (req: any, rows: unknown[]): Promise<ImportPrev
       ownerSellerId = resolveOwnerId(req);
     }
 
-    const payload = { ...parsedRow.data, ownerSellerId };
+    // UF e cidade da lista oficial do IBGE: linha com cidade fora da UF não entra e vai para os erros.
+    const municipality = findBrazilMunicipality(parsedRow.data.state, parsedRow.data.city);
+    if (!municipality) {
+      return { kind: "error" as const, rowNumber, row, error: invalidClientAddressMessage(parsedRow.data.state, parsedRow.data.city) };
+    }
+
+    const payload = { ...parsedRow.data, city: municipality.city, state: municipality.state, ownerSellerId };
     const fp = buildDuplicateFingerprint(payload);
 
     fileFingerprintCount.set(fp, (fileFingerprintCount.get(fp) || 0) + 1);
@@ -2169,6 +2183,7 @@ type OpportunityImportSkippedReason =
   | "duplicate_file"
   | "client_missing"
   | "client_ambiguous"
+  | "client_invalid_address"
   | "owner_missing"
   | "owner_conflict"
   | "invalid_row"
@@ -2244,6 +2259,8 @@ const processOpportunityImport = async ({
   let failed = 0;
 
   const parsedRows = rows.map((rawRow, index) => ({ rowNumber: index + 1, parsed: opportunityImportRowSchema.safeParse(rawRow) }));
+  // Tenant do cliente criado pela importação (único tenant ativo de quem importa).
+  const importTenantId = createClientIfMissing && !dryRun ? await resolveUniqueActiveTenantForUser(req.user!.id).catch(() => null) : null;
 
   const ownerEmails = new Set<string>();
   const ownerNames = new Set<string>();
@@ -2467,16 +2484,27 @@ const processOpportunityImport = async ({
             return { outcome: "error", reason: "client_ambiguous", message: "cliente ambíguo" } as const;
           }
 
-          if (!client && createClientIfMissing) {
+          // Cliente novo só com cidade e UF da lista oficial do IBGE e com o tenant de quem importa; senão a linha vai
+          // para os erros e nada é criado.
+          const newClientMunicipality = !client && createClientIfMissing ? findBrazilMunicipality(row.state, row.city) : null;
+          if (!client && createClientIfMissing && !newClientMunicipality) {
+            return { outcome: "error", reason: "client_invalid_address", message: `cliente novo sem cidade válida: ${invalidClientAddressMessage(row.state, row.city)}` } as const;
+          }
+          if (!client && createClientIfMissing && shouldPersist && !importTenantId) {
+            return { outcome: "error", reason: "client_invalid_address", message: "cliente novo sem empresa (tenant) definida para o usuário" } as const;
+          }
+
+          if (!client && createClientIfMissing && newClientMunicipality) {
             if (shouldPersist) {
               const createdClient = await tx.client.create({
-                data: {
+                data: withClientNormalizedFields({
+                  tenantId: importTenantId,
                   name: clientLookup,
-                  city: "N/A",
-                  state: "NA",
+                  city: newClientMunicipality.city,
+                  state: newClientMunicipality.state,
                   region: "Importação",
                   ownerSellerId
-                },
+                }),
                 select: { id: true, name: true, city: true, state: true, cnpj: true }
               });
               upsertClientCandidate(createdClient);
@@ -2487,7 +2515,8 @@ const processOpportunityImport = async ({
                 const previewClient = toImportClientCandidate({
                   id: `preview-client-${previewCreatedClientsCache.size + 1}`,
                   name: clientLookup,
-                  city: row.city ?? "N/A",
+                  city: newClientMunicipality.city,
+                  state: newClientMunicipality.state,
                   cnpj: row.cnpj
                 });
                 previewCreatedClientsCache.set(previewClientKey, previewClient);
@@ -4054,6 +4083,15 @@ const distinctFilterValues = (values: Array<string | null>) => {
 };
 
 // Opções dos filtros de UF e Região da lista de clientes: o que está gravado na carteira visível (só não arquivados).
+// Lista oficial do IBGE para o endereço do cliente: todas as UFs e, com ?uf=, os municípios dela (cadastro e edição).
+router.get("/clients/address-catalog", async (req, res) => {
+  const uf = typeof req.query.uf === "string" ? req.query.uf : "";
+  res.json({
+    states: BRAZIL_STATES,
+    municipalities: uf ? listBrazilMunicipalities(uf).map(({ city, ibgeCode }) => ({ city, ibgeCode })) : []
+  });
+});
+
 router.get("/clients/filter-options", async (req, res) => {
   const where: Prisma.ClientWhereInput = { ...sellerWhere(req), isArchived: false };
   const [states, regions] = await Promise.all([
@@ -4708,7 +4746,11 @@ router.post("/clients", rejectClientCodeInBody, validateBody(clientSchema), asyn
           ? resolveOwnerId(req, req.body.ownerSellerId)
           : resolveOwnerId(req);
 
-    const payload = withClientNormalizedFields({ ...req.body, tenantId, ownerSellerId });
+    // UF e cidade só da lista oficial do IBGE, gravadas com o nome oficial.
+    const municipality = findBrazilMunicipality(req.body.state, req.body.city);
+    if (!municipality) return res.status(400).json({ message: invalidClientAddressMessage(req.body.state, req.body.city), field: "city" });
+
+    const payload = withClientNormalizedFields({ ...req.body, city: municipality.city, state: municipality.state, tenantId, ownerSellerId });
     await ensureClientIsNotDuplicate({ candidate: payload, scope: { tenantId } });
 
     const data = await prisma.$transaction(async (tx) => {
@@ -5001,10 +5043,21 @@ router.put("/clients/:id", rejectClientCodeInBody, validateBody(clientSchema.par
   }
 
   try {
+    // Mudou a UF ou a cidade: o par tem que estar na lista oficial do IBGE (gravado com o nome oficial). Edição de
+    // outros campos não exige corrigir um endereço antigo.
+    const nextCity = req.body.city ?? old.city;
+    const nextState = req.body.state ?? old.state;
+    const addressChanged = normalizeState(nextState) !== normalizeState(old.state) || normalizeTerritoryCityKey(nextCity) !== normalizeTerritoryCityKey(old.city);
+    const municipality = addressChanged ? findBrazilMunicipality(nextState, nextCity) : null;
+    if (addressChanged && !municipality) return res.status(400).json({ message: invalidClientAddressMessage(nextState, nextCity), field: "city" });
+    const address = municipality ? { city: municipality.city, state: municipality.state } : {};
+    // Cliente antigo sem tenant recebe o tenant de quem edita, quando ele tem um único tenant ativo (senão segue sem).
+    const tenantId = old.tenantId ? null : await resolveUniqueActiveTenantForUser(req.user!.id).catch(() => null);
+
     const mergedClientForValidation = {
       name: req.body.name ?? old.name,
-      city: req.body.city ?? old.city,
-      state: req.body.state ?? old.state,
+      city: municipality?.city ?? nextCity,
+      state: municipality?.state ?? nextState,
       cnpj: req.body.cnpj ?? old.cnpj,
       code: req.body.code ?? old.code
     };
@@ -5020,6 +5073,8 @@ router.put("/clients/:id", rejectClientCodeInBody, validateBody(clientSchema.par
     const data = await prisma.$transaction(async (tx) => {
       const changed = await tx.client.update({ where: { id: req.params.id }, data: {
         ...req.body,
+        ...address,
+        ...(tenantId ? { tenantId } : {}),
         state: normalized.state,
         nameNormalized: normalized.nameNormalized,
         cityNormalized: normalized.cityNormalized,
@@ -6336,7 +6391,9 @@ router.get("/opportunities/import/dictionary", async (_req, res) => {
       { key: "fechamento_previsto", required: false, notes: "aceita yyyy-mm-dd ou dd/mm/aaaa" },
       { key: "ultimo_contato", required: false, notes: "aceita yyyy-mm-dd ou dd/mm/aaaa" },
       { key: "observacoes", required: false },
-      { key: "status", required: false, accepted: ["open", "closed"] }
+      { key: "status", required: false, accepted: ["open", "closed"] },
+      { key: "cidade_cliente", required: false, notes: "obrigatória para criar cliente novo; nome oficial do IBGE" },
+      { key: "uf_cliente", required: false, notes: "obrigatória para criar cliente novo; sigla da UF (ex.: PR)" }
     ],
     tips: [
       "Se 'cliente' não existir e a opção 'Criar cliente automaticamente' estiver ligada, será criado como PJ com dados mínimos.",
