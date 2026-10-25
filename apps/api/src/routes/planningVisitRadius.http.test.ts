@@ -74,6 +74,7 @@ try {
   assert(settingsSource.includes('<PlanningVisitRadiusPanel canEdit={user.role === "diretor" || user.role === "gerente"} />'));
   assert(planSource.includes("Fora do território"));
   assert(planSource.includes("Ver rota do dia"));
+  assert(planSource.includes("Visitas sem dia nesta semana") && planSource.includes("plan?.unallocatedPriorities"), "bloco das visitas sem dia");
   assert(planSource.includes('target="_blank"') && planSource.includes('rel="noopener noreferrer"'));
   results.push("screen=PASS");
 

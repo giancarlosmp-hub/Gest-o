@@ -26,6 +26,8 @@ type WeeklyPlan = {
   workload: { plannedActions: number; visits: number; calls: number; proposals: number; followUps: number; capacityStatus: "balanced" | "light" | "overloaded" };
   visitRadiusKm?: number;
   days: PlanningDay[];
+  // Sugestões que não couberam em nenhum dia (visita longe das visitas dos dias ou dias cheios).
+  unallocatedPriorities?: PlanningAction[];
   warnings: string[];
   source: "ai" | "deterministic";
 };
@@ -172,8 +174,12 @@ export default function WeeklyCommercialPlan({ sellerId, weekStart }: Props) {
 
   const canAct = Boolean(plan && canActOnPlan(user, plan.sellerId));
 
+  // Sem dia: o Agendar e o Registrar partem do primeiro dia com sugestões (hoje em diante), editável no Agendar.
+  const unallocated = plan?.unallocatedPriorities ?? [];
+  const firstOpenDate = plan ? (plan.days.find((day) => day.suggestedActions.length) ?? plan.days[0])?.date ?? plan.weekStart : "";
+
   const openSchedule = (date: string, action: PlanningAction, key: string) =>
-    setDraft({ key, fromDate: date, action, date, time: defaultScheduleTime(action), durationMinutes: action.estimatedDurationMinutes });
+    setDraft({ key, fromDate: date, action, date: date || firstOpenDate, time: defaultScheduleTime(action), durationMinutes: action.estimatedDurationMinutes });
 
   // O compromisso criado sai das sugestões e entra como "Já agendado" no dia escolhido; a API também não sugere de novo.
   const schedule = async ({ key, fromDate, action, date, time, durationMinutes }: ScheduleDraft) => {
@@ -190,7 +196,8 @@ export default function WeeklyCommercialPlan({ sellerId, weekStart }: Props) {
             ? [...day.existingAppointments, { id: created.id, title: created.title || action.title, startsAt: created.startsAt, endsAt: created.endsAt, city: created.city ?? action.city ?? null, type: created.type }]
             : day.existingAppointments,
           suggestedActions: day.date === fromDate ? day.suggestedActions.filter((item) => item !== action) : day.suggestedActions
-        }))
+        })),
+        unallocatedPriorities: current.unallocatedPriorities?.filter((item) => item !== action)
       });
       setDraft(null);
       toast.success("Compromisso agendado.");
@@ -253,6 +260,20 @@ export default function WeeklyCommercialPlan({ sellerId, weekStart }: Props) {
           </details>
         ))}
       </div>
+      {unallocated.length ? (
+        <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50/60 p-3" aria-label="Sem dia nesta semana">
+          <h4 className="text-sm font-semibold text-slate-900">{unallocated.every((action) => action.type === "visit") ? "Visitas sem dia nesta semana" : "Sem dia nesta semana"}</h4>
+          <p className="text-xs text-slate-600">
+            Não couberam nos próximos dias: nenhum dia com visitas a até {plan.visitRadiusKm ?? 70} km ou os dias já estão cheios (3 visitas ou 8 ações por dia). Agende num dia que fizer sentido ou registre o que já foi feito.
+          </p>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {unallocated.map((action, index) => {
+              const key = `sem-dia-${action.clientId || action.opportunityId || index}`;
+              return <ActionCard key={key} action={action} date={firstOpenDate} sellerId={plan.sellerId} canAct={canAct} scheduling={schedulingKey === key} onSchedule={() => openSchedule("", action, key)} />;
+            })}
+          </div>
+        </div>
+      ) : null}
       {draft ? <ScheduleDialog draft={draft} saving={schedulingKey === draft.key} onChange={setDraft} onCancel={() => setDraft(null)} onConfirm={() => void schedule(draft)} /> : null}
     </section>
   );

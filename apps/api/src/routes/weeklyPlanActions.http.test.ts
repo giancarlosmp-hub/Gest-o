@@ -226,8 +226,11 @@ try {
   const activitiesSource = readFileSync(new URL("../../../web/src/pages/ActivitiesPage.tsx", import.meta.url), "utf8");
   for (const label of [">{scheduling ? \"Agendando…\" : \"Agendar\"}</button>", ">Registrar</Link>", ">Abrir</Link>"]) assert(weeklySource.includes(label), label);
   assert(!weeklySource.includes("/whatsapp"), "sem botão de WhatsApp");
-  // Nova atividade é sempre realizada (Agenda planeja, Atividades registram o que foi feito).
-  assert(activitiesSource.includes("  executed: true,\n"));
+  // Nova atividade é sempre realizada (Agenda planeja, Atividades registram o que foi feito): desde o #989 não há campo
+  // "realizada" no formulário; a criação manda done: true fixo e nenhum caminho cria pendente.
+  assert.match(activitiesSource, /api\.post\("\/activities", \{\s*\.\.\.payload,\s*done: true,/, "criação sempre realizada");
+  assert.equal(activitiesSource.match(/api\.post\("\/activities"/g)?.length, 1, "um só caminho de criação");
+  assert.doesNotMatch(activitiesSource, /done: false|done: form\.|done: !/, "nenhuma atividade criada como pendente");
   results.push("screen=PASS");
 
   console.log(`WEEKLY_PLAN_ACTIONS=PASS ${results.join(" ")}`);
