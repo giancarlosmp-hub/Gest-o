@@ -1,3 +1,15 @@
+# Clientes: filtro da Curva ABC (o link do Dashboard passa a funcionar) — código pronto, aguardando deploy — 24/10/2026
+
+- Tela Clientes: filtro "Curva ABC" (todas, A, B, C), lido da URL (`?abc=A`); com o filtro ativo, cada cliente mostra
+  o selo "Classe X" (desktop e celular). As fatias do donut "Curva ABC" do Dashboard abrem a lista filtrada (antes
+  usavam `?classe=`, que não existia).
+- `GET /clients?abc=A|B|C`: mesma regra do Dashboard, numa função só (`loadClientAbcCurve`), no escopo do usuário e
+  combinável com os demais filtros; arquivados fora.
+- Regra da curva ajustada: só clientes da carteira (dono do cliente, sem arquivados), janela até hoje no mês atual,
+  sem compra em 90 dias fica fora de A/B/C (antes contava em C), empate pelo id do cliente.
+- Faturamento real do ERP fica como próximo passo (sem dado do ERP por cliente com data). Detalhes:
+  `TECH_DEBT.md`, “TD-CLIENTS-ABC-FILTER”.
+
 # Dashboard na visão do vendedor: "Minha semana" no lugar dos rankings — código pronto, aguardando deploy — 24/10/2026
 
 - Para o vendedor, o Dashboard não mostra mais Destaques da Semana, Ranking Disciplina, Score Comercial do Mês,

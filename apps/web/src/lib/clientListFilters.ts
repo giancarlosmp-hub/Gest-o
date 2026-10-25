@@ -5,9 +5,11 @@ export type ClientQuickFilters = {
   clientType: string;
   ownerSellerId: string;
   portfolioStatus: string;
+  // Curva ABC (?abc=A|B|C), a mesma do Dashboard.
+  abc: string;
 };
 
-export const EMPTY_CLIENT_QUICK_FILTERS: ClientQuickFilters = { uf: "", region: "", clientType: "", ownerSellerId: "", portfolioStatus: "" };
+export const EMPTY_CLIENT_QUICK_FILTERS: ClientQuickFilters = { uf: "", region: "", clientType: "", ownerSellerId: "", portfolioStatus: "", abc: "" };
 
 export const canFilterClientsBySeller = (role?: string) => role === "diretor" || role === "gerente";
 
@@ -34,6 +36,7 @@ export const buildClientListParams = (options: {
   if (options.canFilterBySeller && filters.ownerSellerId) params.ownerSellerId = filters.ownerSellerId;
   if (options.includeArchived) params.includeArchived = 1;
   if (filters.portfolioStatus) params.status = filters.portfolioStatus;
+  if (filters.abc) params.abc = filters.abc;
   if (options.collection) params.cobranca = 1;
   return params;
 };
@@ -51,6 +54,10 @@ export const withUrlFilters = (current: URLSearchParams, values: Record<string, 
 // Fatia do donut "Carteira de clientes": com vendedor escolhido, a lista abre na carteira dele.
 export const portfolioStatusClientsPath = (status: string, sellerId?: string) =>
   `/clientes?${withUrlFilters(new URLSearchParams(), { status, ownerSellerId: sellerId ?? "" }).toString()}`;
+
+// Fatia do donut "Curva ABC de clientes": mesma regra de vendedor do donut da carteira.
+export const abcClientsPath = (abc: string, sellerId?: string) =>
+  `/clientes?${withUrlFilters(new URLSearchParams(), { abc, ownerSellerId: sellerId ?? "" }).toString()}`;
 
 // Filtro "Em cobrança" da lista de clientes: ?cobranca=1 na URL e na API.
 export const COLLECTION_URL_PARAM = "cobranca";

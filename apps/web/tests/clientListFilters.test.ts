@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   EMPTY_CLIENT_QUICK_FILTERS,
+  abcClientsPath,
   buildClientListParams,
   collectionClientsPath,
   isCollectionFilterInUrl,
@@ -25,9 +26,9 @@ assert.deepEqual(
     page: 3,
     search: "fazenda",
     includeArchived: true,
-    filters: { uf: "SC", region: "Regiao Ficticia", clientType: "PF", ownerSellerId: "seller-a", portfolioStatus: "ativo" },
+    filters: { uf: "SC", region: "Regiao Ficticia", clientType: "PF", ownerSellerId: "seller-a", portfolioStatus: "ativo", abc: "B" },
   }),
-  { page: 3, pageSize: 10, q: "fazenda", uf: "SC", regiao: "Regiao Ficticia", tipo: "PF", ownerSellerId: "seller-a", includeArchived: 1, status: "ativo" }
+  { page: 3, pageSize: 10, q: "fazenda", uf: "SC", regiao: "Regiao Ficticia", tipo: "PF", ownerSellerId: "seller-a", includeArchived: 1, status: "ativo", abc: "B" }
 );
 
 // Vendedor não manda ownerSellerId; filtros vazios não viram parâmetro.
@@ -65,4 +66,11 @@ assert.equal(isCollectionFilterInUrl(new URLSearchParams("")), false);
 assert.equal(collectionClientsPath(), "/clientes?cobranca=1");
 assert.equal(withUrlFilters(new URLSearchParams("cobranca=1&status=ativo"), { cobranca: "" }).toString(), "status=ativo");
 
-console.log("CLIENT_LIST_FILTERS=PASS api_param_names=PASS combined=PASS seller_scope=PASS url_sync=PASS clear=PASS donut_links=PASS collection=PASS");
+// Curva ABC: ?abc= na API e nas fatias do donut do Dashboard (com o vendedor escolhido).
+assert.deepEqual(buildClientListParams({ ...base, filters: { ...EMPTY_CLIENT_QUICK_FILTERS, abc: "A", uf: "PR" } }), { page: 1, pageSize: 10, uf: "PR", abc: "A" });
+assert.equal(abcClientsPath("A"), "/clientes?abc=A");
+assert.equal(abcClientsPath("C", ""), "/clientes?abc=C");
+assert.equal(abcClientsPath("B", "seller-a"), "/clientes?abc=B&ownerSellerId=seller-a");
+assert.equal(withUrlFilters(new URLSearchParams("abc=A&status=ativo"), { abc: "" }).toString(), "status=ativo");
+
+console.log("CLIENT_LIST_FILTERS=PASS api_param_names=PASS combined=PASS seller_scope=PASS url_sync=PASS clear=PASS donut_links=PASS collection=PASS abc=PASS");

@@ -31,6 +31,7 @@ import {
   knowledgeDocumentCreateSchema,
   knowledgeDocumentUpdateSchema,
   COOLING_ACTIVE_MONTHS,
+  isAbcClass,
   isPortfolioStatus,
   isVisibleInRanking,
   rankingSellerName,
@@ -55,6 +56,7 @@ import { calculateOpportunityRisk } from "../services/opportunityInsight.js";
 import { generateSalesMessageResult } from "../services/opportunitySalesMessage.js";
 import { buildClientAiContext, portfolioApproachOf } from "../services/clientAiContext.js";
 import { isClientCoolingActive, listPortfolioSegment, loadLastSentCrmOrderByClient, portfolioStatusOf, resolveLastPurchase } from "../services/clientPortfolioStatus.js";
+import { loadClientAbcCurve } from "../services/clientAbcCurve.js";
 import { aiUsageConfigSchema, saveAiUsageConfig } from "../services/ai/aiUsageLimiter.js";
 import { generateClientSuggestion } from "../services/clientSuggestion.js";
 import { collectionStatusOf, loadClientCollection, loadClientIdsInCollection, withoutClientsInCollection } from "../services/clientCollection.js";
@@ -4051,6 +4053,8 @@ router.get("/clients", async (req, res) => {
   const portfolioStatusFilter = isPortfolioStatus(req.query.status) ? req.query.status : null;
   // Só clientes em cobrança (?cobranca=1), com os dias do título vencido mais antigo e o total vencido.
   const collectionFilter = ["1", "true"].includes(String(req.query.cobranca || ""));
+  // Curva ABC (?abc=A|B|C), a mesma do Dashboard; valor inválido é ignorado.
+  const abcFilter = isAbcClass(req.query.abc) ? req.query.abc : null;
   const page = parsePositiveInt(req.query.page, 1);
   const pageSize = Math.min(parsePositiveInt(req.query.pageSize, 20), 100);
   const orderBy = parseClientSort(String(req.query.sort || "").trim() || undefined);
@@ -4084,7 +4088,19 @@ router.get("/clients", async (req, res) => {
       : {})
   };
 
-  const hasAdvancedQuery = Boolean(portfolioStatusFilter) || collectionFilter || ["q", "uf", "regiao", "tipo", "ownerSellerId", "vendedorId", "page", "pageSize", "sort"].some(
+  if (abcFilter) {
+    // A classe é relativa à carteira inteira do recorte (dono, sem arquivados), não aos demais filtros: classifica
+    // a carteira e restringe a lista aos clientes da classe. Com "Mostrar arquivados" a lista fica vazia.
+    const abcScope: Prisma.ClientWhereInput = {
+      ...sellerWhere(req),
+      ...(req.user?.role !== "vendedor" && ownerSellerIdFilter ? { ownerSellerId: ownerSellerIdFilter } : {})
+    };
+    const { classByClient } = showArchivedOnly ? { classByClient: new Map() } : await loadClientAbcCurve(abcScope, brazilTodayKey());
+    const abcIds = [...classByClient.entries()].filter(([, abcClass]) => abcClass === abcFilter).map(([clientId]) => clientId);
+    where.AND = [{ id: { in: abcIds } }];
+  }
+
+  const hasAdvancedQuery = Boolean(portfolioStatusFilter) || collectionFilter || Boolean(abcFilter) || ["q", "uf", "regiao", "tipo", "ownerSellerId", "vendedorId", "page", "pageSize", "sort"].some(
     (key) => req.query[key] !== undefined
   );
 
@@ -4122,9 +4138,11 @@ router.get("/clients", async (req, res) => {
   const ownerSellerInclude = { ownerSeller: { select: { id: true, name: true } } } as const;
   const now = new Date();
   // Selo "Em cobrança" na lista: calculado dos títulos já carregados de cada linha.
+  // Com o filtro da Curva ABC, todas as linhas são da classe filtrada.
   const withCollection = <T extends { partnerTitles?: unknown; overdueTitlesTotal?: number | null; financialProfile?: unknown }>(row: T) => ({
     ...projectClientForResponse(row),
-    collection: collectionStatusOf(row, now)
+    collection: collectionStatusOf(row, now),
+    ...(abcFilter ? { abcClass: abcFilter } : {})
   });
 
   if (collectionFilter) {

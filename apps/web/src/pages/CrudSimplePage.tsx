@@ -1,7 +1,7 @@
 import { ChangeEvent, FormEvent, MouseEvent, useEffect, useMemo, useState } from "react";
 import { MoreHorizontal } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { CLIENT_IN_COLLECTION_LABEL, PORTFOLIO_STATUSES, PORTFOLIO_STATUS_LABELS, isPortfolioStatus } from "@salesforce-pro/shared";
+import { ABC_CLASSES, CLIENT_IN_COLLECTION_LABEL, PORTFOLIO_STATUSES, PORTFOLIO_STATUS_LABELS, isAbcClass, isPortfolioStatus } from "@salesforce-pro/shared";
 import api from "../lib/apiClient";
 import { toast } from "sonner";
 import { useAuth } from "../context/AuthContext";
@@ -76,6 +76,8 @@ type ClientListItem = {
   };
   // Cliente em cobrança: dias do título de venda vencido mais antigo e total vencido.
   collection?: { oldestOverdueDays: number; overdueTitlesTotal: number } | null;
+  // Classe da Curva ABC: só vem com o filtro ?abc= ativo.
+  abcClass?: string;
   [key: string]: unknown;
 };
 
@@ -286,12 +288,15 @@ export default function CrudSimplePage({
   const urlPortfolioStatus = endpoint === "/clients" && isPortfolioStatus(searchParams.get("status")) ? searchParams.get("status")! : "";
   // Vendedor vem de ?ownerSellerId= (donut do Dashboard com vendedor escolhido); só gerente e diretor.
   const urlOwnerSellerId = endpoint === "/clients" ? ownerSellerIdFromUrl(searchParams, user?.role) : "";
+  // Curva ABC vem de ?abc= (links do donut "Curva ABC" do Dashboard); valor inválido é ignorado.
+  const urlAbc = endpoint === "/clients" && isAbcClass(searchParams.get("abc")) ? searchParams.get("abc")! : "";
   // "Em cobrança" vem de ?cobranca=1 (link da Central do Dia) e fica só na URL.
   const collectionFilter = endpoint === "/clients" && isCollectionFilterInUrl(searchParams);
   const [quickFilters, setQuickFilters] = useState({
     ...EMPTY_CLIENT_QUICK_FILTERS,
     ownerSellerId: urlOwnerSellerId,
-    portfolioStatus: urlPortfolioStatus
+    portfolioStatus: urlPortfolioStatus,
+    abc: urlAbc
   });
   const [clientFilterOptions, setClientFilterOptions] = useState<{ ufs: string[]; regions: string[] }>({ ufs: [], regions: [] });
   const [userStatusFilter, setUserStatusFilter] = useState<"active" | "inactive" | "all">("active");
@@ -434,6 +439,7 @@ export default function CrudSimplePage({
     quickFilters.clientType,
     quickFilters.ownerSellerId,
     quickFilters.portfolioStatus,
+    quickFilters.abc,
     collectionFilter,
     canFilterBySeller,
     showArchived,
@@ -453,6 +459,11 @@ export default function CrudSimplePage({
     setQuickFilters((prev) => (prev.ownerSellerId === urlOwnerSellerId ? prev : { ...prev, ownerSellerId: urlOwnerSellerId }));
   }, [isClientsPage, urlOwnerSellerId]);
 
+  useEffect(() => {
+    if (!isClientsPage) return;
+    setQuickFilters((prev) => (prev.abc === urlAbc ? prev : { ...prev, abc: urlAbc }));
+  }, [isClientsPage, urlAbc]);
+
   // Uma chamada só por mudança: duas chamadas seguidas de setSearchParams se sobrescrevem.
   const updateUrlFilters = (values: Record<string, string>) => {
     setSearchParams((prev) => withUrlFilters(prev, values), { replace: true });
@@ -461,6 +472,11 @@ export default function CrudSimplePage({
   const changePortfolioStatus = (value: string) => {
     setQuickFilters((prev) => ({ ...prev, portfolioStatus: value }));
     updateUrlFilters({ status: value });
+  };
+
+  const changeAbc = (value: string) => {
+    setQuickFilters((prev) => ({ ...prev, abc: value }));
+    updateUrlFilters({ abc: value });
   };
 
   const changeCollectionFilter = (checked: boolean) => updateUrlFilters({ [COLLECTION_URL_PARAM]: checked ? "1" : "" });
@@ -555,6 +571,15 @@ export default function CrudSimplePage({
     );
   };
 
+  const renderAbcBadge = (item: ClientListItem) => {
+    if (!isAbcClass(item.abcClass)) return null;
+    return (
+      <span className="mt-1 flex w-fit whitespace-nowrap rounded-full bg-sky-50 px-2 py-0.5 text-xs font-semibold text-sky-800 ring-1 ring-sky-200">
+        Classe {item.abcClass}
+      </span>
+    );
+  };
+
   const formatCurrency = (value: number) => value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
   const renderCollectionBadge = (item: ClientListItem) => {
@@ -572,7 +597,7 @@ export default function CrudSimplePage({
     setSearch("");
     setDebouncedSearch("");
     setQuickFilters(EMPTY_CLIENT_QUICK_FILTERS);
-    updateUrlFilters({ status: "", ownerSellerId: "", [COLLECTION_URL_PARAM]: "" });
+    updateUrlFilters({ status: "", ownerSellerId: "", abc: "", [COLLECTION_URL_PARAM]: "" });
     setShowArchived(false);
     setPage(1);
   };
@@ -587,6 +612,7 @@ export default function CrudSimplePage({
     quickFilters.clientType,
     quickFilters.ownerSellerId,
     quickFilters.portfolioStatus,
+    quickFilters.abc,
     collectionFilter,
     showArchived,
     isClientsPage
@@ -1946,7 +1972,7 @@ export default function CrudSimplePage({
 
       {isClientsPage ? (
         <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+          <div className={`grid gap-3 md:grid-cols-2 ${canFilterBySeller ? "xl:grid-cols-7" : "xl:grid-cols-6"}`}>
             <input
               className="rounded-lg border border-slate-300 px-3 py-2"
               placeholder="Buscar clientes..."
@@ -2015,6 +2041,21 @@ export default function CrudSimplePage({
               {PORTFOLIO_STATUSES.map((status) => (
                 <option key={status} value={status}>
                   {PORTFOLIO_STATUS_LABELS[status]}
+                </option>
+              ))}
+            </select>
+
+            <select
+              className="rounded-lg border border-slate-300 px-3 py-2"
+              aria-label="Curva ABC (últimos 90 dias)"
+              title="Curva ABC dos últimos 90 dias, a mesma do Dashboard"
+              value={quickFilters.abc}
+              onChange={(e) => changeAbc(e.target.value)}
+            >
+              <option value="">Curva ABC (todas)</option>
+              {ABC_CLASSES.map((abcClass) => (
+                <option key={abcClass} value={abcClass}>
+                  Classe {abcClass}
                 </option>
               ))}
             </select>
@@ -2155,6 +2196,7 @@ export default function CrudSimplePage({
                     <h3 className="text-base font-semibold text-slate-900">{String(getCellValue(it, "name") || "-")}</h3>
                     {renderArchiveBadge(it)}
                     {renderPortfolioStatusBadge(it)}
+                    {renderAbcBadge(it)}
                     {renderCollectionBadge(it)}
                     <dl className="mt-3 grid grid-cols-2 gap-3 text-sm">
                       <div>
@@ -2267,6 +2309,7 @@ export default function CrudSimplePage({
                           {getCellValue(it, f.key)}
                           {isClientsPage && f.key === "name" ? renderArchiveBadge(it) : null}
                           {isClientsPage && f.key === "name" ? renderPortfolioStatusBadge(it) : null}
+                          {isClientsPage && f.key === "name" ? renderAbcBadge(it) : null}
                           {isClientsPage && f.key === "name" ? renderCollectionBadge(it) : null}
                         </td>
                       ))}
