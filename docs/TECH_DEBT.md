@@ -714,6 +714,32 @@ explícito de `/prices` sem tabela não esconde o produto quando há linha posit
 já bloqueia). Há linhas duplicadas por produto (legacy, prices e products sem tabela, e linhas de filial); a limpeza
 fica para um script próprio.
 
+### TD-SELLER-DASHBOARD-MY-WEEK — Dashboard do vendedor com rankings em que ele só via a si mesmo
+
+**Resolvido no código, aguardando deploy.** Para o vendedor, os blocos de ranking do Dashboard (Destaques da Semana,
+Ranking Disciplina, Score Comercial do Mês, Consistência e Performance da equipe) mostravam só ele, sempre em 1º.
+Agora o vendedor vê "Minha semana" (`apps/web/src/lib/sellerWeek.ts`): os números de `/reports/discipline-ranking`
+da semana atual e da anterior (segunda a domingo de Brasília) e as visitas de `/reports/weekly-visits`, sem posição,
+medalha ou colegas; Carteira e Curva ABC sobem para logo depois do objetivo do mês. Gerente e diretor sem mudança.
+Conferência no servidor das rotas que o Dashboard chama (`/dashboard/summary`, `/sales-series`, `/portfolio`,
+`/activity-kpis`, `/activities`, `/reports/discipline-ranking`, `/weekly-highlights`, `/consistency`,
+`/score-monthly`, `/weekly-visits`): todas já filtravam o vendedor; a única sobra era o `rank` do
+`/reports/score-monthly`, que deixou de ir para o vendedor. Teste: `test:seller-dashboard-scope` (API) e
+`test:seller-week` (web).
+
+Pendente (fora deste PR):
+- "Visitas da semana" segue `/reports/weekly-visits`, que conta visitas concluídas pela data prevista (`dueDate`); a
+  disciplina e as metas de atividade usam a data informada (`date`). Uma visita feita em outra semana da prevista
+  conta na semana prevista.
+- A comparação é com a semana anterior inteira; no meio da semana, os totais (concluído, visitas) ainda estão
+  parciais. As taxas (execução, pontualidade) não dependem disso.
+- Código que ficou sem uso para o vendedor no `DashboardPage.tsx` (não removido): os ramos `vendedor` de
+  `disciplineRankingVisible`, `consistencyRankingVisible` e `monthlyScoreVisible`, e as condições de "Posição" na
+  tabela do Score Comercial do Mês.
+- Em desenvolvimento (React StrictMode), o Dashboard pode ficar em "Carregando dashboard..." na primeira carga: o
+  primeiro efeito é abortado e o segundo reaproveita a requisição abortada em `dashboardInFlightRef`. Em produção
+  não há o efeito duplo. Já era assim antes deste PR.
+
 ### TD-DISCIPLINE-AGENDA-PLANNED — disciplina com planejado = executado ou só roteiros
 
 **Resolvido no código, aguardando deploy** (PR 4 da separação Agenda × Atividades). A disciplina semanal usava

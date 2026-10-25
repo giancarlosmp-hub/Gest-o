@@ -1,3 +1,15 @@
+# Dashboard na visão do vendedor: "Minha semana" no lugar dos rankings — código pronto, aguardando deploy — 24/10/2026
+
+- Para o vendedor, o Dashboard não mostra mais Destaques da Semana, Ranking Disciplina, Score Comercial do Mês,
+  Consistência nem Performance da equipe (e não chama mais as rotas desses blocos).
+- No lugar, "Minha semana": concluído / planejado, execução, não realizado, sem conclusão, pontualidade (regra da
+  disciplina da Agenda) e visitas da semana, comparados com a semana anterior inteira. Sem posição, medalha ou colegas.
+- Carteira de clientes e Curva ABC sobem para logo depois do gráfico do objetivo do mês: lado a lado no desktop,
+  empilhadas no celular; as fatias da Carteira continuam levando à lista de clientes.
+- Gerente e diretor: Dashboard sem mudança.
+- API: as rotas do Dashboard já devolviam ao vendedor só os dados dele; `GET /reports/score-monthly` deixa de devolver
+  ao vendedor a posição (`rank`). Detalhes e pendências: `TECH_DEBT.md`, “TD-SELLER-DASHBOARD-MY-WEEK”.
+
 # Disciplina: planejado na Agenda × concluído — código pronto, aguardando deploy — 24/10/2026
 
 - PR 4 de 4 da separação Agenda × Atividades. Disciplina semanal, ranking de disciplina, componente de disciplina do
