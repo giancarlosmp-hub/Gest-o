@@ -950,7 +950,6 @@ Pendente (fora deste PR):
 - Roteiro com várias paradas usa só a cidade do compromisso (ou da primeira parada) no agrupamento e na rota.
 - Compromisso da agenda e atividade sem cliente não têm UF: o município é achado pelo nome quando é único em PR/SC/MS ou
   desempatado pelo território; senão fica sem coordenada. Atividade com cidade própria usa a UF do cliente.
-- As visitas que ficam "sem dia" (`unallocatedPriorities`) não aparecem na tela do planejamento.
 - O link da rota é montado na API; depois de "Agendar" para outro dia, a rota do dia de origem só se atualiza ao
   recarregar.
 - A chave `planning.visitClusterRadiusKm` é única no `AppConfig` (vale para a empresa toda, não por tenant), como as

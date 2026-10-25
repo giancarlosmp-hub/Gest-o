@@ -9,8 +9,9 @@
   achada na UF), vale a regra antiga de cidade igual.
 - Normalização do catálogo trata apóstrofo como espaço ("diamante d oeste" = "Diamante D'Oeste"), também nas telas de
   território.
-- Aviso "Fora do território" no cartão da visita; link "Ver rota do dia" no Google Maps (só URL, até 4 cidades por
-  link, divide em "Rota 1/2" quando passa).
+- Aviso "Fora do território" no cartão da visita; link "Ver rota do dia" no Google Maps (só URL, cada cidade uma vez,
+  até 4 cidades por link, divide em "Rota 1/2" quando passa). Bloco "Visitas sem dia nesta semana" abaixo dos dias,
+  com Agendar/Registrar/Abrir.
 - Raio em Configurações > Disciplina Semanal: gerente e diretor alteram (10 a 300 km), vendedor vê no planejamento.
   Chave `planning.visitClusterRadiusKm` no `AppConfig`, sem migration. Detalhes: `TECH_DEBT.md`,
   “TD-PLANNING-VISIT-PROXIMITY”.
