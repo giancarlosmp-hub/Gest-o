@@ -4532,6 +4532,7 @@ router.post("/assistant-whatsapp/contact", async (req, res) => {
         ownerSellerId
       }
     });
+    await advanceOpportunityLastContactInTx(tx, activity.opportunityId, activity.date);
 
     const timelineEvent = await tx.timelineEvent.create({
       data: {
@@ -8161,14 +8162,21 @@ router.put("/opportunities/:id", validateBody(opportunitySchema.partial()), asyn
   const isMovingToClosedStage = !!(nextStageRaw && CLOSED_STAGES.has(nextStageRaw) && previous && !CLOSED_STAGES.has(previous.stage));
   const closedAt = isMovingToClosedStage ? new Date() : null;
 
-  const data = await prisma.opportunity.update({
+  // Último contato: a edição só avança a data (mesma regra de advanceOpportunityLastContactInTx); data anterior ou
+  // vazia é ignorada para qualquer perfil, porque não há fluxo de correção para trás.
+  const { lastContactAt: requestedLastContactAt, ...opportunityChanges } = normalizeOpportunityDates(req.body) as Record<string, any>;
+  const updated = await prisma.opportunity.update({
     where: { id: req.params.id },
     data: {
-      ...(normalizeOpportunityDates(req.body) as any),
+      ...(opportunityChanges as any),
       ...(closedAt ? { closedAt, expectedCloseDate: closedAt, followUpDate: closedAt } : {}),
       ...(nextStageRaw && !CLOSED_STAGES.has(nextStageRaw) ? { closedAt: null } : {})
     }
   });
+  const advancesLastContact = requestedLastContactAt instanceof Date && !Number.isNaN(requestedLastContactAt.getTime())
+    && (!updated.lastContactAt || updated.lastContactAt < requestedLastContactAt);
+  if (advancesLastContact) await advanceOpportunityLastContactInTx(prisma, updated.id, requestedLastContactAt);
+  const data = advancesLastContact ? { ...updated, lastContactAt: requestedLastContactAt as Date } : updated;
 
   if (requestedOwnerSellerId && previous && requestedOwnerSellerId !== previous.ownerSellerId) {
     const destination = await prisma.user.findUnique({ where: { id: requestedOwnerSellerId }, select: { name: true } });
