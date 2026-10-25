@@ -768,3 +768,36 @@ Pendente (fora deste PR):
   "Atividades do dia" do celular mostra atividades pendentes antigas. "Followups pendentes" e os alertas leem o
   `followUpDate` da oportunidade, não os follow-ups da Agenda.
 - Os testes `test:agenda-discipline` (API) e `test:central-day-agenda` (web) não rodam no CI.
+
+### TD-CLIENTS-ABC-FILTER — fatias da Curva ABC levavam a um filtro que não existia
+
+**Resolvido no código, aguardando deploy.** As fatias do donut "Curva ABC de clientes (últimos 90 dias)" do
+Dashboard abriam `/clientes?classe=A|B|C`, parâmetro que nem a tela nem a API liam. Agora a regra fica numa função
+só, usada pelo Dashboard e pela lista: `classifyAbcCurve` (`packages/shared/src/abcCurve.ts`) e `loadClientAbcCurve`
+(`apps/api/src/services/clientAbcCurve.ts`). `GET /clients?abc=A|B|C` filtra pela classe e devolve `abcClass` em
+cada linha; a tela Clientes tem o filtro "Curva ABC" (lido e gravado em `?abc=`), mostra o selo "Classe X" com o
+filtro ativo, e o donut abre `/clientes?abc=X` com o vendedor escolhido (`ownerSellerId`).
+
+Regra (decisões do Giancarlos, 24/10/2026):
+- Carteira = dono do cliente (`Client.ownerSellerId`), sem arquivados; faturamento = todos os ganhos efetivos do CRM
+  desses clientes (`loadEffectiveWonContributions`: pedido cancelado no ERP zera o ganho), seja quem for o dono da
+  oportunidade. Antes, o faturamento vinha pelo dono da oportunidade e entravam clientes arquivados e de outros
+  vendedores.
+- Janela de 90 dias de Brasília que termina no menor entre hoje e o fim do mês escolhido no Dashboard (antes, o fim
+  do mês, mesmo no futuro). A lista usa sempre hoje: com o Dashboard num mês passado, o link abre a classe de hoje.
+- Só entra quem faturou mais que zero: 20% / 50% arredondados para cima. Cliente sem compra na janela (ou só com
+  ganho cancelado) não tem classe; antes contava em C, então o número de C e o "% Classe A" do Dashboard mudam.
+- Empate de valor desempata pelo id do cliente.
+- A classe é relativa à carteira do recorte (vendedor: a dele; gestão: todos ou o vendedor filtrado); UF, região,
+  tipo, situação e "Em cobrança" só recortam a lista.
+
+Teste: `test:client-abc-filter` (API, dados fictícios) e `test:client-list-filters` (web). Os dois não rodam no CI.
+
+Pendente (fora deste PR):
+- Próximo passo: faturamento real do ERP. A curva usa só ganhos do CRM; compras feitas direto no ERP não entram. O
+  CRM não tem histórico de vendas do ERP por cliente com data: `partnerTitles` são só parcelas a receber de títulos
+  de venda (sem data de emissão; parcela paga sai, venda à vista nunca aparece), `ErpOrderSync` só tem pedidos
+  criados no CRM (já contados pela oportunidade) e `financialProfile` só traz a última fatura (`DATA_ULTFATURA`,
+  `VALOR_ULTFATURA`), a primeira e o `VALOR_MEDIO`. Precisa de dado novo do ERP (notas ou vendas por cliente com
+  data de emissão) e de regra para não contar em dobro o pedido do CRM já faturado.
+- O KPI "Classe A • X%" do Dashboard continua dividindo os clientes A pelo total da carteira (com quem não comprou).
