@@ -42,7 +42,9 @@ type OpportunityImportFieldKey =
   | "expectedTicketPerHa"
   | "crop"
   | "season"
-  | "productOffered";
+  | "productOffered"
+  | "clientCity"
+  | "clientState";
 
 type OpportunityImportField = {
   key: OpportunityImportFieldKey;
@@ -204,6 +206,8 @@ const FALLBACK_DICTIONARY: OpportunityImportDictionary = {
     },
     { key: "observacoes", required: false },
     { key: "status", required: false, accepted: ["open", "closed"] },
+    { key: "cidade_cliente", required: false, notes: "obrigatória para criar cliente novo; nome oficial do IBGE" },
+    { key: "uf_cliente", required: false, notes: "obrigatória para criar cliente novo; sigla da UF (ex.: PR)" },
   ],
   tips: [
     "Se 'cliente' não existir e a opção 'Criar cliente automaticamente' estiver ligada, será criado como PJ com dados mínimos.",
@@ -344,6 +348,18 @@ const IMPORT_FIELDS: OpportunityImportField[] = [
     aliases: ["crop", "cultura"],
   },
   {
+    key: "clientCity",
+    label: "Cidade do cliente",
+    required: false,
+    aliases: ["cidade_cliente", "cidade", "city", "municipio"],
+  },
+  {
+    key: "clientState",
+    label: "UF do cliente",
+    required: false,
+    aliases: ["uf_cliente", "uf", "estado", "state"],
+  },
+  {
     key: "season",
     label: "Safra",
     required: false,
@@ -377,6 +393,8 @@ const TEMPLATE_HEADERS = [
   "ultimo_contato",
   "observacoes",
   "status",
+  "cidade_cliente",
+  "uf_cliente",
 ];
 const TEMPLATE_EXAMPLE_ROWS = [
   [
@@ -398,6 +416,8 @@ const TEMPLATE_EXAMPLE_ROWS = [
     "2026-01-08",
     "Primeiro contato via WhatsApp",
     "open",
+    "Toledo",
+    "PR",
   ],
   [
     "Milho Verão Lote 3",
@@ -418,6 +438,8 @@ const TEMPLATE_EXAMPLE_ROWS = [
     "2026-02-02",
     "Cliente pediu ajuste de prazo",
     "open",
+    "Cascavel",
+    "PR",
   ],
   [
     "Soja Premium Exportação",
@@ -438,6 +460,8 @@ const TEMPLATE_EXAMPLE_ROWS = [
     "2026-02-10",
     "Proposta enviada por e-mail",
     "open",
+    "Palotina",
+    "PR",
   ],
   [
     "Fertilizante NPK 20-10",
@@ -458,6 +482,8 @@ const TEMPLATE_EXAMPLE_ROWS = [
     "2026-01-17",
     "Novo cliente para testar criação automática",
     "open",
+    "Umuarama",
+    "PR",
   ],
   [
     "Defensivo Programa Safra",
@@ -478,6 +504,8 @@ const TEMPLATE_EXAMPLE_ROWS = [
     "2026-03-04",
     "Pedido confirmado",
     "closed",
+    "Assis Chateaubriand",
+    "PR",
   ],
 ];
 
@@ -650,6 +678,9 @@ const buildPreviewRows = (
         productOffered:
           normalizeTextValue(getMappedValue(row, "productOffered")) ||
           undefined,
+        // Cliente novo só é criado com cidade e UF da lista oficial do IBGE (validado na API).
+        city: normalizeTextValue(getMappedValue(row, "clientCity")) || undefined,
+        state: normalizeTextValue(getMappedValue(row, "clientState")).toUpperCase() || undefined,
       },
       status: "new",
       invalidFields: [],
@@ -1611,6 +1642,11 @@ export default function OpportunityImportModal({
                   />
                   Criar cliente automaticamente quando não encontrado
                 </label>
+                {createClientIfMissing ? (
+                  <p className="text-xs text-slate-600">
+                    Cliente novo precisa das colunas Cidade do cliente e UF do cliente com um município da lista oficial do IBGE; sem isso a linha vai para os erros.
+                  </p>
+                ) : null}
               </div>
 
               <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
