@@ -164,6 +164,17 @@ const results: string[] = [];
   assert.equal(url.searchParams.get("waypoints"), "Irati, SC");
   assert.equal(url.searchParams.get("destination"), "Francisco Beltrão, PR");
   assert.equal("state" in actionOf(plan, "cli-beltrao"), false, "UF interna não vai na resposta");
+
+  // Cidade repetida fora de sequência (compromisso em Cascavel, visita em Toledo, visita em Cascavel) entra uma vez só.
+  territoryCities = [];
+  events = [event("cascavel", "roteiro_visita", "2027-03-01T12:00:00.000Z", "Cascavel")];
+  activities = [visit("toledo", "Toledo", "PR"), visit("cascavel", "Cascavel", "PR")];
+  const repeated = await generate();
+  assert.equal(dayOfClient(repeated, "cli-toledo"), "2027-03-01");
+  assert.equal(dayOfClient(repeated, "cli-cascavel"), "2027-03-01");
+  const repeatedUrl = new URL(repeated.days.find((day: Row) => day.date === "2027-03-01").routeLinks[0]);
+  assert.equal(repeatedUrl.searchParams.get("waypoints"), "Cascavel, PR");
+  assert.equal(repeatedUrl.searchParams.get("destination"), "Toledo, PR", "Cascavel não volta no fim da rota");
   events = [];
   territoryCities = [];
   results.push("territory_warning_and_tiebreak=PASS");

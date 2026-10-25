@@ -323,9 +323,10 @@ export class PlanningIntelligenceService {
       const daily = state.get(target.date)!; daily.actions += 1; if (candidate.type === "visit") { daily.visits += 1; if (place) daily.places.push(place); }
       target.suggestedActions.push({ ...action, suggestedPeriod: daily.actions % 2 ? "morning" : "afternoon" });
     }
-    // Rota do dia: cidades dos compromissos presenciais (pela hora) e depois das visitas sugeridas, sem repetir em sequência.
+    // Rota do dia: cidades dos compromissos presenciais (pela hora) e depois das visitas sugeridas, cada cidade uma vez
+    // (na primeira ocorrência).
     const placeKey = (place: VisitPlace) => place.ibgeCode ?? `${place.state ?? ""}:${place.nameKey}`;
-    for (const day of days) day.routeLinks = buildDayRouteLinks(state.get(day.date)!.places.filter((place, index, list) => index === 0 || placeKey(list[index - 1]) !== placeKey(place)).map((place) => place.routeLabel));
+    for (const day of days) day.routeLinks = buildDayRouteLinks(state.get(day.date)!.places.filter((place, index, list) => list.findIndex((other) => placeKey(other) === placeKey(place)) === index).map((place) => place.routeLabel));
     const allActions = days.flatMap((d) => d.suggestedActions);
     const visits = allActions.filter((a) => a.type === "visit").length;
     const calls = allActions.filter((a) => a.type === "call" || a.type === "whatsapp").length;
