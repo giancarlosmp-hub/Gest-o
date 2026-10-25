@@ -3282,6 +3282,7 @@ router.get("/reports/discipline-ranking", async (req, res) => {
         activities: number;
         extra: number;
         followUpAfterVisit: number;
+        visitsDone: number;
       }
     >
   >((acc, seller) => {
@@ -3290,7 +3291,8 @@ router.get("/reports/discipline-ranking", async (req, res) => {
       sellerName: seller.name,
       activities: 0,
       extra: 0,
-      followUpAfterVisit: 0
+      followUpAfterVisit: 0,
+      visitsDone: 0
     };
     return acc;
   }, {});
@@ -3300,6 +3302,8 @@ router.get("/reports/discipline-ranking", async (req, res) => {
     if (!sellerStats) continue;
     sellerStats.activities += 1;
     if (!activity.agendaEventId) sellerStats.extra += 1;
+    // Visitas feitas no período pela data informada (date), como a disciplina; o weekly-visits conta pela dueDate.
+    if (activity.type === "visita") sellerStats.visitsDone += 1;
 
     const normalizedType = normalizeActivityType(activity.type);
     if ((normalizedType === "visita" || normalizedType === "visita_tecnica" || normalizedType === "reuniao") && activity.opportunityId) {
@@ -3335,6 +3339,8 @@ router.get("/reports/discipline-ranking", async (req, res) => {
         unresolved: totals.unresolved,
         upcoming: totals.upcoming,
         extra: stats.extra,
+        visitsDone: stats.visitsDone,
+        visitGoal: weeklyVisitGoal,
         executionRate,
         punctualRate,
         followUpRate,
@@ -3449,9 +3455,13 @@ router.get("/reports/score-monthly", async (req, res) => {
       rank: index + 1
     }));
 
-  // Vendedor vê só a própria linha: nada dos colegas. O score continua calculado sobre o time.
+  // Vendedor vê só a própria linha: nada dos colegas, nem a posição (rank sai da comparação com eles).
+  // O score continua calculado sobre o time.
   if (role === "vendedor") {
-    return res.json({ month, items: rankedItems.filter((item) => item.userId === req.user!.id) });
+    return res.json({
+      month,
+      items: rankedItems.filter((item) => item.userId === req.user!.id).map(({ rank: _rank, ...item }) => item)
+    });
   }
 
   if (userIdFilter) {
