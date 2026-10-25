@@ -96,6 +96,76 @@ for (const [name, sql] of [
   assert.match(result.stdout + result.stderr, /BLOQUEADO/, name);
 }
 
+// DML: a new migration may only carry DDL; the check reads the SQL itself, without comments.
+for (const [name, sql] of [
+  ["UPDATE", `UPDATE "Cliente" SET "nome" = 'Fictício';\n`],
+  ["DELETE", `DELETE FROM "Cliente" WHERE "id" = 'cli_ficticio';\n`],
+  ["INSERT", `INSERT INTO "Cliente" ("id") VALUES ('cli_ficticio');\n`],
+  ["MERGE", `MERGE INTO "Cliente" AS c USING "Origem" AS o ON c."id" = o."id" WHEN MATCHED THEN DO NOTHING;\n`],
+  ["COPY", `COPY "Cliente" FROM '/tmp/ficticio.csv';\n`],
+  ["TRUNCATE", `TRUNCATE "Cliente";\n`],
+  ["CREATE OR REPLACE", `CREATE OR REPLACE VIEW "VisaoFicticia" AS SELECT 1;\n`],
+  ["lowercase update", `update "Cliente" set "nome" = 'x';\n`],
+  ["lowercase delete", `delete from "Cliente";\n`],
+  ["lowercase insert", `insert into "Cliente" ("id") values ('x');\n`],
+  ["lowercase merge", `merge into "Cliente" using "Origem" on true when matched then do nothing;\n`],
+  ["lowercase copy", `copy "Cliente" to stdout;\n`],
+  ["lowercase truncate", `truncate table "Cliente";\n`],
+  ["lowercase create or replace", `create or replace function "f"() returns int as $$ select 1 $$ language sql;\n`],
+  ["mixed case", `UpDaTe "Cliente" SET "nome" = 'x';\n`],
+  ["DML with trailing comment", `UPDATE "Cliente" SET "nome" = 'x'; -- ajuste fictício\n`],
+  ["DML after DDL on the same line", `ALTER TABLE "Cliente" ADD COLUMN "apelido" TEXT; DELETE FROM "Cliente";\n`],
+  ["indented DML", `   INSERT INTO "Cliente" ("id") VALUES ('x');\n`],
+  ["DML inside a DO block", `DO $$ BEGIN UPDATE "Cliente" SET "nome" = 'x'; END $$;\n`],
+  ["DML split across lines", `DELETE\nFROM "Cliente";\n`]
+]) {
+  const result = runPreview(sql);
+  assert.equal(result.status, 42, `${name} must be blocked: ${result.stdout}${result.stderr}`);
+  assert.match(result.stdout, /BLOQUEADO: arquivo aprovado deve conter somente DDL aditiva/, name);
+}
+for (const [name, sql] of [
+  ["update inside a column name", `ALTER TABLE "Cliente" ADD COLUMN "updatedAt" TIMESTAMP(3);\n`],
+  ["update/delete in comments", `-- update\n-- DELETE FROM "Cliente";\nALTER TABLE "Cliente" ADD COLUMN "deletedAt" TIMESTAMP(3); -- insert later\n`],
+  ["quoted identifiers named like DML", `CREATE TABLE "Copia" ("update" TEXT, "delete" TEXT);\n`],
+  ["foreign key referential actions", `ALTER TABLE "Pedido" ADD CONSTRAINT "Pedido_clienteId_fkey" FOREIGN KEY ("clienteId") REFERENCES "Cliente"("id") ON DELETE RESTRICT ON UPDATE CASCADE;\n`],
+  ["lowercase foreign key referential actions", `alter table "Pedido" add constraint "Pedido_x_fkey" foreign key ("x") references "Cliente"("id") on delete set null on update cascade;\n`]
+]) {
+  const result = runPreview(sql);
+  assert.equal(result.status, 0, `${name} must not be blocked as DML: ${result.stdout}${result.stderr}`);
+  assert.match(result.stdout, /bloqueadas=0/, name);
+}
+
+// Registered migrations keep passing; only the approved backfill may carry DML, bound to id + sha256.
+const { migrations: registered } = await import("../production-schema-migrations.mjs");
+const ordersBackfillToken = "orders-tenant-authority-v1";
+function runPreviewFile(file, extraEnv = {}) {
+  return spawnSync("bash", [preview], { cwd: root, env: { ...process.env, MODE: "validate", SQL_FILE: file, ALLOW_DATA_BACKFILL: "", ...extraEnv }, encoding: "utf8" });
+}
+for (const { id, path } of Object.values(registered)) {
+  const env = id === "20260904120000_orders_operational_view" ? { ALLOW_DATA_BACKFILL: ordersBackfillToken } : {};
+  const result = runPreviewFile(path, env);
+  assert.equal(result.status, 0, `registered migration ${id} must keep passing: ${result.stdout}${result.stderr}`);
+  assert.match(result.stdout, /destrutivas=0 bloqueadas=0/, id);
+}
+const ordersPath = registered["20260904120000_orders_operational_view"].path;
+const ordersSql = readFileSync(resolve(root, ordersPath), "utf8");
+assert.match(runPreviewFile(ordersPath, { ALLOW_DATA_BACKFILL: ordersBackfillToken }).stdout, /DML aprovado: 20260904120000_orders_operational_view/);
+const ordersWithoutToken = runPreviewFile(ordersPath);
+assert.equal(ordersWithoutToken.status, 42, "the approved backfill still requires its token");
+for (const [name, sql] of [
+  ["approved copy with extra DML", `${ordersSql}\nDELETE FROM "Cliente" WHERE "id" = 'cli_ficticio';\n`],
+  ["approved copy with a changed comment", ordersSql.replace(/^--.*$/m, "-- comentário fictício alterado")]
+]) {
+  assert.notEqual(sql, ordersSql, name);
+  const dir = mkdtempSync(resolve(tmpdir(), "gesto-schema-dml-"));
+  const file = resolve(dir, "migration.sql");
+  writeFileSync(file, sql);
+  const result = runPreviewFile(file, { ALLOW_DATA_BACKFILL: ordersBackfillToken });
+  rmSync(dir, { recursive: true });
+  assert.equal(result.status, 42, `${name} must be blocked: ${result.stdout}${result.stderr}`);
+  assert.match(result.stdout, /BLOQUEADO: arquivo aprovado deve conter somente DDL aditiva/, name);
+}
+
 const registry = resolve(root, "scripts/production-schema-migrations.mjs");
 const ordersId = "20260904120000_orders_operational_view";
 const ordersEntry = spawnSync("node", [registry, ordersId], { cwd: root, encoding: "utf8" });

@@ -44,10 +44,37 @@ if grep -Eiq 'DROP[[:space:]]+(TABLE|COLUMN)[^;]*incident_' "$sql"; then
   log "BLOQUEADO: tentativa de alterar objeto incident_* não gerenciado"
   blocked=$((blocked + 1))
 fi
-if [[ -n "$SQL_FILE" ]] && grep -Eiq '^[[:space:]]*(UPDATE|DELETE|INSERT|MERGE|COPY|CREATE[[:space:]]+OR[[:space:]]+REPLACE)' "$normalized" \
-   && [[ "${ALLOW_DATA_BACKFILL:-}" != orders-tenant-authority-v1 ]]; then
-  log "BLOQUEADO: arquivo aprovado deve conter somente DDL aditiva"
-  blocked=$((blocked + 1))
+# DML is checked on the comment-free SQL text, case-insensitively, as whole words. Plain quoted
+# identifiers ("updatedAt") are not statements and ON DELETE/ON UPDATE are foreign key actions;
+# everything else, string and dollar-quoted bodies included, is checked.
+dml_scan=$(printf '%s\n' "$normalized" \
+  | sed -E 's/"[A-Za-z_][A-Za-z0-9_]*"/""/g; s/(^|[^A-Za-z0-9_$])ON[[:space:]]+(DELETE|UPDATE)/\1ON_FK_ACTION/gI')
+dml=$(printf '%s\n' "$dml_scan" \
+  | grep -Eic '(^|[^A-Za-z0-9_$])((UPDATE|DELETE|INSERT|MERGE|COPY|TRUNCATE)|CREATE[[:space:]]+OR[[:space:]]+REPLACE)([^A-Za-z0-9_$]|$)' || true)
+# Migrations already approved with a data backfill. Each exemption is bound to the manifest id,
+# its sha256 and its backfill token; any other content, even under the same id, stays blocked.
+approved_dml_migrations=(
+  "20260904120000_orders_operational_view:486c25d46702a8f91131fa6669b12e9119a62b098aed6c3a091fff4cdca892b9:orders-tenant-authority-v1"
+)
+approved_dml_id(){
+  local entry id sha token actual manifest
+  actual=$(sha256sum "$SQL_FILE" | cut -d' ' -f1)
+  for entry in "${approved_dml_migrations[@]}"; do
+    IFS=: read -r id sha token <<<"$entry"
+    [[ "$actual" == "$sha" && "${ALLOW_DATA_BACKFILL:-}" == "$token" ]] || continue
+    manifest=$(node "$(dirname "${BASH_SOURCE[0]}")/production-schema-migrations.mjs" "$id" 2>/dev/null) || continue
+    [[ $(node -e 'process.stdout.write(JSON.parse(process.argv[1]).sha256)' "$manifest") == "$sha" ]] || continue
+    printf '%s' "$id"; return 0
+  done
+  return 1
+}
+if [[ -n "$SQL_FILE" ]] && (( dml > 0 )); then
+  if dml_id=$(approved_dml_id); then
+    log "DML aprovado: $dml_id (id e sha256 conferidos no manifesto)"
+  else
+    log "BLOQUEADO: arquivo aprovado deve conter somente DDL aditiva"
+    blocked=$((blocked + 1))
+  fi
 fi
 printf 'RESUMO aditivas=%d destrutivas=%d bloqueadas=%d nao_gerenciadas=%d\n' "$additive" "$destructive" "$blocked" "$incident"
 [[ "$MODE" != validate || "$blocked" -eq 0 ]] || exit 42
