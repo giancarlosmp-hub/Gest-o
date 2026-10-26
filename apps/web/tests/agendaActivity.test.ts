@@ -143,6 +143,11 @@ assert.equal(agendaNotDoneReasonText(null), null);
 assert.match(dialogs, /api\.post\(`\/agenda\/events\/\$\{event\.id\}\/not-done`, notDonePayload\(form\)\)/);
 assert.match(dialogs, /AGENDA_NOT_DONE_REASONS\.map/, "o diálogo lista o catálogo");
 assert.match(agendaPage, /agendaNotDoneReasonText\(selectedEvent\.notDoneReason\)/, "a Agenda mostra o motivo pelo catálogo");
+const executionReport = source("../src/pages/CommercialExecutionReportPage.tsx");
+assert.match(executionReport, /Não realizado por motivo/, "o relatório gerencial mostra a contagem por motivo");
+assert.match(executionReport, /AGENDA_NOT_DONE_REASONS\.map/, "colunas na ordem do catálogo");
+assert.match(executionReport, /reasonCount\(seller\.notDoneByReason, reason\.code\)/, "contagem por vendedor");
+assert.match(executionReport, /reasonCount\(report\.notDoneByReason, reason\.code\)/, "total da equipe");
 for (const [name, page] of [["AgendaPage", agendaPage], ["ActivitiesPage", activitiesPage]] as const) {
   assert.match(page, /<RescheduleDialog/, `${name} usa o Reagendar compartilhado`);
   assert.match(page, /<NotDoneDialog/, `${name} usa o Não realizado compartilhado`);
