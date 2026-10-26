@@ -11,9 +11,15 @@ Resolvido no código em 24/10/2026, aguardando merge: a checagem lê o SQL sem c
 diferenciar maiúsculas, e bloqueia `UPDATE`, `DELETE`, `INSERT`, `MERGE`, `COPY`, `TRUNCATE` e
 `CREATE OR REPLACE` (os `ON DELETE`/`ON UPDATE` de chave estrangeira não contam). A única exceção é
 o backfill já aprovado de `20260904120000_orders_operational_view`, amarrado ao id, ao sha256 do
-manifesto e ao token `ALLOW_DATA_BACKFILL`. Resta: a remoção de comentários `--` (comum a todas as
-checagens do preview) não reconhece aspas, então um `--` dentro de string ou identificador esconde
-o resto da linha.
+manifesto e ao token `ALLOW_DATA_BACKFILL`.
+
+Resolvido no código em 26/10/2026, aguardando merge: os comentários são removidos por
+`scripts/sql-strip-comments.mjs`, que respeita strings (inclusive `''` e `E'...'`), identificadores
+entre aspas, `$$`/`$tag$` e `/* */` aninhado. Um `--` dentro desses trechos não esconde mais nada.
+SQL sem fechamento ou com `standard_conforming_strings` é bloqueado. As checagens também rodam em
+cada instrução colapsada numa linha, então palavras-chave quebradas em linhas diferentes são vistas.
+Resta: o padrão destrutivo `ALTER TABLE ... TYPE` também casa com identificadores como
+`"ClientType"`, e SQL dinâmico (`EXECUTE` dentro de `DO`) não é analisado.
 
 # Progresso 1.0B.2-H — descendentes ainda isolados
 
