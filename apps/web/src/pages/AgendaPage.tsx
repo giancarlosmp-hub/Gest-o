@@ -5,7 +5,6 @@ import { useAuth } from "../context/AuthContext";
 import api from "../lib/apiClient";
 import { AGENDA_EVENT_TYPE_LABELS, AGENDA_EVENT_TYPE_OPTIONS, type AgendaEventType as SharedAgendaEventType } from "@salesforce-pro/shared";
 import { getApiErrorMessage } from "../lib/apiError";
-import { triggerDashboardRefresh } from "../lib/dashboardRefresh";
 import type { AgendaEvent, AgendaEventType, AgendaStop } from "../models/agenda";
 import ClientSearchSelect, { type SearchableClientOption } from "../components/clients/ClientSearchSelect";
 import WeeklyCommercialPlan from "../components/planning/WeeklyCommercialPlan";
@@ -15,7 +14,6 @@ import {
   brazilDayKeyOf,
   brazilDayStart,
   brazilMinutesOfDay,
-  brazilMonthKey,
   brazilTodayKey,
   brazilWeekday,
   formatBrazil,
@@ -49,11 +47,6 @@ type DraftStop = {
 };
 
 type ClientOption = SearchableClientOption;
-
-type VisitResultForm = {
-  status: "realizada" | "nao_realizada";
-  summary: string;
-};
 
 const typedAgendaEventOptions = AGENDA_EVENT_TYPE_OPTIONS as readonly { id: string; value: SharedAgendaEventType; label: string }[];
 
@@ -286,34 +279,6 @@ function isGenericClientPlaceholder(value?: string | null) {
   return normalized === "cliente" || normalized === "cliente vinculado";
 }
 
-type StopGeolocationPayload = {
-  lat?: number;
-  lng?: number;
-  accuracy?: number;
-  timestamp?: string;
-};
-
-function getCurrentPositionOptional(timeoutMs = 5000): Promise<StopGeolocationPayload> {
-  if (typeof navigator === "undefined" || !navigator.geolocation) {
-    return Promise.resolve({});
-  }
-
-  return new Promise((resolve) => {
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        resolve({
-          lat: position.coords.latitude,
-          lng: position.coords.longitude,
-          accuracy: position.coords.accuracy,
-          timestamp: new Date(position.timestamp).toISOString()
-        });
-      },
-      () => resolve({}),
-      { timeout: timeoutMs, maximumAge: 0, enableHighAccuracy: true }
-    );
-  });
-}
-
 
 function mapApiAgendaEvent(item: any): AgendaEvent {
   const mappedStops = Array.isArray(item.stops)
@@ -394,18 +359,10 @@ export default function AgendaPage() {
   const [selectedMonthDayKey, setSelectedMonthDayKey] = useState("");
   const highlightedEventRef = useRef<HTMLElement | null>(null);
   const inFlightRef = useRef<Map<string, Promise<any>>>(new Map());
-  const [executionEventId, setExecutionEventId] = useState("");
-  const [isResultModalOpen, setIsResultModalOpen] = useState(false);
-  const [activeStopId, setActiveStopId] = useState("");
-  const [isExecutionSubmitting, setIsExecutionSubmitting] = useState(false);
   const [isMobile, setIsMobile] = useState(() => window.matchMedia("(max-width: 767px)").matches);
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const [isMoreFiltersOpen, setIsMoreFiltersOpen] = useState(false);
   const [periodAnchorDate, setPeriodAnchorDate] = useState(() => new Date());
-  const [visitResultForm, setVisitResultForm] = useState<VisitResultForm>({
-    status: "realizada",
-    summary: ""
-  });
 
   const dateRange = useMemo(
     () => getRangeFromFilter(periodFilter, customFrom, customTo, periodAnchorDate),
@@ -817,101 +774,6 @@ export default function AgendaPage() {
 
     highlightedEventRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
   }, [highlightedEventId]);
-
-  const routeEvents = useMemo(() => filteredEvents.filter((event) => event.type === "roteiro_visita" && event.stops?.length), [filteredEvents]);
-  const executionEvent = useMemo(() => {
-    if (!routeEvents.length) return null;
-    if (executionEventId && executionEventId !== "AUTO") {
-      return routeEvents.find((event) => event.id === executionEventId) || routeEvents[0];
-    }
-    return routeEvents[0];
-  }, [executionEventId, routeEvents]);
-
-  const executionStops = executionEvent?.stops || [];
-
-  const updateStopState = (stopId: string, patch: Partial<AgendaStop>) => {
-    setEvents((current) =>
-      current.map((item) => ({
-        ...item,
-        stops: item.stops?.map((stop) => (stop.id === stopId ? { ...stop, ...patch } : stop))
-      }))
-    );
-  };
-
-  const onCheckInStop = async (stopId: string) => {
-    setIsExecutionSubmitting(true);
-    try {
-      const geolocation = await getCurrentPositionOptional(5000);
-      const response = await api.patch(`/agenda-events/${stopId}/check-in`, geolocation);
-      updateStopState(stopId, {
-        checkInAt: response.data?.checkInAt || new Date().toISOString(),
-        checkInLat: response.data?.checkInLat ?? null,
-        checkInLng: response.data?.checkInLng ?? null,
-        checkInAccuracy: response.data?.checkInAccuracy ?? null
-      });
-      toast.success("Parada iniciada.");
-    } catch (error) {
-      toast.error(getApiErrorMessage(error, "Não foi possível iniciar a parada."));
-    } finally {
-      setIsExecutionSubmitting(false);
-    }
-  };
-
-  const onCheckOutStop = async (stopId: string) => {
-    setIsExecutionSubmitting(true);
-    try {
-      const geolocation = await getCurrentPositionOptional(5000);
-      const response = await api.patch(`/agenda-events/${stopId}/check-out`, geolocation);
-      updateStopState(stopId, {
-        checkOutAt: response.data?.checkOutAt || new Date().toISOString(),
-        checkOutLat: response.data?.checkOutLat ?? null,
-        checkOutLng: response.data?.checkOutLng ?? null,
-        checkOutAccuracy: response.data?.checkOutAccuracy ?? null
-      });
-      setVisitResultForm({
-        status: "realizada",
-        summary: ""
-      });
-      setActiveStopId(stopId);
-      setIsResultModalOpen(true);
-    } catch (error) {
-      toast.error(getApiErrorMessage(error, "Não foi possível finalizar a parada."));
-    } finally {
-      setIsExecutionSubmitting(false);
-    }
-  };
-
-  const onSaveVisitResult = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!activeStopId) return;
-
-    setIsExecutionSubmitting(true);
-    try {
-      const payload = {
-        status: visitResultForm.status,
-        summary: visitResultForm.summary
-      };
-      const response = await api.patch(`/agenda-events/${activeStopId}/result`, payload);
-      updateStopState(activeStopId, response.data);
-      closeResultModal();
-      setEventsRefreshToken((current) => current + 1);
-      toast.success("Visita registrada com sucesso");
-      triggerDashboardRefresh({ month: brazilMonthKey() });
-    } catch (error) {
-      toast.error(getApiErrorMessage(error, "Não foi possível salvar o resultado."));
-    } finally {
-      setIsExecutionSubmitting(false);
-    }
-  };
-
-  const closeResultModal = () => {
-    setIsResultModalOpen(false);
-    setActiveStopId("");
-    setVisitResultForm({
-      status: "realizada",
-      summary: ""
-    });
-  };
 
   // Só reabre (gerente/diretor): concluir passa pela atividade vinculada.
   const onReopen = async (agendaEvent: AgendaEvent) => {
@@ -1752,80 +1614,6 @@ export default function AgendaPage() {
                   className="mobile-primary-button rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-70"
                 >
                   {isSubmitting ? "Salvando..." : createForm.type === "roteiro_visita" ? "Salvar roteiro" : "Salvar agenda"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      ) : null}
-
-      {isResultModalOpen ? (
-        <div className="mobile-modal-shell" onClick={closeResultModal}>
-          <div className="mobile-modal-panel" onClick={(e) => e.stopPropagation()}>
-            <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 bg-white px-4 py-4 sm:px-6">
-              <div>
-                <h3 className="text-lg font-semibold text-slate-900">Resultado da visita</h3>
-                <p className="text-sm text-slate-500">Informe o resultado e, se quiser, adicione uma observação.</p>
-              </div>
-              <button
-                type="button"
-                onClick={closeResultModal}
-                className="rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-600 hover:bg-slate-50"
-              >
-                ✕
-              </button>
-            </div>
-
-            <form className="flex min-h-0 flex-1 flex-col" onSubmit={onSaveVisitResult}>
-              <div className="mobile-modal-body space-y-4">
-                <fieldset className="space-y-2">
-                  <legend className="mb-1 block text-xs font-medium uppercase text-slate-500">Resultado</legend>
-                  <label className="flex items-center gap-2 text-sm text-slate-700">
-                    <input
-                      type="radio"
-                      name="visit-result-status"
-                      value="realizada"
-                      checked={visitResultForm.status === "realizada"}
-                      onChange={(event) =>
-                        setVisitResultForm((current) => ({
-                          ...current,
-                          status: event.target.value as VisitResultForm["status"]
-                        }))
-                      }
-                    />
-                    Realizada
-                  </label>
-                  <label className="flex items-center gap-2 text-sm text-slate-700">
-                    <input
-                      type="radio"
-                      name="visit-result-status"
-                      value="nao_realizada"
-                      checked={visitResultForm.status === "nao_realizada"}
-                      onChange={(event) =>
-                        setVisitResultForm((current) => ({
-                          ...current,
-                          status: event.target.value as VisitResultForm["status"]
-                        }))
-                      }
-                    />
-                    Não realizada
-                  </label>
-                </fieldset>
-
-                <div>
-                  <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Observação (opcional)</label>
-                  <textarea
-                    value={visitResultForm.summary}
-                    onChange={(event) => setVisitResultForm((current) => ({ ...current, summary: event.target.value }))}
-                    placeholder="Escreva uma observação rápida"
-                    className="min-h-20 w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                  />
-                </div>
-              </div>
-
-              <div className="mobile-modal-footer">
-                <button type="submit" disabled={isExecutionSubmitting} className="mobile-primary-button rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800 disabled:opacity-70">
-                  {isExecutionSubmitting ? "Salvando..." : "Salvar"}
                 </button>
               </div>
             </form>
