@@ -66,12 +66,13 @@ assert.doesNotMatch(crudRoutes, /buildWonOpportunityDateRangeFilter/, "ganhos n�
 assert.ok((crudRoutes.match(/closedOpportunityPeriodWhere\(/g) || []).length >= 5, "score mensal, score comercial, consistência e destaques semanais usam o recorte de ganhos");
 assert.match(crudRoutes, /createdAt: brazilDayRange\(period\.from, period\.to\)!/, "contagem mensal de atividades usa dias de Brasília");
 assert.match(crudRoutes, /\{ sentAt: monthInstantRange \}/, "cobertura de territórios usa dias de Brasília");
-assert.match(crudRoutes, /startDateTime: monthInstantRange/, "score comercial usa dias de Brasília para a agenda");
+assert.match(crudRoutes, /loadAgendaDisciplineBySeller\(monthInstantRange,/, "score comercial usa dias de Brasília para a agenda");
 
 const dashboardRoutes = read("../routes/dashboardRoutes.ts");
 assert.doesNotMatch(dashboardRoutes, /buildWonDateRangeFilter|getMonthRange\(/, "dashboard não pode voltar ao recorte único de start/end");
 assert.doesNotMatch(dashboardRoutes, /toISOString\(\)\.slice\(0, 7\)/, "mês padrão do dashboard é o de Brasília");
 assert.doesNotMatch(dashboardRoutes, /expectedCloseDate\)\.getDate\(\)/, "série diária agrupa pelo mesmo dia usado no filtro");
-assert.ok((dashboardRoutes.match(/closedOpportunityPeriodWhere\(/g) || []).length >= 5);
+assert.ok((dashboardRoutes.match(/closedOpportunityPeriodWhere\(/g) || []).length >= 4);
+assert.match(read("../services/clientAbcCurve.ts"), /closedOpportunityPeriodWhere\(/, "curva ABC do dashboard usa o recorte de ganhos");
 
 console.log("periodFilters tests passed");
