@@ -205,8 +205,12 @@ try {
   assert.equal(simulation.wouldCreate, 6);
   // A rota simula com o relógio real: fixa o Date no "agora" do teste só durante a chamada.
   mock.timers.enable({ apis: ["Date"], now });
-  const httpSimulation = await request("GET", "/commercial-automations/simulation", "manager-a");
-  mock.timers.reset();
+  let httpSimulation: Awaited<ReturnType<typeof request>>;
+  try {
+    httpSimulation = await request("GET", "/commercial-automations/simulation", "manager-a");
+  } finally {
+    mock.timers.reset();
+  }
   assert.equal(httpSimulation.status, 200);
   assert.equal(httpSimulation.json.wouldCreate, 6);
   assert.equal((await request("GET", "/commercial-automations/simulation", "seller-a")).status, 403);
