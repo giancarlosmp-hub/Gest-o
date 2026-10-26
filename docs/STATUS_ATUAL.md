@@ -1,3 +1,13 @@
+# Tenant dos clientes ativos sem tenant (script) — código pronto, aguardando merge — 25/10/2026
+
+- Script `backfillClientTenant` (simulação por padrão; `--apply --expect=N`), não rodado: preenche o `tenantId` dos
+  clientes ativos sem código do ERP e sem tenant (SELECT de 25/10/2026: 62) com o único tenant ativo e grava uma
+  auditoria por cliente em `ClientCodeAudit`; nenhum outro campo muda. Arquivados sem tenant ficam fora (só contados).
+- Nada muda em listas, carteira, ABC, automações e IA (já mostram esses clientes); passam a funcionar pedido no ERP,
+  transferência de responsável, exclusão de oportunidade, IA da oportunidade e edição/exclusão de contato, e a
+  checagem de duplicados e a importação passam a vê-los. Sem migration. Detalhes: `TECH_DEBT.md`,
+  “TD-CLIENT-TENANT-BACKFILL”.
+
 # Endereço do cliente pela lista oficial do IBGE (cadastro, edição e importações) — código pronto, aguardando deploy — 25/10/2026
 
 - Cadastro e edição manual de clientes com UF e cidade escolhidas de listas (catálogo do IBGE do Brasil inteiro, 5.571
