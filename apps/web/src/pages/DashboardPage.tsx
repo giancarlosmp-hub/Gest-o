@@ -941,47 +941,22 @@ export default function DashboardPage() {
     },
   ], [weeklyHighlights]);
 
-  const disciplineRankingVisible = useMemo(() => {
-    const rankingWithPosition = disciplineRanking.map((item, index) => ({
-      ...item,
-      position: index + 1,
-    }));
+  // Ranking Disciplina, Consistência e Score do Mês só aparecem para a gestão (o vendedor nem carrega essas rotas).
+  const disciplineRankingVisible = useMemo(
+    () => disciplineRanking.map((item, index) => ({ ...item, position: index + 1 })).slice(0, 5),
+    [disciplineRanking]
+  );
 
-    if (user?.role !== "vendedor") {
-      return rankingWithPosition.slice(0, 5);
-    }
-
-    const topThree = rankingWithPosition.slice(0, 3);
-    const myRow = rankingWithPosition.find((item) => item.sellerId === user.id);
-
-    if (!myRow) return topThree;
-    if (topThree.some((item) => item.sellerId === myRow.sellerId)) return topThree;
-
-    return [...topThree, myRow];
-  }, [disciplineRanking, user?.id, user?.role]);
-
-  const consistencyRankingVisible = useMemo(() => {
-    if (!consistencyReport) return [];
-    if (user?.role === "vendedor") {
-      return consistencyReport.ranking.filter((item) => item.sellerId === user.id);
-    }
-
-    return consistencyReport.ranking;
-  }, [consistencyReport, user?.id, user?.role]);
+  const consistencyRankingVisible = useMemo(() => consistencyReport?.ranking ?? [], [consistencyReport]);
 
   const monthlyScoreVisible = useMemo(() => {
     if (!monthlyScore) return [];
-
-    // Vendedor vê só a própria linha (a API já filtra), sem posição nem Top 3.
-    if (user?.role === "vendedor") {
-      return monthlyScore.items.filter((item) => item.userId === user.id);
-    }
 
     const search = scoreSearch.trim().toLowerCase();
     if (!search) return monthlyScore.items;
 
     return monthlyScore.items.filter((item) => item.name.toLowerCase().includes(search));
-  }, [monthlyScore, scoreSearch, user?.id, user?.role]);
+  }, [monthlyScore, scoreSearch]);
 
   const consistencyBadge = (level: ConsistencyLevel) => {
     if (level === "alta") return { label: "🟢 Alta", className: "bg-emerald-50 text-emerald-700 border-emerald-200" };
@@ -1508,32 +1483,30 @@ export default function DashboardPage() {
               <span className="text-xs text-slate-500">{monthlyScore?.month ?? month}</span>
             </div>
 
-            {user?.role !== "vendedor" ? (
-              <div className="mb-3 grid gap-2 sm:grid-cols-2">
-                <select
-                  value={scoreSellerId}
-                  onChange={(event) => setScoreSellerId(event.target.value)}
-                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500"
-                >
-                  <option value="">Todos vendedores</option>
-                  {sellers.map((seller) => (
-                    <option key={seller.id} value={seller.id}>{seller.name}</option>
-                  ))}
-                </select>
-                <input
-                  value={scoreSearch}
-                  onChange={(event) => setScoreSearch(event.target.value)}
-                  placeholder="Buscar vendedor"
-                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500"
-                />
-              </div>
-            ) : null}
+            <div className="mb-3 grid gap-2 sm:grid-cols-2">
+              <select
+                value={scoreSellerId}
+                onChange={(event) => setScoreSellerId(event.target.value)}
+                className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500"
+              >
+                <option value="">Todos vendedores</option>
+                {sellers.map((seller) => (
+                  <option key={seller.id} value={seller.id}>{seller.name}</option>
+                ))}
+              </select>
+              <input
+                value={scoreSearch}
+                onChange={(event) => setScoreSearch(event.target.value)}
+                placeholder="Buscar vendedor"
+                className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500"
+              />
+            </div>
 
             <div className="w-full overflow-x-auto">
               <table className="min-w-[600px] w-full text-sm">
                 <thead>
                   <tr className="border-b border-slate-200 text-left text-slate-500">
-                    {user?.role === "vendedor" ? null : <th className="py-2.5 pr-3">Posição</th>}
+                    <th className="py-2.5 pr-3">Posição</th>
                     <th className="py-2.5 pr-3">Vendedor</th>
                     <th className="py-2.5 pr-3">Faturado</th>
                     <th className="py-2.5 pr-3">Objetivo</th>
@@ -1547,7 +1520,7 @@ export default function DashboardPage() {
                     const medal = row.rank === 1 ? "🥇" : row.rank === 2 ? "🥈" : row.rank === 3 ? "🥉" : "";
                     return (
                       <tr key={`${row.userId}-${row.rank}`} className="border-b border-slate-100">
-                        {user?.role === "vendedor" ? null : <td className="py-2.5 pr-3">{medal || `#${row.rank}`}</td>}
+                        <td className="py-2.5 pr-3">{medal || `#${row.rank}`}</td>
                         <td className="py-2.5 pr-3 font-medium text-slate-800">{row.name}</td>
                         <td className="py-2.5 pr-3 text-slate-700">{formatCurrencyBRL(row.faturadoMes)}</td>
                         <td className="py-2.5 pr-3 text-slate-700">{row.objetivoMes > 0 ? formatCurrencyBRL(row.objetivoMes) : "—"}</td>
@@ -1559,7 +1532,7 @@ export default function DashboardPage() {
                   })}
                   {monthlyScoreVisible.length === 0 && (
                     <tr>
-                      <td colSpan={user?.role === "vendedor" ? 6 : 7} className="py-4 text-center text-slate-500">Sem dados de score mensal no período.</td>
+                      <td colSpan={7} className="py-4 text-center text-slate-500">Sem dados de score mensal no período.</td>
                     </tr>
                   )}
                 </tbody>
