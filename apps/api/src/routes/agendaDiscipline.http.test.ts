@@ -181,7 +181,8 @@ const agendaEvents: Row[] = [
       stop("realizada", "2026-11-03T11:00"),
       stop("realizada", "2026-11-03T15:00"),
       stop("realizada", "2026-11-04T09:00"),
-      stop("nao_realizada"),
+      // Código antigo da parada: conta como "Clima ou condição da estrada".
+      { ...stop("nao_realizada"), resultReason: "chuva" },
       stop(null)
     ]
   }),
@@ -328,9 +329,15 @@ try {
     [13, 7, 2, 2, 2, 3]
   );
   assert.deepEqual(report.sellers.map((row: Row) => row.sellerId), ["seller-a"]);
+  // Por motivo, Agenda e Rota juntas: a parada com "chuva" e o compromisso com texto livre antigo ("Outro").
+  const expectedReasons = { cliente_ausente: 0, cliente_remarcou: 0, clima_estrada: 1, veiculo: 0, demanda_urgente: 0, falta_tempo: 0, outro: 1 };
+  assert.deepEqual(report.notDoneByReason, expectedReasons);
+  assert.deepEqual(report.sellers[0].notDoneByReason, expectedReasons);
   const teamReport = (await get(`/reports/planned-vs-realized?${WEEK}`, "manager-x")).json;
   assert.deepEqual([teamReport.totalPlanned, teamReport.totalExecuted], [15, 9]);
   assert.equal(teamReport.sellers.length, 2);
+  assert.deepEqual(teamReport.notDoneByReason, expectedReasons);
+  assert.equal(Object.values(teamReport.sellers.find((row: Row) => row.sellerId === "seller-b").notDoneByReason).every((value) => value === 0), true);
 
   // Disciplina semanal (semana atual, 02 a 08/11): planejado real; o mínimo continua nas visitas feitas.
   const weekly = (await get("/reports/weekly-discipline", "seller-a")).json;

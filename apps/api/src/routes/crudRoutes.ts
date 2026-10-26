@@ -42,6 +42,7 @@ import {
   rankingSellerName,
   computeDisciplineRates,
   emptyDisciplineTotals,
+  emptyNotDoneReasonCounts,
   describeNotDoneReason,
   formatAgendaNotDoneReason,
   NOT_DONE_DESCRIPTION_MAX_LENGTH,
@@ -55,7 +56,7 @@ import { clientReadableForDetailsWhere } from "../utils/clientHistoricalAccess.j
 import { normalizeCnpj, normalizeState, normalizeText } from "../utils/normalize.js";
 import { brazilDayRange, brazilTodayKey, calendarDayRange, monthDayBounds, shiftDayKey } from "../utils/dateRange.js";
 import { closedOpportunityPeriodWhere, opportunityPeriodWhere } from "../utils/periodFilters.js";
-import { loadAgendaDisciplineBySeller } from "../services/agendaDiscipline.js";
+import { loadAgendaDisciplineBySeller, loadAgendaDisciplineDetailBySeller } from "../services/agendaDiscipline.js";
 import { calculatePipelineMetrics, getWeightedValue, isOpportunityOverdue } from "../utils/pipelineMetrics.js";
 import { loadEffectiveWonContributions, loadEffectiveWonTotals, withEffectiveWin } from "../services/effectiveWins.js";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
@@ -2947,7 +2948,7 @@ router.get("/reports/planned-vs-realized", async (req, res) => {
       },
       select: { id: true, name: true }
     }),
-    loadAgendaDisciplineBySeller({ gte: from, lte: to }, scopedSellerId),
+    loadAgendaDisciplineDetailBySeller({ gte: from, lte: to }, scopedSellerId),
     prisma.activity.findMany({
       where: {
         ...(scopedSellerId ? { ownerSellerId: scopedSellerId } : sellerWhere(req)),
@@ -2992,9 +2993,12 @@ router.get("/reports/planned-vs-realized", async (req, res) => {
   }, {});
 
   const teamTotals = emptyDisciplineTotals();
+  const teamNotDoneByReason = emptyNotDoneReasonCounts();
   const sellerRows = sellers.map((seller) => {
-    const totals = disciplineBySeller[seller.id] || emptyDisciplineTotals();
+    const totals = disciplineBySeller[seller.id]?.totals || emptyDisciplineTotals();
+    const notDoneByReason = disciplineBySeller[seller.id]?.notDoneByReason || emptyNotDoneReasonCounts();
     for (const key of Object.keys(teamTotals) as (keyof typeof teamTotals)[]) teamTotals[key] += totals[key];
+    for (const key of Object.keys(teamNotDoneByReason) as (keyof typeof teamNotDoneByReason)[]) teamNotDoneByReason[key] += notDoneByReason[key];
     const rates = computeDisciplineRates(totals);
 
     return {
@@ -3003,6 +3007,7 @@ router.get("/reports/planned-vs-realized", async (req, res) => {
       planned: totals.planned,
       executed: totals.completed,
       notDone: totals.notDone,
+      notDoneByReason,
       unresolved: totals.unresolved,
       upcoming: totals.upcoming,
       extra: extraBySeller[seller.id] || 0,
@@ -3021,6 +3026,7 @@ router.get("/reports/planned-vs-realized", async (req, res) => {
     totalPlanned: teamTotals.planned,
     totalExecuted: teamTotals.completed,
     totalNotDone: teamTotals.notDone,
+    notDoneByReason: teamNotDoneByReason,
     totalUnresolved: teamTotals.unresolved,
     totalUpcoming: teamTotals.upcoming,
     totalExtra: sellerRows.reduce((sum, item) => sum + item.extra, 0),
