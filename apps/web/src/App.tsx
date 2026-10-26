@@ -83,6 +83,8 @@ export default function App() {
               createInModal
               createButtonLabel="Adicionar cliente"
               createModalTitle="Novo cliente"
+              editModalTitle="Editar cliente"
+              editModalSubtitle="Atualize os dados do cliente."
               fields={[
                 { key: "name", label: "Nome" },
                 { key: "fantasyName", label: "Nome fantasia", placeholder: "Ex: Agro Rural" },

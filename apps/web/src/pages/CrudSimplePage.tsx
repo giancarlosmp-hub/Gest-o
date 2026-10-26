@@ -19,6 +19,7 @@ import { buildDuplicateClientMessage, checkClientDuplicate } from "../lib/client
 import { canManageArchivedClients, clientArchiveBadgeLabel, isPortfolioCleanupArchivedClient } from "../lib/clientArchiveStatus";
 import { getApiErrorMessage } from "../lib/apiError";
 import { portfolioStatusBadgeClass } from "../lib/portfolioStatusBadge";
+import { crudModalHeading } from "../lib/crudModalHeading";
 import { COLLECTION_URL_PARAM, EMPTY_CLIENT_QUICK_FILTERS, buildClientListParams, isCollectionFilterInUrl, ownerSellerIdFromUrl, withUrlFilters } from "../lib/clientListFilters";
 
 type CrudSimplePageProps = {
@@ -39,6 +40,8 @@ type CrudSimplePageProps = {
   createInModal?: boolean;
   createButtonLabel?: string;
   createModalTitle?: string;
+  editModalTitle?: string;
+  editModalSubtitle?: string;
 };
 
 type ErpSalesmanOption = {
@@ -263,7 +266,9 @@ export default function CrudSimplePage({
   detailsPath,
   createInModal = false,
   createButtonLabel = "Adicionar",
-  createModalTitle = "Novo registro"
+  createModalTitle = "Novo registro",
+  editModalTitle = "Editar registro",
+  editModalSubtitle = "Atualize os dados do registro."
 }: CrudSimplePageProps) {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -274,6 +279,12 @@ export default function CrudSimplePage({
   const [erpSalesmen, setErpSalesmen] = useState<ErpSalesmanOption[]>([]);
   const [form, setForm] = useState<any>({});
   const [editing, setEditing] = useState<string | null>(null);
+  const modalHeading = crudModalHeading(editing, {
+    createTitle: createModalTitle,
+    createSubtitle: "Preencha os dados para cadastrar um cliente.",
+    editTitle: editModalTitle,
+    editSubtitle: editModalSubtitle
+  });
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -2795,8 +2806,8 @@ export default function CrudSimplePage({
         <div className="mobile-modal-shell" role="dialog" aria-modal="true">
           <div className="mobile-modal-panel w-full max-w-4xl border border-slate-200 shadow-xl">
             <div className="sticky top-0 z-10 border-b border-slate-200 bg-white px-4 py-4 sm:px-6">
-              <h3 className="text-xl font-semibold text-slate-900">{createModalTitle}</h3>
-              <p className="text-sm text-slate-500">Preencha os dados para cadastrar um cliente.</p>
+              <h3 className="text-xl font-semibold text-slate-900">{modalHeading.title}</h3>
+              <p className="text-sm text-slate-500">{modalHeading.subtitle}</p>
             </div>
 
             <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">

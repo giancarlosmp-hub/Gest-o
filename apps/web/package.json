@@ -13,7 +13,7 @@
     "test:orders": "npx tsx tests/orderPresentation.test.ts",
     "test:client-code-erp-only": "npx tsx tests/clientCodeErpOnly.test.ts",
     "test:client-archive-status": "npx tsx tests/clientArchiveStatus.test.ts",
-    "test:client-address-label": "npx tsx tests/clientAddressLabel.test.ts",
+    "test:client-address-label": "npx tsx tests/clientAddressLabel.test.ts && npx tsx tests/clientFormTitle.test.ts",
     "test:crm-assistant-evidence": "npx tsx tests/crmAssistantEvidence.test.ts",
     "test:client-list-filters": "npx tsx tests/clientListFilters.test.ts",
     "test:client-select-search": "npx tsx tests/clientSelectSearch.test.ts",
