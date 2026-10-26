@@ -1414,10 +1414,8 @@ export default function AgendaPage() {
                   </article>
                 )) : <p className="text-xs text-slate-500">Sem paradas cadastradas.</p>}
 
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                <div className="grid grid-cols-1 gap-2">
                   <Link to={`/agenda/roteiro/${selectedEvent.id}`} className="rounded-lg border border-emerald-300 bg-white px-3 py-2 text-center text-xs font-semibold text-emerald-700">Iniciar rota</Link>
-                  <button type="button" disabled className="rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-500">Registrar visita</button>
-                  <button type="button" disabled className="rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-500">Abrir cliente 360</button>
                 </div>
               </section>
             ) : null}
