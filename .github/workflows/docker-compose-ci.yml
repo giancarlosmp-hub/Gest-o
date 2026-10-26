@@ -664,3 +664,6 @@ jobs:
 
       - name: API smoke:pr18a4-runtime
         run: npm run smoke:pr18a4-runtime -w @salesforce-pro/api
+
+      - name: Schema preview gate (SQL lexer and production schema safety)
+        run: node scripts/smoke/sql-strip-comments.test.mjs && node scripts/smoke/production-schema-safety.mjs
