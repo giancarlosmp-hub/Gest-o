@@ -419,7 +419,13 @@ try {
   assert.equal(stopOther.status, 200);
   assert.deepEqual([stopOther.json.resultReason, stopOther.json.resultSummary, stopOther.json.applied], ["outro", "Porteira ficticia fechada", true]);
   assert.equal(byId(agendaEvents, "evt-route")!.status, "realizado", "todas as paradas resolvidas");
-  results.push("stop_not_done_requires_reason=PASS stop_other_requires_description=PASS route_done_when_all_stops_resolved=PASS");
+  // Linha do tempo da parada não realizada: "não realizado" com o motivo do catálogo, nunca "cancelado".
+  const stopTimeline = timelineEvents.map((row) => row.description).filter((text: string) => text.includes("Visita em roteiro (Roteiro ficticio)"));
+  assert(stopTimeline.includes("Compromisso não realizado: Visita em roteiro (Roteiro ficticio). Motivo: Cliente ausente / não atendeu"), "motivo do catálogo");
+  assert(stopTimeline.includes("Compromisso não realizado: Visita em roteiro (Roteiro ficticio). Motivo: Outro (Porteira ficticia fechada)"), "Outro com a descrição");
+  assert(stopTimeline.includes("Compromisso concluído: Visita em roteiro (Roteiro ficticio)"), "parada realizada sem mudança");
+  assert(!stopTimeline.some((text: string) => text.startsWith("Compromisso cancelado")), "parada não realizada não vira cancelado");
+  results.push("stop_not_done_requires_reason=PASS stop_other_requires_description=PASS route_done_when_all_stops_resolved=PASS stop_timeline_reason=PASS");
 
   // Primeiro resultado vale: reenvio (fila offline) devolve o que está gravado, sem linha do tempo nem próximo passo.
   const eventsBeforeResend = agendaEvents.length;

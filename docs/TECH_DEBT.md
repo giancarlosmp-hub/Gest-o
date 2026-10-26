@@ -742,9 +742,8 @@ Pendente (fora deste PR):
   ranking semanal de visitas (com medalhas) da tela Execução Comercial (`CommercialExecutionReportPage.tsx`): ali,
   uma visita feita em outra semana da prevista ainda conta na semana prevista. As missões semanais
   (`/reports/weekly-missions`, com a meta semanal de visitas) não usam essa rota e já contam pela `date`.
-- Código que ficou sem uso para o vendedor no `DashboardPage.tsx` (não removido): os ramos `vendedor` de
-  `disciplineRankingVisible`, `consistencyRankingVisible` e `monthlyScoreVisible`, e as condições de "Posição" na
-  tabela do Score Comercial do Mês.
+- (Resolvido em “TD-DEAD-CODE-SCREEN-FIXES”: os ramos `vendedor` sem uso no `DashboardPage.tsx` e as condições de "Posição" do Score
+  Comercial do Mês.)
 - Em desenvolvimento (React StrictMode), o Dashboard pode ficar em "Carregando dashboard..." na primeira carga: o
   primeiro efeito é abortado e o segundo reaproveita a requisição abortada em `dashboardInFlightRef`. Em produção
   não há o efeito duplo. Já era assim antes deste PR.
@@ -767,7 +766,7 @@ roteiro realizado sem paradas resolvidas conta 1 concluído. Missões, consistê
 Pendente (fora deste PR):
 - O fator de volume do ranking de disciplina compara o planejado com a meta **semanal** de visitas mesmo quando o
   período é o mês (`/reports/discipline-ranking`).
-- `GET /reports/weekly-discipline` não tem consumidor no web.
+- `GET /reports/weekly-discipline` não tem consumidor no web (na lista de rotas sem consumidor de “TD-DEAD-CODE-SCREEN-FIXES”).
 - `getCurrentWeekRangeFromBrazilNow` fecha a semana em meia-noite UTC (domingo 21h de Brasília), não em Brasília.
 - O motivo de "não realizado" é texto livre: não dá para separar motivo justificável (chuva, estrada) sem categoria.
 - Central do Dia: "Followups pendentes" e os alertas leem o `followUpDate` da oportunidade, não os follow-ups da
@@ -832,7 +831,7 @@ Pendente (fora deste PR):
 - (Resolvido em “TD-COOLING-PROPOSALS-FILTERS”: os links de "Clientes esfriando" e "Propostas sem retorno" e a regra
   única da contagem e da etiqueta.)
 - O texto "Comece por esta ação" dentro de "Comece por aqui" repete o título; mantido como estava.
-- Restos da gestão no código: o ramo `user?.role === "vendedor"` do Top 3 no desktop da gestão ficou sem uso.
+- (Resolvido em “TD-DEAD-CODE-SCREEN-FIXES”: a condição do vendedor em volta do Top 3 no desktop da gestão; o bloco continua.)
 
 ### TD-COOLING-PROPOSALS-FILTERS — links dos alertas abriam listas mais largas e regras divergentes
 
@@ -979,9 +978,10 @@ Pendente (fora deste PR):
 - Clientes sem `tenantId` em produção (SELECT de 25/10/2026, 1 tenant ativo): 1.973 de 5.665 — 71 ativos sem código
   do ERP, 241 arquivados sem código e 1.661 arquivados com código. O script só cuida dos que têm endereço fora da lista.
   Os ativos: ver “TD-CLIENT-TENANT-BACKFILL”.
-- A rota `POST /companies` (sem uso pelo web) ainda cria cliente com "Não informado"/"NI"; código morto a decidir.
+- A rota `POST /companies` (sem uso pelo web) ainda cria cliente com "Não informado"/"NI"; investigada em
+  “TD-DEAD-CODE-SCREEN-FIXES”, remoção a decidir.
 - Clientes com código do ERP e endereço fora da lista (ex.: "NI" da sincronização) seguem como o ERP manda.
-- A janela de edição de cliente mostra o título "Novo cliente" (título fixo em `App.tsx`).
+- (Resolvido em “TD-DEAD-CODE-SCREEN-FIXES”: a edição de cliente mostra "Editar cliente".)
 - `routeAuthorization.http.test.ts` já falha na `main` (falta simular `erpOrderSync`), sem relação com este PR.
 
 ### TD-CLIENT-TENANT-BACKFILL — clientes ativos sem tenant
@@ -1027,13 +1027,64 @@ estrada → `clima_estrada`; reagendar → "Outro (Precisa reagendar)"); resulta
 
 Pendente (fora deste PR):
 
-- Código morto em `AgendaPage.tsx`: `onCheckInStop` e `onCheckOutStop` nunca são chamados, então o modal antigo de
-  resultado da parada é inalcançável (enviaria "não realizada" sem motivo). Remover no PR de limpeza.
+- (Resolvido em “TD-DEAD-CODE-SCREEN-FIXES”: o modo de execução antigo e o modal de resultado da parada saíram da `AgendaPage.tsx`.)
 - O banco não impede código fora do catálogo (validação só na API); um texto livre antigo que comece com
   "<código>: " seria lido como o código.
-- Linha do tempo da parada não realizada continua "Compromisso cancelado: Visita em roteiro (...)", sem o motivo.
+- (Resolvido em “TD-DEAD-CODE-SCREEN-FIXES”: a linha do tempo da parada não realizada mostra o motivo do catálogo.)
 - "Realizada" registrada sem internet não carrega as oportunidades do cliente; se o servidor recusar pela regra do
   próximo passo, o item vai para "Não enviados" e o vendedor corrige no formulário.
 - Item de "Não enviados" de outro roteiro só pode ser reenviado ou descartado na tela do roteiro aberto.
 - No Windows, `npm run test:*` da API falha no `prisma generate` quando a DLL do Prisma está em uso (EPERM); os testes
   rodam direto com `npx tsx` (o schema não mudou).
+
+### TD-DEAD-CODE-SCREEN-FIXES — código morto na web e pequenos erros de tela
+
+**Resolvido no código, aguardando merge.** Sem mudança de regra de negócio.
+
+- Agenda: saiu o modo de execução antigo do roteiro (`onCheckInStop`, `onCheckOutStop`, o modal "Resultado da
+  visita" e o estado que só ele usava). A execução oficial é a `RouteExecutionPage`; as rotas de check-in, check-out
+  e resultado da parada continuam.
+- Agenda: saíram "Registrar visita" e "Abrir cliente 360" da gaveta do roteiro, desativados para sempre e sem função
+  planejada (a parada se registra em Executar roteiro; o roteiro tem vários clientes).
+- Dashboard: saíram os ramos `vendedor` de `disciplineRankingVisible`, `consistencyRankingVisible` e
+  `monthlyScoreVisible` e as condições do vendedor no Score Comercial do Mês (desde "Minha semana", o vendedor nem
+  carrega esses blocos). Na Central do Dia da gestão (desktop), saiu só a condição morta em volta de "Top 3 da semana".
+- Cliente: a edição mostra "Editar cliente" e "Atualize os dados do cliente."; o cadastro continua igual
+  (`apps/web/src/lib/crudModalHeading.ts`).
+- "Servidor indisponível. Verifique conexão." (`apps/web/src/lib/networkError.ts`): só avisa em queda de rede e em
+  tempo esgotado. Cancelamento (`isCancel`, `ERR_CANCELED`, sinal abortado) e abort do navegador (`ECONNABORTED`
+  com "Request aborted") não avisam. O tempo esgotado usa o mesmo código e é separado pela mensagem do axios.
+- Linha do tempo: parada não realizada grava "Compromisso não realizado: Visita em roteiro (...). Motivo: <motivo do
+  catálogo>" (antes "Compromisso cancelado", sem motivo). Os registros antigos não são reescritos.
+
+Testes: `apps/web/tests/clientFormTitle.test.ts` e `apps/web/tests/networkError.test.ts` (dados fictícios) e o caso
+`stop_timeline_reason` em `agendaActivitySplit.http.test.ts`. Como o CI lista cada script no workflow, os dois
+testes novos do web estão encadeados em scripts que o CI já roda (o JSON não aceita comentário):
+`test:client-address-label` roda também `clientFormTitle.test.ts`, e `test:route-execution` roda também
+`networkError.test.ts`.
+
+`POST /companies` e o "NI" (investigado, nada mudou): `/companies` (GET, POST, PUT, DELETE em `crudRoutes.ts`) é o
+alias que sobrou da unificação de Empresas em Clientes (fev/2026). Nenhuma chamada no web nem em scripts; só o
+`DELETE /companies/:id` é coberto em `routeAuthorization.http.test.ts`. "NI" é a UF "Não informado": o POST grava
+`city: "Não informado"` e `state: "NI"` porque o `companySchema` não tem cidade nem UF. A sincronização do ERP também
+grava "NI" quando o parceiro vem sem UF (`ultraFv3SyncService.ts`).
+
+Pendente (fora deste PR): rotas da API sem consumidor no web (busca por uso literal e montado no web, nos scripts e
+nos testes, em 26/10/2026). Nenhuma foi removida; a remoção fica para um PR de limpeza da API, com decisão rota por rota.
+
+- Sem consumidor: `GET /reports/weekly-discipline` (só teste), `GET /activities/monthly-counts`,
+  `PATCH /activities/:id/done`, `POST /agenda/events/:id/stops`, `PATCH /agenda/events/:id/stops/reorder`,
+  `PATCH /users/:id/region`, `GET /users/:id/delete-diagnostics`, `/companies*`, `POST /clients/import/preview` (só
+  teste), `POST /clients/import/simulate`, `GET /clients/:id/ai-context`, `GET /knowledge-documents/ai-context`,
+  `GET /ai/knowledge-preview`, `GET /ai/status` e `PUT /ai/usage-config` (só teste), `PUT/DELETE /contacts/:id` (o
+  web usa `/clients/:id/contacts/:contactId`) e o CRUD de `/cultures` (o web usa `/technical/cultures`).
+- Sem consumidor hoje, com uso previsto (não remover): `POST /commercial-automations/run` e
+  `GET /commercial-automations/history` (ativação da automação de inativos); `POST /territories/config/cities/bulk`
+  e `PUT/DELETE /territories/config/cities/:id` (KMZ e edição de cidades); o CRUD de `/goals` (metas).
+- Operação e diagnóstico (curl/docs, sem tela; não dá para afirmar que estão sem uso): `/erp/ultrafv3/diagnostics`,
+  `healthcheck`, `price-diagnostics`, `scheduler/status`, `order-debug/:opportunityId`,
+  `order-readiness/:opportunityId`, `/erp/investigate`, `POST /erp-sync/automatic/run-now`,
+  `/erp-orders/preflight`, `protocol-test` e `zero-num-pedido-dry-run`, `/opportunities/:id/erp/payload-audit`,
+  `debug-payload` e `last-order-error`, `/erp-integration/salesmen-diagnostic`, `/clients/diagnostics/*`,
+  `POST /erp/ultrafv3/sync/partners/by-user/:userId` e os GETs de leitura do `ultraFv3Routes.ts` (`health`,
+  `products`, `partners`, `price-variations`, `prices`, `order-status`).

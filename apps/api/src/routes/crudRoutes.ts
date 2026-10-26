@@ -48,6 +48,7 @@ import {
   NOT_DONE_DESCRIPTION_MAX_LENGTH,
   notDoneReasonError,
   parseAgendaNotDoneReason,
+  parseStopNotDoneReason,
   type AgendaNotDoneReasonCode
 } from "@salesforce-pro/shared";
 import { authorize } from "../middlewares/authorize.js";
@@ -9541,10 +9542,13 @@ router.patch(["/agenda-events/:id/result", "/agenda/events/:id/result"], validat
 
   if (!updated.applied) return res.json(agendaStopResultResponse(updated.stop, null, false));
   if (updated.stop.clientId) {
-    const statusLabel = updated.stop.resultStatus === "realizada" ? "Compromisso concluído" : "Compromisso cancelado";
+    // Parada não realizada: "Compromisso não realizado", com o motivo do catálogo (como no compromisso da Agenda).
+    const isDone = updated.stop.resultStatus === "realizada";
+    const timelineBase = `${AGENDA_STATUS_TIMELINE_LABEL[isDone ? "completed" : "not_done"]}: Visita em roteiro (${stop.agendaEvent.title})`;
+    const notDoneReason = isDone ? null : describeNotDoneReason(parseStopNotDoneReason(updated.stop.resultReason, updated.stop.resultSummary));
     await createEvent({
       type: "status",
-      description: `${statusLabel}: Visita em roteiro (${stop.agendaEvent.title})`,
+      description: notDoneReason ? `${timelineBase}. Motivo: ${notDoneReason}` : timelineBase,
       clientId: updated.stop.clientId,
       ownerSellerId: stop.agendaEvent.sellerId
     });

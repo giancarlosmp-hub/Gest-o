@@ -1,6 +1,7 @@
 import axios from "axios";
 import { toast } from "sonner";
 import type { AxiosRequestConfig, AxiosResponse } from "axios";
+import { shouldWarnServerUnavailable } from "./networkError";
 
 type RetryableAxiosRequestConfig = AxiosRequestConfig & { _retry?: boolean };
 
@@ -204,7 +205,7 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use((r) => r, async (error) => {
   withApiErrorDetails(error);
   const status = error.response?.status;
-  const isNetworkError = !error.response;
+  const isNetworkError = shouldWarnServerUnavailable(error);
   const requestConfig = (error.config || {}) as RetryableAxiosRequestConfig;
   const requestUrl = String(requestConfig.url || "");
   const isAuthLoginRoute = requestUrl.includes("/auth/login");
