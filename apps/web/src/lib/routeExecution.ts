@@ -1,3 +1,4 @@
+import { describeNotDoneReason, notDoneReasonError, parseStopNotDoneReason } from "@salesforce-pro/shared";
 import { NEXT_STEP_DEFAULT_DURATION, nextStepError, nextStepPayload, type NextStepForm } from "./agendaActivity";
 import type { RouteStopAction } from "./routeStopQueue";
 
@@ -30,13 +31,14 @@ export const stopExecutionStatus = (stop: StopLike, queued: RouteStopAction[] = 
 
 export const isRouteFinished = (stops: StopLike[]) => stops.length > 0 && stops.every((stop) => Boolean(stop.resultStatus));
 
-export const STOP_NOT_DONE_REASONS = [
-  { value: "cliente_ausente", label: "Cliente ausente" },
-  { value: "chuva", label: "Chuva" },
-  { value: "estrada", label: "Estrada ruim" },
-  { value: "reagendar", label: "Precisa reagendar" },
-  { value: "outro", label: "Outro" }
-] as const;
+// Motivo da parada não realizada pelo catálogo (@salesforce-pro/shared). Em "outro", o resumo é a descrição; nos
+// demais, o resumo é um detalhe opcional. Os códigos antigos (chuva, estrada, reagendar) são traduzidos na leitura.
+export const stopNotDoneReasonText = (stop: { resultReason?: string | null; resultSummary?: string | null }) => {
+  const parsed = parseStopNotDoneReason(stop.resultReason, stop.resultSummary);
+  if (!parsed) return "não informado";
+  const detail = parsed.code !== "outro" ? stop.resultSummary?.trim() : "";
+  return detail ? `${describeNotDoneReason(parsed)} · ${detail}` : describeNotDoneReason(parsed)!;
+};
 
 export const STOP_SUMMARY_MAX_LENGTH = 240;
 
@@ -82,9 +84,9 @@ export const STOP_REASON_REQUIRED_MESSAGE = "Informe o motivo de a visita não t
 export const STOP_OPPORTUNITY_REQUIRED_MESSAGE = "Escolha a oportunidade desta visita.";
 
 // Primeiro problema do formulário do check-out, ou null. Realizada: resumo obrigatório e, com oportunidade aberta,
-// a mesma regra das atividades. Não realizada: só o motivo.
+// a mesma regra das atividades. Não realizada: o motivo do catálogo e, em "outro", a descrição.
 export const stopResultError = (form: StopResultForm, openOpportunities: OpportunityOption[], now = new Date()) => {
-  if (form.status === "nao_realizada") return form.reason ? null : STOP_REASON_REQUIRED_MESSAGE;
+  if (form.status === "nao_realizada") return form.reason ? notDoneReasonError(form.reason, form.summary) : STOP_REASON_REQUIRED_MESSAGE;
   if (!form.summary.trim()) return STOP_SUMMARY_REQUIRED_MESSAGE;
   if (openOpportunities.length > 1 && !form.opportunityId) return STOP_OPPORTUNITY_REQUIRED_MESSAGE;
   const chosen = openOpportunities.find((opportunity) => opportunity.id === form.opportunityId);

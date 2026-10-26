@@ -26,7 +26,9 @@ const {
   needsNextStepDecision,
   NEXT_STEP_REQUIRED_MESSAGE,
   nextStepPayload,
-  notDoneReasonError,
+  agendaNotDoneReasonText,
+  notDoneFormError,
+  notDonePayload,
   reschedulePayload
 } = await import("../src/lib/agendaActivity");
 
@@ -125,9 +127,27 @@ const route = { type: "roteiro_visita", startsAt: "2026-10-22T03:00:00.000Z", en
 assert.deepEqual(reschedulePayload({ day: "2026-10-28", time: "", durationMinutes: "" }, route, now), { startDateTime: "2026-10-28T03:00:00.000Z", endDateTime: "2026-10-29T02:59:59.999Z" });
 assert.match(dialogs, /api\.patch\(`\/agenda\/\$\{event\.id\}`, payload\)/);
 
-assert.equal(notDoneReasonError(" "), "Informe o motivo de o compromisso não ter sido realizado.");
-assert.equal(notDoneReasonError("Cliente desmarcou"), null);
-assert.match(dialogs, /api\.post\(`\/agenda\/events\/\$\{event\.id\}\/not-done`, \{ reason: reason\.trim\(\) \}\)/);
+// "Não realizado": motivo do catálogo; "outro" exige descrição; texto livre antigo aparece como "Outro".
+assert.equal(notDoneFormError({ reasonCode: "", description: "" }), "Escolha o motivo de não ter sido realizado.");
+assert.equal(notDoneFormError({ reasonCode: "outro", description: " " }), 'Descreva o motivo em "Outro".');
+assert.equal(notDoneFormError({ reasonCode: "outro", description: "Motivo ficticio" }), null);
+for (const code of ["cliente_ausente", "cliente_remarcou", "clima_estrada", "veiculo", "demanda_urgente", "falta_tempo"]) {
+  assert.equal(notDoneFormError({ reasonCode: code, description: "" }), null, code);
+  assert.deepEqual(notDonePayload({ reasonCode: code, description: "ignorada" }), { reasonCode: code }, `${code} sem descrição`);
+}
+assert.deepEqual(notDonePayload({ reasonCode: "outro", description: "  Motivo ficticio " }), { reasonCode: "outro", description: "Motivo ficticio" });
+assert.equal(agendaNotDoneReasonText("falta_tempo"), "Atraso na rota / faltou tempo");
+assert.equal(agendaNotDoneReasonText("outro: Motivo ficticio"), "Outro (Motivo ficticio)");
+assert.equal(agendaNotDoneReasonText("Cliente ficticio desmarcou"), "Outro (Cliente ficticio desmarcou)", "texto livre antigo");
+assert.equal(agendaNotDoneReasonText(null), null);
+assert.match(dialogs, /api\.post\(`\/agenda\/events\/\$\{event\.id\}\/not-done`, notDonePayload\(form\)\)/);
+assert.match(dialogs, /AGENDA_NOT_DONE_REASONS\.map/, "o diálogo lista o catálogo");
+assert.match(agendaPage, /agendaNotDoneReasonText\(selectedEvent\.notDoneReason\)/, "a Agenda mostra o motivo pelo catálogo");
+const executionReport = source("../src/pages/CommercialExecutionReportPage.tsx");
+assert.match(executionReport, /Não realizado por motivo/, "o relatório gerencial mostra a contagem por motivo");
+assert.match(executionReport, /AGENDA_NOT_DONE_REASONS\.map/, "colunas na ordem do catálogo");
+assert.match(executionReport, /reasonCount\(seller\.notDoneByReason, reason\.code\)/, "contagem por vendedor");
+assert.match(executionReport, /reasonCount\(report\.notDoneByReason, reason\.code\)/, "total da equipe");
 for (const [name, page] of [["AgendaPage", agendaPage], ["ActivitiesPage", activitiesPage]] as const) {
   assert.match(page, /<RescheduleDialog/, `${name} usa o Reagendar compartilhado`);
   assert.match(page, /<NotDoneDialog/, `${name} usa o Não realizado compartilhado`);

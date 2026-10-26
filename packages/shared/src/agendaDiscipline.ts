@@ -1,3 +1,10 @@
+import {
+  parseAgendaNotDoneReason,
+  parseStopNotDoneReason,
+  type AgendaNotDoneReasonCode,
+  type NotDoneReasonCounts
+} from "./agendaNotDoneReasons.js";
+
 // Disciplina = planejado na Agenda × concluído (decisão da diretoria, 24/10/2026).
 // Item planejado: cada parada de roteiro conta 1; compromisso avulso conta 1; roteiro sem paradas conta 1
 // pelo status do compromisso. Compromisso "vencido" (cancelamento antigo) fica fora de tudo.
@@ -19,6 +26,8 @@ export type DisciplineAgendaStatus = "open" | "completed" | "not_done" | "cancel
 export type DisciplineStopInput = {
   resultStatus?: string | null;
   checkOutAt?: Date | string | null;
+  resultReason?: string | null;
+  resultSummary?: string | null;
 };
 
 export type DisciplineEventInput = {
@@ -29,12 +38,15 @@ export type DisciplineEventInput = {
   stops?: DisciplineStopInput[];
   // Data informada na atividade vinculada (Activity.date), para a pontualidade.
   completedAt?: Date | string | null;
+  // Motivo do compromisso "não realizado" (AgendaEvent.notDoneReason).
+  notDoneReason?: string | null;
 };
 
 export type DisciplineOutcome = "completed" | "not_done" | "unresolved" | "upcoming" | "neutral";
 
 // punctual: null quando não há data informada para comparar (fica fora da pontualidade).
-export type DisciplineItem = { outcome: DisciplineOutcome; punctual: boolean | null };
+// reason: só no "não realizado", pelo catálogo de motivos (registro antigo ou sem motivo conta como "outro").
+export type DisciplineItem = { outcome: DisciplineOutcome; punctual: boolean | null; reason?: AgendaNotDoneReasonCode };
 
 export type DisciplineTotals = {
   planned: number;
@@ -74,9 +86,14 @@ export const classifyDisciplineItems = (event: DisciplineEventInput, now: Date =
   const hasEnded = toTime(event.endDateTime) < now.getTime();
   const openOutcome: DisciplineOutcome = !hasEnded ? "upcoming" : isLegacy ? "neutral" : "unresolved";
 
+  const eventNotDone = (): DisciplineItem => ({
+    outcome: "not_done",
+    punctual: null,
+    reason: parseAgendaNotDoneReason(event.notDoneReason)?.code ?? "outro"
+  });
   const byEventStatus = (): DisciplineItem => {
     if (event.status === "completed") return { outcome: "completed", punctual: isSameBrazilDay(event.completedAt, event.startDateTime) };
-    if (event.status === "not_done") return { outcome: "not_done", punctual: null };
+    if (event.status === "not_done") return eventNotDone();
     return { outcome: openOutcome, punctual: null };
   };
 
@@ -88,7 +105,10 @@ export const classifyDisciplineItems = (event: DisciplineEventInput, now: Date =
     if (stop.resultStatus === "realizada") {
       return { outcome: "completed", punctual: isSameBrazilDay(stop.checkOutAt, event.startDateTime) };
     }
-    if (stop.resultStatus === "nao_realizada" || event.status === "not_done") return { outcome: "not_done", punctual: null };
+    if (stop.resultStatus === "nao_realizada") {
+      return { outcome: "not_done", punctual: null, reason: parseStopNotDoneReason(stop.resultReason, stop.resultSummary)?.code ?? "outro" };
+    }
+    if (event.status === "not_done") return eventNotDone();
     return { outcome: openOutcome, punctual: null };
   });
 };
@@ -118,6 +138,14 @@ export const addDisciplineItems = (totals: DisciplineTotals, items: DisciplineIt
     }
   }
   return totals;
+};
+
+// Contagem dos "não realizados" por motivo (não muda a taxa: o teto de 20% neutro vale para todos os motivos).
+export const addNotDoneReasons = (counts: NotDoneReasonCounts, items: DisciplineItem[]): NotDoneReasonCounts => {
+  for (const item of items) {
+    if (item.outcome === "not_done") counts[item.reason ?? "outro"] += 1;
+  }
+  return counts;
 };
 
 // Taxa de execução: concluídos ÷ (elegíveis − não realizados neutros). Elegíveis: concluídos, não

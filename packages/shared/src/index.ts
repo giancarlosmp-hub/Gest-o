@@ -5,6 +5,7 @@ export * from "./abcCurve.js";
 export * from "./rankingSellers.js";
 export * from "./clientCollection.js";
 export * from "./agendaDiscipline.js";
+export * from "./agendaNotDoneReasons.js";
 export * from "./proposalNoResponse.js";
 
 /** The browser-facing route. Reverse proxies may forward it with or without

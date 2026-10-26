@@ -41,7 +41,14 @@ import {
   isVisibleInRanking,
   rankingSellerName,
   computeDisciplineRates,
-  emptyDisciplineTotals
+  emptyDisciplineTotals,
+  emptyNotDoneReasonCounts,
+  describeNotDoneReason,
+  formatAgendaNotDoneReason,
+  NOT_DONE_DESCRIPTION_MAX_LENGTH,
+  notDoneReasonError,
+  parseAgendaNotDoneReason,
+  type AgendaNotDoneReasonCode
 } from "@salesforce-pro/shared";
 import { authorize } from "../middlewares/authorize.js";
 import { resolveOwnerId, sellerWhere } from "../utils/access.js";
@@ -49,7 +56,7 @@ import { clientReadableForDetailsWhere } from "../utils/clientHistoricalAccess.j
 import { normalizeCnpj, normalizeState, normalizeText } from "../utils/normalize.js";
 import { brazilDayRange, brazilTodayKey, calendarDayRange, monthDayBounds, shiftDayKey } from "../utils/dateRange.js";
 import { closedOpportunityPeriodWhere, opportunityPeriodWhere } from "../utils/periodFilters.js";
-import { loadAgendaDisciplineBySeller } from "../services/agendaDiscipline.js";
+import { loadAgendaDisciplineBySeller, loadAgendaDisciplineDetailBySeller } from "../services/agendaDiscipline.js";
 import { calculatePipelineMetrics, getWeightedValue, isOpportunityOverdue } from "../utils/pipelineMetrics.js";
 import { loadEffectiveWonContributions, loadEffectiveWonTotals, withEffectiveWin } from "../services/effectiveWins.js";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
@@ -1192,7 +1199,8 @@ const agendaStopGeoSchema = z.object({
 
 const agendaStopResultSchema = z.object({
   status: z.enum(["realizada", "nao_realizada"]),
-  reason: z.enum(["cliente_ausente", "chuva", "estrada", "reagendar", "outro"]).optional(),
+  // Código do catálogo de motivos (@salesforce-pro/shared); "outro" leva a descrição no summary.
+  reason: z.string().max(40).optional(),
   summary: z.string().max(240).optional(),
   // Legado: a tela "Executar roteiro" não envia mais; registros antigos continuam lidos.
   nextStep: z.enum(["criar_followup", "criar_oportunidade", "reagendar"]).optional(),
@@ -2940,7 +2948,7 @@ router.get("/reports/planned-vs-realized", async (req, res) => {
       },
       select: { id: true, name: true }
     }),
-    loadAgendaDisciplineBySeller({ gte: from, lte: to }, scopedSellerId),
+    loadAgendaDisciplineDetailBySeller({ gte: from, lte: to }, scopedSellerId),
     prisma.activity.findMany({
       where: {
         ...(scopedSellerId ? { ownerSellerId: scopedSellerId } : sellerWhere(req)),
@@ -2985,9 +2993,12 @@ router.get("/reports/planned-vs-realized", async (req, res) => {
   }, {});
 
   const teamTotals = emptyDisciplineTotals();
+  const teamNotDoneByReason = emptyNotDoneReasonCounts();
   const sellerRows = sellers.map((seller) => {
-    const totals = disciplineBySeller[seller.id] || emptyDisciplineTotals();
+    const totals = disciplineBySeller[seller.id]?.totals || emptyDisciplineTotals();
+    const notDoneByReason = disciplineBySeller[seller.id]?.notDoneByReason || emptyNotDoneReasonCounts();
     for (const key of Object.keys(teamTotals) as (keyof typeof teamTotals)[]) teamTotals[key] += totals[key];
+    for (const key of Object.keys(teamNotDoneByReason) as (keyof typeof teamNotDoneByReason)[]) teamNotDoneByReason[key] += notDoneByReason[key];
     const rates = computeDisciplineRates(totals);
 
     return {
@@ -2996,6 +3007,7 @@ router.get("/reports/planned-vs-realized", async (req, res) => {
       planned: totals.planned,
       executed: totals.completed,
       notDone: totals.notDone,
+      notDoneByReason,
       unresolved: totals.unresolved,
       upcoming: totals.upcoming,
       extra: extraBySeller[seller.id] || 0,
@@ -3014,6 +3026,7 @@ router.get("/reports/planned-vs-realized", async (req, res) => {
     totalPlanned: teamTotals.planned,
     totalExecuted: teamTotals.completed,
     totalNotDone: teamTotals.notDone,
+    notDoneByReason: teamNotDoneByReason,
     totalUnresolved: teamTotals.unresolved,
     totalUpcoming: teamTotals.upcoming,
     totalExtra: sellerRows.reduce((sum, item) => sum + item.extra, 0),
@@ -9191,14 +9204,17 @@ router.post("/agenda/events/:id/complete", validateBody(agendaCompleteSchema), a
   return res.status(201).json({ agendaEvent: mapAgendaEvent(updated), activityId, nextStepAgendaEventId });
 });
 
-const agendaNotDoneSchema = z.object({ reason: z.string().max(500).optional() });
+const agendaNotDoneSchema = z.object({
+  reasonCode: z.string().max(40).optional(),
+  description: z.string().max(NOT_DONE_DESCRIPTION_MAX_LENGTH).optional()
+});
 
-// "Não realizado": o compromisso não aconteceu; o motivo é obrigatório. Substitui o cancelamento (vencido).
+// "Não realizado": o compromisso não aconteceu; o motivo do catálogo é obrigatório ("outro" exige descrição).
+// Substitui o cancelamento (vencido).
 router.post("/agenda/events/:id/not-done", validateBody(agendaNotDoneSchema), async (req, res) => {
-  const reason = String(req.body.reason || "").trim();
-  if (reason.length < 2) {
-    return res.status(400).json({ message: "Informe o motivo de o compromisso não ter sido realizado." });
-  }
+  const reasonError = notDoneReasonError(req.body.reasonCode, req.body.description);
+  if (reasonError) return res.status(400).json({ message: reasonError });
+  const reason = formatAgendaNotDoneReason(req.body.reasonCode as AgendaNotDoneReasonCode, req.body.description);
   const event = await prisma.agendaEvent.findUnique({
     where: { id: req.params.id },
     select: { id: true, sellerId: true, title: true, type: true, status: true, clientId: true }
@@ -9220,7 +9236,7 @@ router.post("/agenda/events/:id/not-done", validateBody(agendaNotDoneSchema), as
   if (event.clientId) {
     await createEvent({
       type: "status",
-      description: buildAgendaStatusDescription("not_done", event, reason),
+      description: buildAgendaStatusDescription("not_done", event, describeNotDoneReason(parseAgendaNotDoneReason(reason))),
       clientId: event.clientId,
       ownerSellerId: event.sellerId
     });
@@ -9354,6 +9370,31 @@ router.patch(["/agenda-events/:id/check-out", "/agenda/events/:id/check-out"], v
   });
 });
 
+// applied: false quando a parada já tinha resultado; a resposta traz o resultado que vale.
+const agendaStopResultResponse = (
+  stop: {
+    id: string;
+    resultStatus: string | null;
+    resultReason: string | null;
+    resultSummary: string | null;
+    nextStep: string | null;
+    nextStepDate: Date | null;
+    checkOutAt: Date | null;
+  },
+  nextStepAgendaEventId: string | null,
+  applied: boolean
+) => ({
+  id: stop.id,
+  resultStatus: stop.resultStatus,
+  resultReason: stop.resultReason,
+  resultSummary: stop.resultSummary,
+  nextStep: stop.nextStep,
+  nextStepDate: stop.nextStepDate ? stop.nextStepDate.toISOString() : null,
+  checkOutAt: stop.checkOutAt ? stop.checkOutAt.toISOString() : null,
+  nextStepAgendaEventId,
+  applied
+});
+
 router.patch(["/agenda-events/:id/result", "/agenda/events/:id/result"], validateBody(agendaStopResultSchema), async (req, res) => {
   const stop = await prisma.agendaStop.findUnique({
     where: { id: req.params.id },
@@ -9364,8 +9405,16 @@ router.patch(["/agenda-events/:id/result", "/agenda/events/:id/result"], validat
     return res.status(403).json({ message: "Acesso negado." });
   }
 
+  // O primeiro resultado vale: reenvio (fila offline do aparelho, toque duplo) devolve o que já está gravado, sem
+  // aplicar nada de novo (nem linha do tempo, nem próximo passo).
+  if (stop.resultStatus) return res.json(agendaStopResultResponse(stop, null, false));
+
   if (req.body.status === "nao_realizada" && !req.body.reason) {
     return res.status(400).json({ message: "Motivo é obrigatório quando a visita não é realizada." });
+  }
+  if (req.body.status === "nao_realizada") {
+    const reasonError = notDoneReasonError(req.body.reason, req.body.summary);
+    if (reasonError) return res.status(400).json({ message: reasonError });
   }
   const ownerSellerIdForAutoActivity = stop.agendaEvent.sellerId || req.user!.id;
   if (req.body.status === "realizada" && !stop.clientId) {
@@ -9401,8 +9450,9 @@ router.patch(["/agenda-events/:id/result", "/agenda/events/:id/result"], validat
   let nextStepAgendaEventId: string | null = null;
   const updated = await prisma.$transaction(async (tx) => {
     const completionAt = req.body.status === "realizada" ? (stop.checkOutAt ?? new Date()) : null;
-    const updatedStop = await tx.agendaStop.update({
-      where: { id: req.params.id },
+    // Só grava se a parada ainda não tem resultado: dois envios ao mesmo tempo não aplicam os dois.
+    const claimed = await tx.agendaStop.updateMany({
+      where: { id: req.params.id, resultStatus: null },
       data: {
         resultStatus: req.body.status,
         resultReason: req.body.reason,
@@ -9412,6 +9462,9 @@ router.patch(["/agenda-events/:id/result", "/agenda/events/:id/result"], validat
         ...(completionAt && !stop.checkOutAt ? { checkOutAt: completionAt } : {})
       }
     });
+    const updatedStop = await tx.agendaStop.findUnique({ where: { id: req.params.id } });
+    if (!updatedStop) throw new Error("Parada não encontrada.");
+    if (claimed.count === 0) return { stop: updatedStop, applied: false };
 
     if (req.body.status === "realizada") {
       const executionDate = updatedStop.checkOutAt ?? completionAt;
@@ -9483,29 +9536,21 @@ router.patch(["/agenda-events/:id/result", "/agenda/events/:id/result"], validat
       });
     }
 
-    return updatedStop;
+    return { stop: updatedStop, applied: true };
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
-  if (updated.clientId) {
-    const statusLabel = updated.resultStatus === "realizada" ? "Compromisso concluído" : "Compromisso cancelado";
+  if (!updated.applied) return res.json(agendaStopResultResponse(updated.stop, null, false));
+  if (updated.stop.clientId) {
+    const statusLabel = updated.stop.resultStatus === "realizada" ? "Compromisso concluído" : "Compromisso cancelado";
     await createEvent({
       type: "status",
       description: `${statusLabel}: Visita em roteiro (${stop.agendaEvent.title})`,
-      clientId: updated.clientId,
+      clientId: updated.stop.clientId,
       ownerSellerId: stop.agendaEvent.sellerId
     });
   }
 
-  return res.json({
-    id: updated.id,
-    resultStatus: updated.resultStatus,
-    resultReason: updated.resultReason,
-    resultSummary: updated.resultSummary,
-    nextStep: updated.nextStep,
-    nextStepDate: updated.nextStepDate ? updated.nextStepDate.toISOString() : null,
-    checkOutAt: updated.checkOutAt ? updated.checkOutAt.toISOString() : null,
-    nextStepAgendaEventId
-  });
+  return res.json(agendaStopResultResponse(updated.stop, nextStepAgendaEventId, true));
 });
 
 

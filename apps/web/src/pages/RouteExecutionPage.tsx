@@ -1,7 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { toast } from "sonner";
-import { AGENDA_EVENT_TYPE_OPTIONS } from "@salesforce-pro/shared";
+import { AGENDA_EVENT_TYPE_OPTIONS, AGENDA_NOT_DONE_REASONS } from "@salesforce-pro/shared";
 import { useAuth } from "../context/AuthContext";
 import api from "../lib/apiClient";
 import { getApiErrorMessage } from "../lib/apiError";
@@ -10,7 +10,6 @@ import { triggerDashboardRefresh } from "../lib/dashboardRefresh";
 import { NEXT_STEP_REQUIRED_MESSAGE, needsNextStepDecision, type NextStepMode } from "../lib/agendaActivity";
 import {
   STOP_EXECUTION_STATUS_LABELS,
-  STOP_NOT_DONE_REASONS,
   STOP_SUMMARY_MAX_LENGTH,
   initialStopResultForm,
   isRouteFinished,
@@ -18,6 +17,7 @@ import {
   openStreetMapRouteHref,
   stopExecutionStatus,
   stopMapDestination,
+  stopNotDoneReasonText,
   stopResultError,
   stopResultPayload,
   type StopExecutionStatus,
@@ -29,14 +29,21 @@ import {
   flushRouteStopQueue,
   isNetworkError,
   loadRouteStopQueue,
+  loadUnsentRouteStopActions,
   pendingRouteStopActions,
+  queuedRouteStopResult,
+  removeUnsentRouteStopAction,
+  retryUnsentRouteStopAction,
+  type QueuedRouteStopAction,
   type RouteStopAction,
-  type RouteStopGeo
+  type RouteStopGeo,
+  type UnsentRouteStopAction
 } from "../lib/routeStopQueue";
 import type { AgendaStop } from "../models/agenda";
 
 // Executar roteiro: o vendedor faz check-in e check-out em cada parada e registra o resultado. Pensada para o celular;
-// sem internet, check-in e check-out ficam guardados no aparelho e são enviados quando a conexão volta.
+// sem internet, check-in, check-out e resultado ficam guardados no aparelho e são enviados quando a conexão volta. O
+// que o servidor recusar (ou passar de 72 horas sem conexão) aparece em "Não enviados" para reenviar ou corrigir.
 
 type RouteEvent = {
   id: string;
@@ -64,6 +71,19 @@ const fieldClassName = "w-full min-w-0 rounded-lg border border-slate-300 bg-whi
 const labelClassName = "mb-1 block text-xs font-medium uppercase text-slate-500";
 
 const formatTime = (value: string) => formatBrazil(value, { hour: "2-digit", minute: "2-digit" });
+
+const stopLabelOf = (stop: AgendaStop) => `Parada ${stop.order} · ${stop.clientName || "Cliente não informado"}`;
+
+// Mesmo caminho para check-in, check-out e resultado: PATCH /agenda-events/:stopId/<ação>.
+const sendQueuedAction = (item: QueuedRouteStopAction) => api.patch(`/agenda-events/${item.stopId}/${item.action}`, item.payload);
+
+const UNSENT_ACTION_LABEL: Record<RouteStopAction, string> = { "check-in": "Check-in", "check-out": "Check-out", result: "Resultado" };
+
+const unsentDescription = (item: UnsentRouteStopAction) => {
+  if (item.action !== "result") return UNSENT_ACTION_LABEL[item.action];
+  const summary = typeof item.payload.summary === "string" ? item.payload.summary : "";
+  return `${UNSENT_ACTION_LABEL.result}: ${STOP_EXECUTION_STATUS_LABELS[item.payload.status]}${summary ? ` · ${summary}` : ""}`;
+};
 
 const isOpenStage = (stage: string) => stage !== "ganho" && stage !== "perdido";
 
@@ -102,6 +122,8 @@ export default function RouteExecutionPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [queue, setQueue] = useState(() => loadRouteStopQueue(userId));
+  const [unsent, setUnsent] = useState(() => loadUnsentRouteStopActions(userId));
+  const [retryingKey, setRetryingKey] = useState("");
   const [busyStopId, setBusyStopId] = useState("");
   const [isOnline, setIsOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine));
   const [resultStop, setResultStop] = useState<AgendaStop | null>(null);
@@ -146,13 +168,17 @@ export default function RouteExecutionPage() {
     if (!userId || flushingRef.current || !loadRouteStopQueue(userId).length) return;
     flushingRef.current = true;
     try {
-      const result = await flushRouteStopQueue(userId, (item) => api.patch(`/agenda-events/${item.stopId}/${item.action}`, item.payload));
+      const result = await flushRouteStopQueue(userId, sendQueuedAction);
       if (result.sent.length) {
-        toast.success("Check-in e check-out guardados foram enviados.");
+        toast.success("Os registros guardados no aparelho foram enviados.");
+        if (result.sent.some((item) => item.action === "result")) triggerDashboardRefresh({ month: brazilMonthKey() });
         void loadRoute();
       }
+      if (result.notApplied.length) {
+        toast.info("Uma parada já tinha resultado registrado. Vale o primeiro, que aparece na tela.");
+      }
       if (result.refused.length) {
-        toast.error("O servidor recusou um check-in ou check-out guardado. Confira a parada.");
+        toast.error("O servidor recusou um registro guardado. Confira em \"Não enviados\".");
         void loadRoute();
       }
     } finally {
@@ -161,7 +187,10 @@ export default function RouteExecutionPage() {
   }, [userId, loadRoute]);
 
   useEffect(() => {
-    const refresh = () => setQueue(loadRouteStopQueue(userId));
+    const refresh = () => {
+      setQueue(loadRouteStopQueue(userId));
+      setUnsent(loadUnsentRouteStopActions(userId));
+    };
     const goOnline = () => {
       setIsOnline(true);
       void flushQueue();
@@ -187,7 +216,7 @@ export default function RouteExecutionPage() {
   const stops = useMemo(() => [...(routeEvent?.stops || [])].sort((left, right) => left.order - right.order), [routeEvent]);
   const resolvedCount = stops.filter((stop) => stop.resultStatus).length;
   const finished = isRouteFinished(stops);
-  const nextStop = stops.find((stop) => !stop.resultStatus) || null;
+  const nextStop = stops.find((stop) => !stop.resultStatus && !queuedRouteStopResult(queue, stop.id)) || null;
   const userAgent = typeof navigator === "undefined" ? "" : navigator.userAgent;
 
   const patchStop = (stopId: string, patch: Partial<AgendaStop>) =>
@@ -195,9 +224,10 @@ export default function RouteExecutionPage() {
       current ? { ...current, stops: current.stops.map((stop) => (stop.id === stopId ? { ...stop, ...patch } : stop)) } : current
     );
 
-  const openResultForm = async (stop: AgendaStop, status: StopResultForm["status"]) => {
+  // preset: formulário guardado de um resultado recusado ("Corrigir"), com o que o vendedor já tinha preenchido.
+  const openResultForm = async (stop: AgendaStop, status: StopResultForm["status"], preset?: StopResultForm) => {
     setResultStop(stop);
-    setResultForm(initialStopResultForm(status));
+    setResultForm(preset ?? initialStopResultForm(status));
     setOpportunities([]);
     if (!stop.clientId) return;
     setLoadingOpportunities(true);
@@ -207,7 +237,7 @@ export default function RouteExecutionPage() {
       // Oportunidades abertas do cliente da parada, do vendedor do roteiro.
       const open = items.filter((item) => isOpenStage(item.stage) && (!item.ownerSellerId || item.ownerSellerId === routeEvent?.sellerId));
       setOpportunities(open);
-      setResultForm((current) => ({ ...current, opportunityId: initialStopResultForm(current.status, open).opportunityId }));
+      if (!preset) setResultForm((current) => ({ ...current, opportunityId: initialStopResultForm(current.status, open).opportunityId }));
     } catch {
       setOpportunities([]);
     } finally {
@@ -216,7 +246,7 @@ export default function RouteExecutionPage() {
   };
 
   // Check-in e check-out: hora do toque no botão e GPS se houver. Sem internet, ficam guardados no aparelho.
-  const runStopAction = async (stop: AgendaStop, action: RouteStopAction) => {
+  const runStopAction = async (stop: AgendaStop, action: Exclude<RouteStopAction, "result">) => {
     const pressedAt = new Date().toISOString();
     setBusyStopId(stop.id);
     const position = await captureStopPosition();
@@ -229,7 +259,7 @@ export default function RouteExecutionPage() {
       else toast.success("Check-out feito.");
     } catch (error) {
       if (isNetworkError(error) || (typeof navigator !== "undefined" && !navigator.onLine)) {
-        enqueueRouteStopAction(userId, { stopId: stop.id, action, payload });
+        enqueueRouteStopAction(userId, { stopId: stop.id, action, payload, stopLabel: stopLabelOf(stop) });
         toast.info("Sem conexão: guardado no aparelho. Será enviado quando a conexão voltar.");
       } else {
         toast.error(getApiErrorMessage(error, action === "check-in" ? "Não foi possível fazer o check-in." : "Não foi possível fazer o check-out."));
@@ -254,27 +284,63 @@ export default function RouteExecutionPage() {
       toast.error(formError);
       return;
     }
-    if (resultForm.status === "realizada" && pendingRouteStopActions(queue, resultStop.id).includes("check-in")) {
-      toast.error("O check-in desta parada ainda não foi enviado. Aguarde a conexão para registrar a visita.");
+    const payload = stopResultPayload(resultForm);
+    // Com check-in ou check-out ainda guardados, o resultado entra na fila atrás deles, para chegar na ordem certa.
+    const queueResult = (message: string) => {
+      enqueueRouteStopAction(userId, { stopId: resultStop.id, action: "result", payload, form: resultForm, stopLabel: stopLabelOf(resultStop) });
+      removeUnsentRouteStopAction(userId, { stopId: resultStop.id, action: "result" });
+      toast.info(message);
+      closeResultForm();
+    };
+    if (pendingRouteStopActions(queue, resultStop.id).length) {
+      queueResult("Resultado guardado no aparelho. Será enviado depois do check-in e do check-out guardados.");
+      void flushQueue();
       return;
     }
     setSavingResult(true);
     try {
-      const response = await api.patch(`/agenda-events/${resultStop.id}/result`, stopResultPayload(resultForm));
+      const response = await api.patch(`/agenda-events/${resultStop.id}/result`, payload);
       patchStop(resultStop.id, response.data || {});
-      toast.success(resultForm.status === "realizada" ? "Visita registrada." : "Parada marcada como não realizada.");
+      removeUnsentRouteStopAction(userId, { stopId: resultStop.id, action: "result" });
+      if (response.data?.applied === false) toast.info("Esta parada já tinha resultado registrado. Vale o primeiro, que aparece na tela.");
+      else toast.success(resultForm.status === "realizada" ? "Visita registrada." : "Parada marcada como não realizada.");
       closeResultForm();
       triggerDashboardRefresh({ month: brazilMonthKey() });
       void loadRoute();
     } catch (error) {
-      toast.error(
-        isNetworkError(error)
-          ? "Sem conexão. Registre o resultado quando a conexão voltar."
-          : getApiErrorMessage(error, "Não foi possível salvar o resultado.")
-      );
+      if (isNetworkError(error) || (typeof navigator !== "undefined" && !navigator.onLine)) {
+        queueResult("Sem conexão: resultado guardado no aparelho. Será enviado quando a conexão voltar.");
+      }
+      else toast.error(getApiErrorMessage(error, "Não foi possível salvar o resultado."));
     } finally {
       setSavingResult(false);
     }
+  };
+
+  // "Não enviados": reenviar como está, corrigir o resultado no formulário ou descartar.
+  const retryUnsent = async (item: UnsentRouteStopAction) => {
+    setRetryingKey(`${item.stopId}:${item.action}`);
+    try {
+      const result = await retryUnsentRouteStopAction(userId, item, sendQueuedAction);
+      if (result.status === "sent") toast.success("Registro enviado.");
+      else if (result.status === "not_applied") toast.info("Esta parada já tinha resultado registrado. Vale o primeiro, que aparece na tela.");
+      else if (result.status === "network") toast.error("Sem conexão. Tente de novo quando a conexão voltar.");
+      else toast.error(result.message || "O servidor recusou de novo. Corrija ou descarte o registro.");
+      if (result.status !== "network") void loadRoute();
+    } finally {
+      setRetryingKey("");
+    }
+  };
+
+  const correctUnsent = (item: UnsentRouteStopAction) => {
+    const stop = stops.find((candidate) => candidate.id === item.stopId);
+    if (!stop || item.action !== "result") return;
+    void openResultForm(stop, item.payload.status, item.form);
+  };
+
+  const discardUnsent = (item: UnsentRouteStopAction) => {
+    if (!window.confirm("Descartar este registro? Ele não será enviado e os dados guardados no aparelho serão apagados.")) return;
+    removeUnsentRouteStopAction(userId, item);
   };
 
   const chosenOpportunity = opportunities.find((item) => item.id === resultForm.opportunityId) || null;
@@ -330,8 +396,40 @@ export default function RouteExecutionPage() {
           {!isOnline ? "Sem conexão. " : ""}
           {queue.length
             ? `${queue.length === 1 ? "1 registro guardado" : `${queue.length} registros guardados`} no aparelho, aguardando conexão para enviar.`
-            : "Check-in e check-out ficam guardados no aparelho e são enviados quando a conexão voltar."}
+            : "Check-in, check-out e resultado ficam guardados no aparelho e são enviados quando a conexão voltar."}
         </p>
+      ) : null}
+
+      {unsent.length ? (
+        <section aria-labelledby="unsent-title" className="space-y-2 rounded-xl border border-rose-300 bg-rose-50 p-3">
+          <h2 id="unsent-title" className="text-sm font-semibold text-rose-900">Não enviados ({unsent.length})</h2>
+          <p className="text-xs text-rose-800">Os dados continuam guardados no aparelho. Reenvie, corrija ou descarte cada registro.</p>
+          <ul className="space-y-2">
+            {unsent.map((item) => {
+              const key = `${item.stopId}:${item.action}`;
+              const canCorrect = item.action === "result" && stops.some((stop) => stop.id === item.stopId);
+              return (
+                <li key={key} className="space-y-2 rounded-lg border border-rose-200 bg-white p-3">
+                  <p className="break-words text-sm font-semibold text-slate-900">{item.stopLabel || "Parada do roteiro"}</p>
+                  <p className="break-words text-sm text-slate-700">{unsentDescription(item)}</p>
+                  <p className="break-words text-xs font-medium text-rose-800">
+                    {item.unsentReason === "expired" ? "Aviso: " : "Recusado: "}
+                    {item.message || "O servidor não aceitou este registro."}
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" disabled={retryingKey === key} onClick={() => void retryUnsent(item)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60">
+                      {retryingKey === key ? "Enviando..." : "Reenviar"}
+                    </button>
+                    {canCorrect ? (
+                      <button type="button" onClick={() => correctUnsent(item)} className="rounded-lg border border-brand-300 px-3 py-2 text-sm font-medium text-brand-700 hover:bg-brand-50">Corrigir</button>
+                    ) : null}
+                    <button type="button" onClick={() => discardUnsent(item)} className="rounded-lg border border-rose-300 px-3 py-2 text-sm font-medium text-rose-700 hover:bg-rose-50">Descartar</button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
       ) : null}
 
       {finished ? (
@@ -347,7 +445,9 @@ export default function RouteExecutionPage() {
       <ol className="space-y-3">
         {stops.map((stop) => {
           const queued = pendingRouteStopActions(queue, stop.id);
-          const status = stopExecutionStatus(stop, queued);
+          const queuedResult = queuedRouteStopResult(queue, stop.id);
+          // Resultado guardado no aparelho: a parada aparece com ele e sem botões até o envio.
+          const status = !stop.resultStatus && queuedResult ? queuedResult.status : stopExecutionStatus(stop, queued);
           const checkedOut = Boolean(stop.checkOutAt) || queued.includes("check-out");
           const destination = stopMapDestination(stop);
           const busy = busyStopId === stop.id;
@@ -381,13 +481,14 @@ export default function RouteExecutionPage() {
 
               {stop.resultStatus === "realizada" && stop.resultSummary ? <p className="break-words text-sm text-slate-700">{stop.resultSummary}</p> : null}
               {stop.resultStatus === "nao_realizada" ? (
-                <p className="text-sm text-rose-800">
-                  Motivo: {STOP_NOT_DONE_REASONS.find((reason) => reason.value === stop.resultReason)?.label || "não informado"}
-                  {stop.resultSummary ? ` · ${stop.resultSummary}` : ""}
-                </p>
+                <p className="break-words text-sm text-rose-800">Motivo: {stopNotDoneReasonText(stop)}</p>
               ) : null}
 
-              {!stop.resultStatus ? (
+              {!stop.resultStatus && queuedResult ? (
+                <p className="text-sm text-amber-900">Resultado guardado no aparelho, aguardando conexão para enviar.</p>
+              ) : null}
+
+              {!stop.resultStatus && !queuedResult ? (
                 <div className="grid grid-cols-2 gap-2">
                   {status === "pendente" ? (
                     <button type="button" disabled={busy} onClick={() => void runStopAction(stop, "check-in")} className="col-span-2 rounded-lg bg-brand-700 px-3 py-3 text-sm font-semibold text-white hover:bg-brand-800 disabled:opacity-60">
@@ -460,12 +561,12 @@ export default function RouteExecutionPage() {
                       <label className={labelClassName} htmlFor="stop-reason">Motivo (obrigatório)</label>
                       <select id="stop-reason" required className={fieldClassName} value={resultForm.reason} onChange={(change) => setResultForm((current) => ({ ...current, reason: change.target.value }))}>
                         <option value="">Selecione</option>
-                        {STOP_NOT_DONE_REASONS.map((reason) => <option key={reason.value} value={reason.value}>{reason.label}</option>)}
+                        {AGENDA_NOT_DONE_REASONS.map((reason) => <option key={reason.code} value={reason.code}>{reason.label}</option>)}
                       </select>
                     </div>
                     <div>
-                      <label className={labelClassName} htmlFor="stop-not-done-detail">Detalhe (opcional)</label>
-                      <textarea id="stop-not-done-detail" maxLength={STOP_SUMMARY_MAX_LENGTH} className={`${fieldClassName} min-h-20`} value={resultForm.summary} onChange={(change) => setResultForm((current) => ({ ...current, summary: change.target.value }))} />
+                      <label className={labelClassName} htmlFor="stop-not-done-detail">{resultForm.reason === "outro" ? "Descrição (obrigatória)" : "Detalhe (opcional)"}</label>
+                      <textarea id="stop-not-done-detail" required={resultForm.reason === "outro"} maxLength={STOP_SUMMARY_MAX_LENGTH} className={`${fieldClassName} min-h-20`} value={resultForm.summary} onChange={(change) => setResultForm((current) => ({ ...current, summary: change.target.value }))} />
                     </div>
                   </>
                 ) : (

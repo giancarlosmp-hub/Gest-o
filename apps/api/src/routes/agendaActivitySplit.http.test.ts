@@ -176,6 +176,11 @@ setModel("agendaStop", {
     return stop ? { ...stop, agendaEvent: byId(agendaEvents, stop.agendaEventId) } : null;
   },
   update: async ({ where, data }: any) => Object.assign(byId(agendaStops, where.id)!, data),
+  updateMany: async ({ where, data }: any) => {
+    const rows = agendaStops.filter((row) => matches(row, where));
+    rows.forEach((row) => Object.assign(row, data));
+    return { count: rows.length };
+  },
   count: async ({ where }: any) => agendaStops.filter((row) => matches(row, where)).length,
 });
 setModel("timelineEvent", { create: async ({ data }: any) => { timelineEvents.push(data); return { id: `tl-${timelineEvents.length}`, ...data }; } });
@@ -295,18 +300,25 @@ try {
   assert.equal((await call("PATCH", "/agenda/evt-no-activity", "seller-a", { status: "cancelled" })).status, 400);
   results.push("completed_requires_activity=PASS no_new_vencido=PASS");
 
-  // 7. Não realizado exige motivo.
+  // 7. Não realizado exige o motivo do catálogo; "outro" exige descrição. Texto livre não é mais aceito.
   const notDoneWithout = await call("POST", "/agenda/events/evt-not-done/not-done", "seller-a", {});
   assert.equal(notDoneWithout.status, 400);
-  assert.equal(notDoneWithout.json.message, "Informe o motivo de o compromisso não ter sido realizado.");
-  const notDone = await call("POST", "/agenda/events/evt-not-done/not-done", "seller-a", { reason: "Cliente ficticio ausente" });
+  assert.equal(notDoneWithout.json.message, "Escolha o motivo de não ter sido realizado.");
+  const freeText = await call("POST", "/agenda/events/evt-not-done/not-done", "seller-a", { reason: "Cliente ficticio ausente" });
+  assert.equal(freeText.status, 400, "texto livre (cliente antigo) é recusado");
+  assert.equal((await call("POST", "/agenda/events/evt-not-done/not-done", "seller-a", { reasonCode: "chuva" })).status, 400, "código fora do catálogo");
+  const otherWithout = await call("POST", "/agenda/events/evt-not-done/not-done", "seller-a", { reasonCode: "outro", description: " " });
+  assert.equal(otherWithout.status, 400);
+  assert.equal(otherWithout.json.message, 'Descreva o motivo em "Outro".');
+  assert.equal(byId(agendaEvents, "evt-not-done")!.status, "agendado");
+  const notDone = await call("POST", "/agenda/events/evt-not-done/not-done", "seller-a", { reasonCode: "outro", description: "Cliente ficticio em viagem" });
   assert.equal(notDone.status, 200);
   assert.equal(notDone.json.status, "not_done");
-  assert.equal(notDone.json.notDoneReason, "Cliente ficticio ausente");
-  assert.deepEqual([byId(agendaEvents, "evt-not-done")!.status, byId(agendaEvents, "evt-not-done")!.notDoneReason], ["nao_realizado", "Cliente ficticio ausente"]);
-  assert(timelineEvents.some((row) => row.description.includes("Compromisso não realizado") && row.description.includes("Motivo: Cliente ficticio ausente")));
-  assert.equal((await call("POST", "/agenda/events/evt-not-done/not-done", "seller-a", { reason: "De novo" })).status, 400, "só agendado");
-  results.push("not_done_requires_reason=PASS");
+  assert.equal(notDone.json.notDoneReason, "outro: Cliente ficticio em viagem");
+  assert.deepEqual([byId(agendaEvents, "evt-not-done")!.status, byId(agendaEvents, "evt-not-done")!.notDoneReason], ["nao_realizado", "outro: Cliente ficticio em viagem"]);
+  assert(timelineEvents.some((row) => row.description.includes("Compromisso não realizado") && row.description.includes("Motivo: Outro (Cliente ficticio em viagem)")));
+  assert.equal((await call("POST", "/agenda/events/evt-not-done/not-done", "seller-a", { reasonCode: "veiculo" })).status, 400, "só agendado");
+  results.push("not_done_requires_catalog_reason=PASS other_requires_description=PASS");
 
   // 8. Reabrir: só gerente/diretor; a atividade vinculada fica e o evento vai para a timeline.
   const sellerReopen = await call("PATCH", "/agenda/evt-reopen", "seller-a", { status: "planned" });
@@ -394,11 +406,44 @@ try {
   const notDoneNoReason = await call("PATCH", "/agenda-events/stop-2/result", "seller-a", { status: "nao_realizada" });
   assert.equal(notDoneNoReason.status, 400);
   assert.equal(notDoneNoReason.json.message, "Motivo é obrigatório quando a visita não é realizada.");
+  const legacyCode = await call("PATCH", "/agenda-events/stop-2/result", "seller-a", { status: "nao_realizada", reason: "chuva" });
+  assert.equal(legacyCode.status, 400, "código antigo da parada não é aceito em gravação nova");
+  assert.equal(legacyCode.json.message, "Escolha o motivo de não ter sido realizado.");
+  const stopOtherWithout = await call("PATCH", "/agenda-events/stop-2/result", "seller-a", { status: "nao_realizada", reason: "outro" });
+  assert.equal(stopOtherWithout.status, 400);
+  assert.equal(stopOtherWithout.json.message, 'Descreva o motivo em "Outro".');
+  assert.equal(byId(agendaStops, "stop-2")!.resultStatus, null);
   assert.equal((await call("PATCH", "/agenda-events/stop-3/result", "seller-a", { status: "nao_realizada", reason: "cliente_ausente" })).status, 200);
   assert.equal(byId(agendaEvents, "evt-route")!.status, "agendado");
-  assert.equal((await call("PATCH", "/agenda-events/stop-2/result", "seller-a", { status: "nao_realizada", reason: "chuva" })).status, 200);
+  const stopOther = await call("PATCH", "/agenda-events/stop-2/result", "seller-a", { status: "nao_realizada", reason: "outro", summary: "Porteira ficticia fechada" });
+  assert.equal(stopOther.status, 200);
+  assert.deepEqual([stopOther.json.resultReason, stopOther.json.resultSummary, stopOther.json.applied], ["outro", "Porteira ficticia fechada", true]);
   assert.equal(byId(agendaEvents, "evt-route")!.status, "realizado", "todas as paradas resolvidas");
-  results.push("stop_not_done_requires_reason=PASS route_done_when_all_stops_resolved=PASS");
+  results.push("stop_not_done_requires_reason=PASS stop_other_requires_description=PASS route_done_when_all_stops_resolved=PASS");
+
+  // Primeiro resultado vale: reenvio (fila offline) devolve o que está gravado, sem linha do tempo nem próximo passo.
+  const eventsBeforeResend = agendaEvents.length;
+  const timelineBeforeResend = timelineEvents.length;
+  const activitiesBeforeResend = activities.length;
+  const resendDone = await call("PATCH", "/agenda-events/stop-1/result", "seller-a", {
+    status: "realizada",
+    summary: "Outro resumo ficticio",
+    opportunityId: "opp-open",
+    nextStepEvent: { type: "visita", startsAt: "2026-10-28T13:00:00.000Z" },
+  });
+  assert.equal(resendDone.status, 200);
+  assert.deepEqual(
+    [resendDone.json.applied, resendDone.json.resultStatus, resendDone.json.resultSummary, resendDone.json.nextStepAgendaEventId],
+    [false, "realizada", "Visita ficticia feita", null]
+  );
+  const resendOther = await call("PATCH", "/agenda-events/stop-3/result", "seller-a", { status: "nao_realizada", reason: "veiculo" });
+  assert.deepEqual([resendOther.status, resendOther.json.applied, resendOther.json.resultReason], [200, false, "cliente_ausente"], "vale o primeiro motivo");
+  assert.deepEqual(
+    [agendaEvents.length, timelineEvents.length, activities.length],
+    [eventsBeforeResend, timelineBeforeResend, activitiesBeforeResend],
+    "reenvio não cria compromisso, linha do tempo nem atividade"
+  );
+  results.push("first_result_wins=PASS");
 
   // 10. Pendências: passados não concluídos dos últimos 30 dias (Brasília), no escopo; antigos só como contador.
   const sellerPending = await call("GET", "/agenda/pending", "seller-a");
@@ -455,6 +500,20 @@ try {
   assert.equal((await call("PATCH", "/activities/act-old-done/done", "seller-a", { done: false })).status, 400);
   assert.equal((await call("PUT", "/activities/act-old-done", "seller-a", { date: "2026-10-25T12:00:00.000Z" })).status, 400, "realizada não vai para data futura");
   results.push("legacy_readable=PASS");
+
+  // 13. Cada motivo do catálogo é aceito na Agenda e na Rota.
+  const codes = ["cliente_ausente", "cliente_remarcou", "clima_estrada", "veiculo", "demanda_urgente", "falta_tempo", "outro"];
+  for (const code of codes) {
+    const description = code === "outro" ? "Motivo ficticio" : undefined;
+    agendaEvents.push(event(`evt-reason-${code}`, { type: "visita", startDateTime: daysAgo(2), endDateTime: daysAgo(2) }));
+    const marked = await call("POST", `/agenda/events/evt-reason-${code}/not-done`, "seller-a", { reasonCode: code, description });
+    assert.equal(marked.status, 200, `Agenda ${code}`);
+    assert.equal(byId(agendaEvents, `evt-reason-${code}`)!.notDoneReason, code === "outro" ? "outro: Motivo ficticio" : code);
+    agendaStops.push({ id: `stop-reason-${code}`, agendaEventId: "evt-route", order: 10 + codes.indexOf(code), clientId: "cli-a", checkInAt: null, checkOutAt: null, resultStatus: null });
+    const stopMarked = await call("PATCH", `/agenda-events/stop-reason-${code}/result`, "seller-a", { status: "nao_realizada", reason: code, summary: description });
+    assert.deepEqual([stopMarked.status, stopMarked.json.resultReason, stopMarked.json.applied], [200, code, true], `Rota ${code}`);
+  }
+  results.push("every_reason_accepted=PASS");
 
   console.log(`AGENDA_ACTIVITY_SPLIT=PASS ${results.join(" ")}`);
 } finally {

@@ -1006,3 +1006,34 @@ Pendente (fora deste PR):
   `/partners` e a reativar os que o ERP marca como cliente (exceto os da limpeza da carteira). Decidir antes.
 - Transferir a carteira dos 8 clientes de vendedor inativo.
 - `ensureSmokeBootstrap.ts` e os seeds de preview/teste criam cliente sem tenant (não rodam em produção).
+
+### TD-AGENDA-NOT-DONE-REASONS — motivo de "Não realizado" em texto livre e resultado da parada fora da fila offline
+
+**Código pronto, aguardando merge.** Decisões do Giancarlos de 26/10/2026: catálogo fixo em
+`packages/shared/src/agendaNotDoneReasons.ts`, só validação na aplicação com as colunas atuais (sem migration, sem
+mudança no manifesto nem nas gates de schema); mapeamento dos códigos antigos da parada só na leitura (chuva e
+estrada → `clima_estrada`; reagendar → "Outro (Precisa reagendar)"); resultado da parada na fila offline com a lista
+"Não enviados"; primeiro resultado vale; fila de 72 h, item expirado vai para "Não enviados" com aviso.
+
+- Agenda: `POST /agenda/events/:id/not-done` recebe `reasonCode` (+ `description` em "outro") e grava em
+  `notDoneReason` o código ou "outro: descrição". Texto livre (`reason`) não é mais aceito: uma aba antiga do web
+  aberta durante o deploy recebe "Escolha o motivo de não ter sido realizado." e precisa recarregar.
+- Rota: `PATCH /agenda-events/:stopId/result` aceita só os códigos do catálogo; "outro" exige o resumo. Com resultado já
+  gravado, devolve o atual com `applied: false` (antes regravava e criava de novo linha do tempo e próximo passo).
+- Fila (`routeStopQueue.ts`): check-in, check-out e resultado por parada, primeira ação de cada tipo vale, envio em
+  ordem e parada no primeiro erro de rede. "Não enviados" fica só no aparelho (`localStorage`, por usuário), sem
+  prazo, até o vendedor reenviar, corrigir (resultado de parada do roteiro aberto) ou descartar.
+- Relatório: `/reports/planned-vs-realized` devolve `notDoneByReason` por vendedor e da equipe; a taxa não muda.
+
+Pendente (fora deste PR):
+
+- Código morto em `AgendaPage.tsx`: `onCheckInStop` e `onCheckOutStop` nunca são chamados, então o modal antigo de
+  resultado da parada é inalcançável (enviaria "não realizada" sem motivo). Remover no PR de limpeza.
+- O banco não impede código fora do catálogo (validação só na API); um texto livre antigo que comece com
+  "<código>: " seria lido como o código.
+- Linha do tempo da parada não realizada continua "Compromisso cancelado: Visita em roteiro (...)", sem o motivo.
+- "Realizada" registrada sem internet não carrega as oportunidades do cliente; se o servidor recusar pela regra do
+  próximo passo, o item vai para "Não enviados" e o vendedor corrige no formulário.
+- Item de "Não enviados" de outro roteiro só pode ser reenviado ou descartado na tela do roteiro aberto.
+- No Windows, `npm run test:*` da API falha no `prisma generate` quando a DLL do Prisma está em uso (EPERM); os testes
+  rodam direto com `npx tsx` (o schema não mudou).

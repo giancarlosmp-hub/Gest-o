@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Bar } from "react-chartjs-2";
 import { BarElement, CategoryScale, Chart as ChartJS, Legend, LinearScale, Tooltip } from "chart.js";
+import { AGENDA_NOT_DONE_REASONS, type NotDoneReasonCounts } from "@salesforce-pro/shared";
 import api from "../lib/apiClient";
 import { useAuth } from "../context/AuthContext";
 import { formatNumberBR, formatPercentBR } from "../lib/formatters";
@@ -13,6 +14,7 @@ type ReportSeller = {
   planned: number;
   executed: number;
   notDone: number;
+  notDoneByReason?: NotDoneReasonCounts;
   unresolved: number;
   upcoming: number;
   extra: number;
@@ -26,6 +28,7 @@ type PlannedVsRealizedResponse = {
   totalPlanned: number;
   totalExecuted: number;
   totalNotDone: number;
+  notDoneByReason?: NotDoneReasonCounts;
   totalUnresolved: number;
   totalUpcoming: number;
   totalExtra: number;
@@ -59,6 +62,13 @@ const getPerformanceClass = (rate: number) => {
 };
 
 const cardClass = "rounded-2xl border border-slate-200 bg-white p-5 shadow-sm";
+
+// Motivos de "Não realizado" na ordem do catálogo (Agenda e Rota juntas). Sem a contagem (API antiga), fica 0.
+const NOT_DONE_REASON_COLUMNS = AGENDA_NOT_DONE_REASONS.map((reason) => ({
+  code: reason.code,
+  label: reason.code === "outro" ? "Outro" : reason.label
+}));
+const reasonCount = (counts: NotDoneReasonCounts | undefined, code: keyof NotDoneReasonCounts) => counts?.[code] ?? 0;
 
 const getCurrentWeekStart = () => {
   const now = new Date();
@@ -271,6 +281,66 @@ export default function CommercialExecutionReportPage() {
         <div className="mt-4 grid gap-2 text-sm text-slate-600 md:grid-cols-2">
           <div>Follow-ups gerados: <span className="font-semibold text-slate-900">{formatNumberBR(report.followUpGenerated)}</span></div>
           <div>Oportunidades geradas: <span className="font-semibold text-slate-900">{formatNumberBR(report.opportunitiesGenerated)}</span></div>
+        </div>
+      </section>
+
+      <section className={cardClass}>
+        <h3 className="text-base font-semibold text-slate-900">Não realizado por motivo</h3>
+        <p className="mb-4 mt-1 text-xs text-slate-500">
+          Compromissos da Agenda e paradas de roteiro no mesmo catálogo. Registros antigos com texto livre contam como "Outro".
+        </p>
+        <div className="hidden overflow-x-auto md:block">
+          <table className="min-w-[760px] w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 text-left text-slate-500">
+                <th className="py-2 pr-3 font-medium">Vendedor</th>
+                {NOT_DONE_REASON_COLUMNS.map((reason) => <th key={reason.code} className="py-2 pr-3 font-medium">{reason.label}</th>)}
+                <th className="py-2 pr-3 font-medium">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {report.sellers.map((seller) => (
+                <tr key={seller.sellerId} className="border-b border-slate-100">
+                  <td className="py-2 pr-3 text-slate-700">{seller.sellerName}</td>
+                  {NOT_DONE_REASON_COLUMNS.map((reason) => (
+                    <td key={reason.code} className="py-2 pr-3 text-slate-700">{formatNumberBR(reasonCount(seller.notDoneByReason, reason.code))}</td>
+                  ))}
+                  <td className="py-2 pr-3 font-semibold text-slate-900">{formatNumberBR(seller.notDone)}</td>
+                </tr>
+              ))}
+              {report.sellers.length > 1 ? (
+                <tr>
+                  <td className="py-2 pr-3 font-semibold text-slate-900">Equipe</td>
+                  {NOT_DONE_REASON_COLUMNS.map((reason) => (
+                    <td key={reason.code} className="py-2 pr-3 font-semibold text-slate-900">{formatNumberBR(reasonCount(report.notDoneByReason, reason.code))}</td>
+                  ))}
+                  <td className="py-2 pr-3 font-semibold text-slate-900">{formatNumberBR(report.totalNotDone)}</td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+        <div className="space-y-3 md:hidden">
+          {report.sellers.map((seller) => {
+            const reasons = NOT_DONE_REASON_COLUMNS.filter((reason) => reasonCount(seller.notDoneByReason, reason.code) > 0);
+            return (
+              <article key={seller.sellerId} className="rounded-xl border border-slate-200 p-3 text-sm">
+                <h4 className="font-semibold text-slate-900">{seller.sellerName}</h4>
+                {reasons.length ? (
+                  <dl className="mt-2 space-y-1">
+                    {reasons.map((reason) => (
+                      <div key={reason.code} className="flex justify-between gap-3">
+                        <dt className="min-w-0 break-words text-slate-500">{reason.label}</dt>
+                        <dd className="shrink-0 text-slate-700">{formatNumberBR(reasonCount(seller.notDoneByReason, reason.code))}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                ) : (
+                  <p className="mt-2 text-slate-500">Nenhum não realizado no período.</p>
+                )}
+              </article>
+            );
+          })}
         </div>
       </section>
 

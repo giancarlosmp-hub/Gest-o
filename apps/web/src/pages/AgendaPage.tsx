@@ -23,7 +23,7 @@ import {
   fromBrazilDateTimeInput,
   shiftBrazilDayKey
 } from "../lib/brazilDate";
-import { agendaEventActions, completeAgendaEventHref, PENDING_WINDOW_DAYS } from "../lib/agendaActivity";
+import { agendaEventActions, agendaNotDoneReasonText, completeAgendaEventHref, PENDING_WINDOW_DAYS } from "../lib/agendaActivity";
 import { NotDoneDialog, RescheduleDialog } from "../components/agenda/AgendaEventDialogs";
 
 type Seller = { id: string; name: string };
@@ -1512,7 +1512,7 @@ export default function AgendaPage() {
               <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Dados do compromisso</p>
               <p className="text-sm text-slate-700"><strong>Tipo:</strong> {TYPE_LABEL[selectedEvent.type]}</p>
               <p className="text-sm text-slate-700"><strong>Status:</strong> {STATUS_LABEL[selectedEvent.status]}</p>
-              {selectedEvent.status === "not_done" && selectedEvent.notDoneReason ? <p className="text-sm text-slate-700"><strong>Motivo:</strong> {selectedEvent.notDoneReason}</p> : null}
+              {selectedEvent.status === "not_done" && selectedEvent.notDoneReason ? <p className="text-sm text-slate-700"><strong>Motivo:</strong> {agendaNotDoneReasonText(selectedEvent.notDoneReason)}</p> : null}
               <p className="text-sm text-slate-700"><strong>Observações:</strong> {selectedEvent.notes || "Sem observações."}</p>
             </section>
 
