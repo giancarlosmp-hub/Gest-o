@@ -85,6 +85,74 @@ const br = (dayTime: string) => new Date(`${dayTime}:00.000-03:00`);
   assert.equal(afterCutoff.unresolved, 1);
 }
 
+// ---------- Motivos de "Não realizado" (@salesforce-pro/shared) ----------
+{
+  const now = br("2026-11-06T12:00");
+  const codes = ["cliente_ausente", "cliente_remarcou", "clima_estrada", "veiculo", "demanda_urgente", "falta_tempo", "outro"];
+  assert.deepEqual(shared.AGENDA_NOT_DONE_REASON_CODES, codes, "catálogo fixo, nesta ordem");
+
+  // Cada motivo: validação, gravação e leitura na Agenda e na Rota.
+  for (const code of codes) {
+    const description = code === "outro" ? "Motivo ficticio" : null;
+    assert.equal(shared.notDoneReasonError(code, description), null, `${code} aceito`);
+    const stored = shared.formatAgendaNotDoneReason(code as never, description);
+    assert.deepEqual(shared.parseAgendaNotDoneReason(stored), { code, description, legacy: false }, `${code} lido na Agenda`);
+    assert.deepEqual(shared.parseStopNotDoneReason(code, description), { code, description, legacy: false }, `${code} lido na Rota`);
+  }
+  assert.equal(shared.formatAgendaNotDoneReason("outro", "  Motivo ficticio  "), "outro: Motivo ficticio");
+  assert.equal(shared.formatAgendaNotDoneReason("veiculo", "ignorado"), "veiculo", "só \"outro\" leva descrição");
+  assert.equal(shared.describeNotDoneReason(shared.parseAgendaNotDoneReason("veiculo")), "Problema com veículo");
+  assert.equal(shared.describeNotDoneReason(shared.parseAgendaNotDoneReason("outro: Motivo ficticio")), "Outro (Motivo ficticio)");
+
+  // Código desconhecido ou ausente é recusado; "outro" exige descrição (mínimo 2 caracteres).
+  assert.equal(shared.notDoneReasonError(undefined), shared.NOT_DONE_REASON_REQUIRED_MESSAGE);
+  assert.equal(shared.notDoneReasonError("chuva"), shared.NOT_DONE_REASON_REQUIRED_MESSAGE, "código antigo não é aceito em gravação nova");
+  assert.equal(shared.notDoneReasonError("Texto livre ficticio"), shared.NOT_DONE_REASON_REQUIRED_MESSAGE);
+  assert.equal(shared.notDoneReasonError("outro"), shared.NOT_DONE_DESCRIPTION_REQUIRED_MESSAGE);
+  assert.equal(shared.notDoneReasonError("outro", "  x "), shared.NOT_DONE_DESCRIPTION_REQUIRED_MESSAGE);
+
+  // Registros antigos: texto livre da Agenda vira "Outro" com o texto original; códigos antigos da Rota são traduzidos.
+  assert.deepEqual(shared.parseAgendaNotDoneReason("Cliente ficticio viajou"), { code: "outro", description: "Cliente ficticio viajou", legacy: true });
+  assert.equal(shared.describeNotDoneReason(shared.parseAgendaNotDoneReason("Cliente ficticio viajou")), "Outro (Cliente ficticio viajou)");
+  assert.equal(shared.parseAgendaNotDoneReason(null), null);
+  assert.equal(shared.parseAgendaNotDoneReason("  "), null);
+  const legacyStop = (reason: string, summary: string | null = null) => shared.describeNotDoneReason(shared.parseStopNotDoneReason(reason, summary));
+  assert.equal(legacyStop("cliente_ausente"), "Cliente ausente / não atendeu");
+  assert.equal(legacyStop("chuva"), "Clima ou condição da estrada");
+  assert.equal(legacyStop("estrada"), "Clima ou condição da estrada");
+  assert.equal(legacyStop("reagendar"), "Outro (Precisa reagendar)");
+  assert.equal(legacyStop("outro"), "Outro", "\"outro\" antigo sem resumo");
+  assert.equal(legacyStop("outro", "Resumo ficticio"), "Outro (Resumo ficticio)");
+  assert.deepEqual(shared.parseStopNotDoneReason("chuva"), { code: "clima_estrada", description: null, legacy: true });
+
+  // Disciplina: cada "não realizado" é contado pelo motivo, Agenda e Rota no mesmo catálogo. A taxa não muda.
+  const events: Parameters<typeof shared.classifyDisciplineItems>[0][] = [
+    { type: "visita", status: "not_done", notDoneReason: "veiculo", startDateTime: br("2026-11-03T08:00"), endDateTime: br("2026-11-03T09:00") },
+    { type: "ligacao", status: "not_done", notDoneReason: "Texto livre ficticio", startDateTime: br("2026-11-03T10:00"), endDateTime: br("2026-11-03T10:30") },
+    {
+      type: "roteiro_visita",
+      status: "open",
+      startDateTime: br("2026-11-04T08:00"),
+      endDateTime: br("2026-11-04T18:00"),
+      stops: [
+        { resultStatus: "nao_realizada", resultReason: "chuva" },
+        { resultStatus: "nao_realizada", resultReason: "clima_estrada" },
+        { resultStatus: "nao_realizada", resultReason: "reagendar" },
+        { resultStatus: "nao_realizada", resultReason: "falta_tempo" },
+        { resultStatus: "realizada", checkOutAt: br("2026-11-04T10:00") }
+      ]
+    },
+    // Roteiro não realizado inteiro: as paradas abertas levam o motivo do compromisso.
+    { type: "roteiro_visita", status: "not_done", notDoneReason: "cliente_remarcou", startDateTime: br("2026-11-05T08:00"), endDateTime: br("2026-11-05T18:00"), stops: [{}, { resultStatus: "nao_realizada", resultReason: "cliente_ausente" }] }
+  ];
+  const items = events.flatMap((item) => shared.classifyDisciplineItems(item, now));
+  const counts = shared.addNotDoneReasons(shared.emptyNotDoneReasonCounts(), items);
+  assert.deepEqual(counts, { cliente_ausente: 1, cliente_remarcou: 1, clima_estrada: 2, veiculo: 1, demanda_urgente: 0, falta_tempo: 1, outro: 2 });
+  const totals = shared.addDisciplineItems(shared.emptyDisciplineTotals(), items);
+  assert.equal(totals.notDone, 8);
+  assert.equal(Object.values(counts).reduce((sum, value) => sum + value, 0), totals.notDone, "todo não realizado tem um motivo");
+}
+
 // ---------- Rotas ----------
 const users: Row[] = [
   { id: "director-x", name: "Diretora Ficticia", role: "diretor", isActive: true },
