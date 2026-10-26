@@ -1,3 +1,4 @@
+import { describeNotDoneReason, notDoneReasonError, parseAgendaNotDoneReason } from "@salesforce-pro/shared";
 import { brazilDateTime, brazilDayKeyOf, brazilTimeKey, brazilTodayKey } from "./brazilDate";
 import { isActivityCatalogType } from "../constants/activityTypes";
 
@@ -139,8 +140,20 @@ export const nextStepPayload = (nextStep: NextStepForm) => {
 // Janela das Pendências (GET /agenda/pending): compromissos dos últimos 30 dias de Brasília.
 export const PENDING_WINDOW_DAYS = 30;
 
-export const NOT_DONE_REASON_MESSAGE = "Informe o motivo de o compromisso não ter sido realizado.";
-export const notDoneReasonError = (reason: string) => (hasReason(reason) ? null : NOT_DONE_REASON_MESSAGE);
+// "Não realizado": motivo do catálogo (@salesforce-pro/shared); "outro" exige descrição.
+export type NotDoneForm = { reasonCode: string; description: string };
+
+export const notDoneFormError = (form: NotDoneForm) => notDoneReasonError(form.reasonCode, form.description);
+
+// Corpo de POST /agenda/events/:id/not-done. Só "outro" leva a descrição.
+export const notDonePayload = (form: NotDoneForm) => ({
+  reasonCode: form.reasonCode,
+  ...(form.reasonCode === "outro" ? { description: form.description.trim() } : {})
+});
+
+// Texto do motivo gravado; o texto livre antigo aparece como "Outro (texto original)".
+export const agendaNotDoneReasonText = (notDoneReason: string | null | undefined) =>
+  describeNotDoneReason(parseAgendaNotDoneReason(notDoneReason));
 
 type RescheduleForm = { day: string; time: string; durationMinutes: string };
 

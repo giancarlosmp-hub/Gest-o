@@ -3,7 +3,8 @@ import { toast } from "sonner";
 import api from "../../lib/apiClient";
 import { getApiErrorMessage } from "../../lib/apiError";
 import { brazilDayKeyOf, brazilTimeKey, brazilTodayKey } from "../../lib/brazilDate";
-import { eventDurationMinutes, notDoneReasonError, reschedulePayload } from "../../lib/agendaActivity";
+import { AGENDA_NOT_DONE_REASONS, NOT_DONE_DESCRIPTION_MAX_LENGTH } from "@salesforce-pro/shared";
+import { eventDurationMinutes, notDoneFormError, notDonePayload, reschedulePayload, type NotDoneForm } from "../../lib/agendaActivity";
 
 // Janelas "Reagendar" e "Não realizado" de um compromisso, usadas pela Agenda e pelas Pendências de Atividades.
 
@@ -102,19 +103,19 @@ export function RescheduleDialog({ event, onClose, onDone }: DialogProps) {
 }
 
 export function NotDoneDialog({ event, onClose, onDone }: DialogProps) {
-  const [reason, setReason] = useState("");
+  const [form, setForm] = useState<NotDoneForm>({ reasonCode: "", description: "" });
   const [saving, setSaving] = useState(false);
 
   const onSubmit = async (submitEvent: FormEvent<HTMLFormElement>) => {
     submitEvent.preventDefault();
-    const error = notDoneReasonError(reason);
+    const error = notDoneFormError(form);
     if (error) {
       toast.error(error);
       return;
     }
     setSaving(true);
     try {
-      await api.post(`/agenda/events/${event.id}/not-done`, { reason: reason.trim() });
+      await api.post(`/agenda/events/${event.id}/not-done`, notDonePayload(form));
       toast.success("Compromisso marcado como não realizado.");
       onDone();
     } catch (requestError) {
@@ -129,14 +130,30 @@ export function NotDoneDialog({ event, onClose, onDone }: DialogProps) {
       <form className="flex min-h-0 flex-1 flex-col" onSubmit={onSubmit}>
         <div className="mobile-modal-body space-y-2">
           <label className={labelClassName} htmlFor="not-done-reason">Motivo (obrigatório)</label>
-          <textarea
+          <select
             id="not-done-reason"
             required
-            value={reason}
-            onChange={(change) => setReason(change.target.value)}
-            placeholder="Ex.: cliente desmarcou, chuva na estrada"
-            className="min-h-24 w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm"
-          />
+            value={form.reasonCode}
+            onChange={(change) => setForm((current) => ({ ...current, reasonCode: change.target.value }))}
+            className={fieldClassName}
+          >
+            <option value="">Escolha o motivo</option>
+            {AGENDA_NOT_DONE_REASONS.map((reason) => <option key={reason.code} value={reason.code}>{reason.label}</option>)}
+          </select>
+          {form.reasonCode === "outro" ? (
+            <>
+              <label className={labelClassName} htmlFor="not-done-description">Descrição (obrigatória)</label>
+              <textarea
+                id="not-done-description"
+                required
+                maxLength={NOT_DONE_DESCRIPTION_MAX_LENGTH}
+                value={form.description}
+                onChange={(change) => setForm((current) => ({ ...current, description: change.target.value }))}
+                placeholder="Descreva o que aconteceu"
+                className="min-h-24 w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm"
+              />
+            </>
+          ) : null}
         </div>
         <div className="mobile-modal-footer">
           <button type="button" onClick={onClose} className="mobile-secondary-half rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">Cancelar</button>
