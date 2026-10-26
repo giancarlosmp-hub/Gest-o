@@ -972,7 +972,31 @@ Pendente (fora deste PR):
 
 - Clientes sem `tenantId` em produção (SELECT de 25/10/2026, 1 tenant ativo): 1.973 de 5.665 — 71 ativos sem código
   do ERP, 241 arquivados sem código e 1.661 arquivados com código. O script só cuida dos que têm endereço fora da lista.
+  Os ativos: ver “TD-CLIENT-TENANT-BACKFILL”.
 - A rota `POST /companies` (sem uso pelo web) ainda cria cliente com "Não informado"/"NI"; código morto a decidir.
 - Clientes com código do ERP e endereço fora da lista (ex.: "NI" da sincronização) seguem como o ERP manda.
 - A janela de edição de cliente mostra o título "Novo cliente" (título fixo em `App.tsx`).
 - `routeAuthorization.http.test.ts` já falha na `main` (falta simular `erpOrderSync`), sem relação com este PR.
+
+### TD-CLIENT-TENANT-BACKFILL — clientes ativos sem tenant
+
+**Script pronto, aguardando merge; não rodado.** SELECT de 25/10/2026 (1 tenant ativo, só contagens): 62 clientes
+ativos sem `tenantId`, todos sem código do ERP (os 9 do MS já foram corrigidos pelo #999); 8 deles de vendedor
+inativo. Nenhum casaria com parceiro do cache do `/partners` pela regra da sincronização (0 trocas de dono, 0
+mesclas, 0 ambíguos). Nenhum caminho de produção cria cliente sem tenant depois do #999. Decisões do Giancarlos de
+25/10/2026: critério do único tenant ativo (mesmo do #997/#999), auditoria por cliente, só os ativos.
+
+- Script: `node dist/scripts/backfillClientTenant.js` (simulação, transação READ ONLY) e `--apply --expect=N`
+  (transação serializável; recusa com zero ou mais de um tenant ativo). Grava só `Client.tenantId` e uma linha em
+  `ClientCodeAudit` por cliente (`origin` "Script", `metadata.operation` "tenant_backfill"). Saída só com contagens.
+- Efeito para o usuário: listas, carteira, ABC, automações e IA não mudam (não filtram por tenant). Passam a
+  funcionar pedido no ERP, transferência de responsável, exclusão de oportunidade, IA da oportunidade e
+  edição/exclusão de contato; checagem de duplicados por nome + cidade + UF, importação de clientes e diagnóstico de
+  CNPJ duplicado passam a ver esses clientes.
+
+Pendente (fora deste PR):
+
+- 1.902 arquivados sem tenant (241 sem código, 1.661 com código): com tenant, o scheduler passaria a casá-los com o
+  `/partners` e a reativar os que o ERP marca como cliente (exceto os da limpeza da carteira). Decidir antes.
+- Transferir a carteira dos 8 clientes de vendedor inativo.
+- `ensureSmokeBootstrap.ts` e os seeds de preview/teste criam cliente sem tenant (não rodam em produção).
