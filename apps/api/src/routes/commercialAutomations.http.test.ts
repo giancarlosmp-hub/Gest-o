@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
+import { mock } from "node:test";
 import { app } from "../app.js";
 import { prisma } from "../config/prisma.js";
 import {
@@ -202,7 +203,10 @@ try {
   assert.equal(simulation.eligibleClients, 10);
   // seller-a: 5 (a das 23:30 de ontem não conta); seller-b: 1 (4 de 5 já usados hoje).
   assert.equal(simulation.wouldCreate, 6);
+  // A rota simula com o relógio real: fixa o Date no "agora" do teste só durante a chamada.
+  mock.timers.enable({ apis: ["Date"], now });
   const httpSimulation = await request("GET", "/commercial-automations/simulation", "manager-a");
+  mock.timers.reset();
   assert.equal(httpSimulation.status, 200);
   assert.equal(httpSimulation.json.wouldCreate, 6);
   assert.equal((await request("GET", "/commercial-automations/simulation", "seller-a")).status, 403);
