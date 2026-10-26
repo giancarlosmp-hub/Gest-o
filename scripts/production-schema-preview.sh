@@ -34,9 +34,20 @@ without_identifiers=$(node "$strip_comments" "$sql" --blank-identifiers)
 # The only accepted ALTER TYPE is one exact enum addition per line; every other ALTER TYPE
 # (RENAME, DROP, ADD VALUE without IF NOT EXISTS, anything else) stays blocked below.
 enum_add_line="^[[:space:]]*ALTER TYPE \"[A-Za-z][A-Za-z0-9_]*\" ADD VALUE IF NOT EXISTS '[a-z][a-z0-9_]*';[[:space:]]*\$"
+# Each check runs line by line and again on every statement collapsed onto one line, so keywords
+# split across lines (DROP / TABLE) are still seen; each count is the larger of the two.
+statements(){ printf '%s\n' "$1" | tr '\n\r\t' '   ' | sed -E 's/[[:space:]]+/ /g; s/;/;\n/g'; }
+count(){
+  local lines stmts
+  lines=$(printf '%s\n' "$2" | grep -Eic "$1" || true)
+  stmts=$(printf '%s\n' "$3" | grep -Eic "$1" || true)
+  printf '%d' $(( lines > stmts ? lines : stmts ))
+}
+normalized_statements=$(statements "$normalized")
 checked=$(printf '%s\n' "$normalized" | grep -Ev "$enum_add_line" || true)
-additive=$(printf '%s\n' "$normalized" | grep -Eic "^[[:space:]]*(CREATE (TYPE|TABLE|UNIQUE INDEX|INDEX)|ALTER TABLE .*ADD (COLUMN|CONSTRAINT))|$enum_add_line" || true)
-destructive=$(printf '%s\n' "$checked" | grep -Eic 'DROP[[:space:]]+(TABLE|COLUMN|TYPE)|TRUNCATE|DROP[^;]*CASCADE|ALTER[[:space:]]+(TABLE|TYPE)[^;]*(TYPE|DROP VALUE|RENAME VALUE)|^[[:space:]]*ALTER[[:space:]]+TYPE' || true)
+checked_statements=$(printf '%s\n' "$normalized_statements" | grep -Ev "$enum_add_line" || true)
+additive=$(count "^[[:space:]]*(CREATE (TYPE|TABLE|UNIQUE INDEX|INDEX)|ALTER TABLE .*ADD (COLUMN|CONSTRAINT))|$enum_add_line" "$normalized" "$normalized_statements")
+destructive=$(count 'DROP[[:space:]]+(TABLE|COLUMN|TYPE)|TRUNCATE|DROP[^;]*CASCADE|ALTER[[:space:]]+(TABLE|TYPE)[^;]*(TYPE|DROP VALUE|RENAME VALUE)|^[[:space:]]*ALTER[[:space:]]+TYPE' "$checked" "$checked_statements")
 incident=$(printf '%s\n' "$normalized" | grep -Eic 'incident_[0-9]+' || true)
 blocked=0
 
@@ -51,10 +62,10 @@ fi
 # DML is checked on the comment-free SQL text, case-insensitively, as whole words. Quoted
 # identifiers ("updatedAt") are not statements and ON DELETE/ON UPDATE are foreign key actions;
 # everything else, string and dollar-quoted bodies included, is checked.
-dml_scan=$(printf '%s\n' "$without_identifiers" \
-  | sed -E 's/(^|[^A-Za-z0-9_$])ON[[:space:]]+(DELETE|UPDATE)/\1ON_FK_ACTION/gI')
-dml=$(printf '%s\n' "$dml_scan" \
-  | grep -Eic '(^|[^A-Za-z0-9_$])((UPDATE|DELETE|INSERT|MERGE|COPY|TRUNCATE)|CREATE[[:space:]]+OR[[:space:]]+REPLACE)([^A-Za-z0-9_$]|$)' || true)
+fk_actions(){ sed -E 's/(^|[^A-Za-z0-9_$])ON[[:space:]]+(DELETE|UPDATE)/\1ON_FK_ACTION/gI'; }
+dml_scan=$(printf '%s\n' "$without_identifiers" | fk_actions)
+dml_statements=$(statements "$without_identifiers" | fk_actions)
+dml=$(count '(^|[^A-Za-z0-9_$])((UPDATE|DELETE|INSERT|MERGE|COPY|TRUNCATE)|CREATE[[:space:]]+OR[[:space:]]+REPLACE)([^A-Za-z0-9_$]|$)' "$dml_scan" "$dml_statements")
 # Migrations already approved with a data backfill. Each exemption is bound to the manifest id,
 # its sha256 and its backfill token; any other content, even under the same id, stays blocked.
 approved_dml_migrations=(

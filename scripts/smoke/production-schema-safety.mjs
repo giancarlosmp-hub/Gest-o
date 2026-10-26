@@ -136,7 +136,8 @@ for (const [name, sql] of [
 }
 
 // Comments are read the way PostgreSQL reads them: a "--" inside a string, identifier, block comment
-// or dollar-quoted body hides nothing, and a comment PostgreSQL ignores blocks nothing.
+// or dollar-quoted body hides nothing, and a comment PostgreSQL ignores blocks nothing. Keywords
+// split across lines are checked on the whole statement.
 for (const [name, sql] of [
   ["B1 -- inside a string hides DML", `ALTER TABLE "Exemplo" ADD COLUMN "nota" TEXT DEFAULT 'a--b'; DELETE FROM "Exemplo";\n`],
   ["B2 -- inside a string hides a drop", `ALTER TABLE "Exemplo" ADD COLUMN "nota" TEXT DEFAULT 'a--b'; DROP TABLE "Exemplo";\n`],
@@ -146,7 +147,11 @@ for (const [name, sql] of [
   ["B6 -- inside a $$ body", `DO $$ BEGIN NULL; END -- $$; DELETE FROM "Exemplo";\n`],
   ["B7 -- inside a $tag$ body", `DO $fx$ BEGIN NULL; END -- $fx$; TRUNCATE "Exemplo";\n`],
   ["B8 -- inside an escape string", `ALTER TABLE "Exemplo" ADD COLUMN "nota" TEXT DEFAULT E'a\\'--b'; DELETE FROM "Exemplo";\n`],
-  ["DML word in a comment inside a $$ body", `DO $$ BEGIN -- sem DELETE aqui\n NULL; END $$;\n`]
+  ["DML word in a comment inside a $$ body", `DO $$ BEGIN -- sem DELETE aqui\n NULL; END $$;\n`],
+  ["B9 CREATE OR REPLACE split across lines", `CREATE\nOR REPLACE VIEW "V" AS SELECT 1;\n`],
+  ["B10 DROP TABLE split across lines", `DROP\nTABLE "Exemplo";\n`],
+  ["column type change split across lines", `ALTER TABLE "Exemplo"\nALTER COLUMN "nota" TYPE VARCHAR(10);\n`],
+  ["keywords split by a block comment", `DROP /* x */\nTABLE "Exemplo";\n`]
 ]) {
   const result = runPreview(sql);
   assert.equal(result.status, 42, `${name} must be blocked: ${result.stdout}${result.stderr}`);
@@ -185,18 +190,20 @@ for (const { id, path } of Object.values(registered)) {
   assert.match(result.stdout, /destrutivas=0 bloqueadas=0/, id);
 }
 // Historical migrations outside the registry never go through the gate; they stay blocked for the
-// same destructive changes and data writes they always carried.
-for (const [id, summary, destructive] of [
-  ["20260228110000_unify_companies_into_clients", "aditivas=1 destrutivas=2 bloqueadas=3", true],
-  ["20260306120000_add_app_config_weekly_visits", "aditivas=1 destrutivas=0 bloqueadas=1", false],
-  ["20260307100000_refactor_app_config_to_key_value", "aditivas=1 destrutivas=1 bloqueadas=2", true],
-  ["202607210001_secure_communications_foundation", "aditivas=26 destrutivas=0 bloqueadas=1", false]
+// same destructive changes and data writes they always carried. The column type change split
+// across lines in add_client_normalized_fields is only seen by the per-statement check.
+for (const [id, summary, destructive, dml] of [
+  ["20260228110000_unify_companies_into_clients", "aditivas=1 destrutivas=3 bloqueadas=4", true, true],
+  ["20260302000000_add_client_normalized_fields", "aditivas=1 destrutivas=1 bloqueadas=1", true, false],
+  ["20260306120000_add_app_config_weekly_visits", "aditivas=1 destrutivas=0 bloqueadas=1", false, true],
+  ["20260307100000_refactor_app_config_to_key_value", "aditivas=1 destrutivas=2 bloqueadas=3", true, true],
+  ["202607210001_secure_communications_foundation", "aditivas=26 destrutivas=0 bloqueadas=1", false, true]
 ]) {
   const result = runPreviewFile(`apps/api/prisma/migrations/${id}/migration.sql`);
   assert.equal(result.status, 42, `historical migration ${id} must stay blocked: ${result.stdout}${result.stderr}`);
   assert.match(result.stdout, new RegExp(`RESUMO ${summary} `), id);
-  assert.match(result.stdout, /BLOQUEADO: arquivo aprovado deve conter somente DDL aditiva/, id);
   assert.equal(/BLOQUEADO: SQL destrutivo\/incompatível detectado/.test(result.stdout), destructive, id);
+  assert.equal(/BLOQUEADO: arquivo aprovado deve conter somente DDL aditiva/.test(result.stdout), dml, id);
 }
 const ordersPath = registered["20260904120000_orders_operational_view"].path;
 const ordersSql = readFileSync(resolve(root, ordersPath), "utf8");
