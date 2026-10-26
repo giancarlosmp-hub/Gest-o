@@ -1,3 +1,19 @@
+# Motivos fixos de "Não realizado" (Agenda e Rota) e resultado da parada na fila offline — código pronto, aguardando merge — 26/10/2026
+
+- Catálogo fixo em `@salesforce-pro/shared` (`agendaNotDoneReasons.ts`), usado pela API e pela web: cliente ausente,
+  cliente remarcou, clima/estrada, veículo, demanda urgente, falta de tempo e "outro" (descrição obrigatória). Sem
+  migration: a Agenda grava o código em `AgendaEvent.notDoneReason` ("outro: descrição") e a Rota em
+  `AgendaStop.resultReason`, com a descrição de "outro" no resumo da parada. Nada gravado é reescrito: texto livre
+  antigo aparece como "Outro (texto)"; códigos antigos da parada são traduzidos na leitura (chuva e estrada → clima ou
+  estrada; reagendar → "Outro (Precisa reagendar)").
+- Rota: o resultado da parada (realizada ou não realizada) também entra na fila offline, atrás do check-in e do
+  check-out, e é enviado na ordem quando a conexão volta. A fila vale 72 h; o que o servidor recusar ou passar de 72 h
+  vai para "Não enviados" na tela, com os dados preservados, para reenviar, corrigir ou descartar.
+- API: o primeiro resultado da parada vale; reenvio devolve o que está gravado com `applied: false`, sem linha do tempo
+  nem próximo passo. Regras da disciplina inalteradas (não realizado neutro até 20%; só gerente ou diretor reabre ou
+  exclui). Relatório Execução Comercial mostra o não realizado por motivo (vendedor e equipe). Detalhes:
+  `TECH_DEBT.md`, “TD-AGENDA-NOT-DONE-REASONS”.
+
 # Tenant dos clientes ativos sem tenant (script) — código pronto, aguardando merge — 25/10/2026
 
 - Script `backfillClientTenant` (simulação por padrão; `--apply --expect=N`), não rodado: preenche o `tenantId` dos
