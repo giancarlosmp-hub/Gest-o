@@ -136,7 +136,7 @@ try {
   // Período e valor não se aplicam: saem dos filtros e viram aviso.
   const withDays = await ask("Quais clientes estão sem comprar há 200 dias?", "seller-a");
   assert.equal(withDays.json.summary.totalResults, 25);
-  assert.deepEqual(withDays.json.filtersApplied, [{ field: "sellerId", operator: "=", value: "seller-a" }]);
+  assert.deepEqual(withDays.json.filtersApplied, [{ field: "sellerId", operator: "=", value: "seller-a", label: "Vendedor: selecionado" }]);
   assert(withDays.json.warnings.some((warning: string) => /Período informado não aplicado/.test(warning)));
 
   // O aviso acompanha a pergunta mesmo quando a resposta vem do cache do mesmo plano.

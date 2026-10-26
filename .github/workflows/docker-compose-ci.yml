@@ -336,3 +336,331 @@ jobs:
 
       - name: Prove price provenance through the real Prisma db push path
         run: npm run test:product-price-provenance-db-push:postgres
+
+  api-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # Endereço inalcançável: nenhum destes testes pode tocar um banco real.
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:1/unreachable?connect_timeout=1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install pinned dependencies
+        run: |
+          npm install --global npm@11.4.2
+          npm ci
+
+      - name: Build workspace @salesforce-pro/shared
+        run: npm run build -w @salesforce-pro/shared
+
+      - name: Generate Prisma client
+        run: npm run prisma:generate -w @salesforce-pro/api
+
+      - name: API test:auth-security
+        run: npm run test:auth-security -w @salesforce-pro/api
+
+      - name: API test:tenancy
+        run: npm run test:tenancy -w @salesforce-pro/api
+
+      - name: API test:tenancy-control-plane
+        run: npm run test:tenancy-control-plane -w @salesforce-pro/api
+
+      - name: API test:tenancy-backfill
+        run: npm run test:tenancy-backfill -w @salesforce-pro/api
+
+      - name: API test:preflight-plan-ledger
+        run: npm run test:preflight-plan-ledger -w @salesforce-pro/api
+
+      - name: API test:erp-order-reconciliation
+        run: npm run test:erp-order-reconciliation -w @salesforce-pro/api
+
+      - name: API test:erp-order-manual-resolution
+        run: npm run test:erp-order-manual-resolution -w @salesforce-pro/api
+
+      - name: API test:cleanup-rejected-order-fake-status
+        run: npm run test:cleanup-rejected-order-fake-status -w @salesforce-pro/api
+
+      - name: API test:simulate-client-portfolio-cleanup
+        run: npm run test:simulate-client-portfolio-cleanup -w @salesforce-pro/api
+
+      - name: API test:portfolio-cleanup-reactivation
+        run: npm run test:portfolio-cleanup-reactivation -w @salesforce-pro/api
+
+      - name: API test:archive-portfolio-cleanup
+        run: npm run test:archive-portfolio-cleanup -w @salesforce-pro/api
+
+      - name: API test:opportunity-archived-client
+        run: npm run test:opportunity-archived-client -w @salesforce-pro/api
+
+      - name: API test:client-reactivation
+        run: npm run test:client-reactivation -w @salesforce-pro/api
+
+      - name: API test:commercial-automations
+        run: npm run test:commercial-automations -w @salesforce-pro/api
+
+      - name: API test:agenda-activity-split
+        run: npm run test:agenda-activity-split -w @salesforce-pro/api
+
+      - name: API test:client-portfolio-status
+        run: npm run test:client-portfolio-status -w @salesforce-pro/api
+
+      - name: API test:dashboard-portfolio-ranking
+        run: npm run test:dashboard-portfolio-ranking -w @salesforce-pro/api
+
+      - name: API test:seller-score-scope
+        run: npm run test:seller-score-scope -w @salesforce-pro/api
+
+      - name: API test:agenda-discipline
+        run: npm run test:agenda-discipline -w @salesforce-pro/api
+
+      - name: API test:seller-dashboard-scope
+        run: npm run test:seller-dashboard-scope -w @salesforce-pro/api
+
+      - name: API test:client-portfolio-status-filter
+        run: npm run test:client-portfolio-status-filter -w @salesforce-pro/api
+
+      - name: API test:client-list-filters
+        run: npm run test:client-list-filters -w @salesforce-pro/api
+
+      - name: API test:client-abc-filter
+        run: npm run test:client-abc-filter -w @salesforce-pro/api
+
+      - name: API test:portfolio-without-purchase-cooling
+        run: npm run test:portfolio-without-purchase-cooling -w @salesforce-pro/api
+
+      - name: API test:portfolio-priority-planning
+        run: npm run test:portfolio-priority-planning -w @salesforce-pro/api
+
+      - name: API test:ai-reasoning-compat
+        run: npm run test:ai-reasoning-compat -w @salesforce-pro/api
+
+      - name: API test:ai-time-budget
+        run: npm run test:ai-time-budget -w @salesforce-pro/api
+
+      - name: API test:ai-context-official-rule
+        run: npm run test:ai-context-official-rule -w @salesforce-pro/api
+
+      - name: API test:crm-assistant-today
+        run: npm run test:crm-assistant-today -w @salesforce-pro/api
+
+      - name: API test:cooling-proposals-filters
+        run: npm run test:cooling-proposals-filters -w @salesforce-pro/api
+
+      - name: API test:opportunity-last-contact-edit
+        run: npm run test:opportunity-last-contact-edit -w @salesforce-pro/api
+
+      - name: API test:backfill-opportunity-last-contact
+        run: npm run test:backfill-opportunity-last-contact -w @salesforce-pro/api
+
+      - name: API test:client-collection
+        run: npm run test:client-collection -w @salesforce-pro/api
+
+      - name: API test:client-system-notes
+        run: npm run test:client-system-notes -w @salesforce-pro/api
+
+      - name: API test:erp-order-open-errors
+        run: npm run test:erp-order-open-errors -w @salesforce-pro/api
+
+      - name: API test:ultrafv3-partner-tenancy
+        run: npm run test:ultrafv3-partner-tenancy -w @salesforce-pro/api
+
+      - name: API test:ultrafv3-partners-customer-flag
+        run: npm run test:ultrafv3-partners-customer-flag -w @salesforce-pro/api
+
+      - name: API test:erp-payment-method-eligibility
+        run: npm run test:erp-payment-method-eligibility -w @salesforce-pro/api
+
+      - name: API test:opportunity-product-availability
+        run: npm run test:opportunity-product-availability -w @salesforce-pro/api
+
+      - name: API test:erp-price-variation-policy
+        run: npm run test:erp-price-variation-policy -w @salesforce-pro/api
+
+      - name: API test:client-code-audit
+        run: npm run test:client-code-audit -w @salesforce-pro/api
+
+      - name: API test:seller-offboarding
+        run: npm run test:seller-offboarding -w @salesforce-pro/api
+
+      - name: API test:client-address
+        run: npm run test:client-address -w @salesforce-pro/api
+
+      - name: API test:client-tenant-backfill
+        run: npm run test:client-tenant-backfill -w @salesforce-pro/api
+
+      - name: API test:territory-config
+        run: npm run test:territory-config -w @salesforce-pro/api
+
+      - name: API test:inactive-user-auth
+        run: npm run test:inactive-user-auth -w @salesforce-pro/api
+
+      - name: API test:route-authorization
+        run: npm run test:route-authorization -w @salesforce-pro/api
+
+      - name: API test:client-code-erp-only
+        run: npm run test:client-code-erp-only -w @salesforce-pro/api
+
+      - name: API test:timeline-event-where
+        run: npm run test:timeline-event-where -w @salesforce-pro/api
+
+      - name: API test:activity-observation-insights
+        run: npm run test:activity-observation-insights -w @salesforce-pro/api
+
+      - name: API test:conversational-crm-service
+        run: npm run test:conversational-crm-service -w @salesforce-pro/api
+
+      - name: API test:timeline-intelligence
+        run: npm run test:timeline-intelligence -w @salesforce-pro/api
+
+      - name: API test:erp-order-payload-contract
+        run: npm run test:erp-order-payload-contract -w @salesforce-pro/api
+
+      - name: API test:erp-partner-dedup-rules
+        run: npm run test:erp-partner-dedup-rules -w @salesforce-pro/api
+
+      - name: API test:pr18a1-communications
+        run: npm run test:pr18a1-communications -w @salesforce-pro/api
+
+      - name: API test:pr18a1-regression
+        run: npm run test:pr18a1-regression -w @salesforce-pro/api
+
+  web-tests-and-smokes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # Endereço inalcançável: nenhum destes testes pode tocar um banco real.
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:1/unreachable?connect_timeout=1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install pinned dependencies
+        run: |
+          npm install --global npm@11.4.2
+          npm ci
+
+      - name: Build workspace @salesforce-pro/api (shared, Prisma client and dist for the runtime smoke)
+        run: npm run build -w @salesforce-pro/api
+
+      - name: Web test:responsive
+        run: npm run test:responsive -w @salesforce-pro/web
+
+      - name: Web test:opportunity-quick-action
+        run: npm run test:opportunity-quick-action -w @salesforce-pro/web
+
+      - name: Web test:orders
+        run: npm run test:orders -w @salesforce-pro/web
+
+      - name: Web test:client-code-erp-only
+        run: npm run test:client-code-erp-only -w @salesforce-pro/web
+
+      - name: Web test:client-archive-status
+        run: npm run test:client-archive-status -w @salesforce-pro/web
+
+      - name: Web test:client-address-label
+        run: npm run test:client-address-label -w @salesforce-pro/web
+
+      - name: Web test:crm-assistant-evidence
+        run: npm run test:crm-assistant-evidence -w @salesforce-pro/web
+
+      - name: Web test:client-list-filters
+        run: npm run test:client-list-filters -w @salesforce-pro/web
+
+      - name: Web test:client-select-search
+        run: npm run test:client-select-search -w @salesforce-pro/web
+
+      - name: Web test:brazil-date
+        run: npm run test:brazil-date -w @salesforce-pro/web
+
+      - name: Web test:mobile-visit-action
+        run: npm run test:mobile-visit-action -w @salesforce-pro/web
+
+      - name: Web test:visit-draft
+        run: npm run test:visit-draft -w @salesforce-pro/web
+
+      - name: Web test:agenda-activity
+        run: npm run test:agenda-activity -w @salesforce-pro/web
+
+      - name: Web test:route-execution
+        run: npm run test:route-execution -w @salesforce-pro/web
+
+      - name: Web test:central-day-agenda
+        run: npm run test:central-day-agenda -w @salesforce-pro/web
+
+      - name: Web test:seller-central
+        run: npm run test:seller-central -w @salesforce-pro/web
+
+      - name: Web test:opportunity-last-contact
+        run: npm run test:opportunity-last-contact -w @salesforce-pro/web
+
+      - name: Web test:proposals-no-response
+        run: npm run test:proposals-no-response -w @salesforce-pro/web
+
+      - name: Web test:seller-week
+        run: npm run test:seller-week -w @salesforce-pro/web
+
+      - name: Web test:erp-payment-method-eligibility
+        run: npm run test:erp-payment-method-eligibility -w @salesforce-pro/web
+
+      - name: Web test:whatsapp-link
+        run: npm run test:whatsapp-link -w @salesforce-pro/web
+
+      - name: Web test:desktop-layout
+        run: npm run test:desktop-layout -w @salesforce-pro/web
+
+      - name: API smoke:ultrafv3-crm-sync
+        run: npm run smoke:ultrafv3-crm-sync -w @salesforce-pro/api
+
+      - name: API smoke:ultrafv3-scheduler
+        run: npm run smoke:ultrafv3-scheduler -w @salesforce-pro/api
+
+      - name: API smoke:commercial-automations
+        run: npm run smoke:commercial-automations -w @salesforce-pro/api
+
+      - name: API smoke:ai
+        run: npm run smoke:ai -w @salesforce-pro/api
+
+      - name: API smoke:date-only
+        run: npm run smoke:date-only -w @salesforce-pro/api
+
+      - name: API smoke:ultrafv3-order-flow
+        run: npm run smoke:ultrafv3-order-flow -w @salesforce-pro/api
+
+      - name: API smoke:ultrafv3-order-number-parser
+        run: npm run smoke:ultrafv3-order-number-parser -w @salesforce-pro/api
+
+      - name: API smoke:ultrafv3-order-protocol-test
+        run: npm run smoke:ultrafv3-order-protocol-test -w @salesforce-pro/api
+
+      - name: API smoke:archived-client-read
+        run: npm run smoke:archived-client-read -w @salesforce-pro/api
+
+      - name: API smoke:communications
+        run: npm run smoke:communications -w @salesforce-pro/api
+
+      - name: API smoke:communications:security
+        run: npm run smoke:communications:security -w @salesforce-pro/api
+
+      - name: API smoke:pr18a2-http
+        run: npm run smoke:pr18a2-http -w @salesforce-pro/api
+
+      - name: API smoke:pr18a3-ultrafv3-partners
+        run: npm run smoke:pr18a3-ultrafv3-partners -w @salesforce-pro/api
+
+      - name: API smoke:ultrafv3-partner-identity
+        run: npm run smoke:ultrafv3-partner-identity -w @salesforce-pro/api
+
+      - name: API smoke:pr18a4-runtime
+        run: npm run smoke:pr18a4-runtime -w @salesforce-pro/api

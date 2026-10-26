@@ -14,7 +14,7 @@ const clientByIdIndex = crud.indexOf('router.get("/clients/:id"');
 assert(coolingIndex >= 0, "cooling alerts route must exist");
 assert(clientByIdIndex > coolingIndex, "cooling route must be registered before /clients/:id");
 assert.match(crud, /isArchived:\s*false/, "client list/cooling must exclude archived clients");
-assert.match(agenda, /firstSeller/, "agenda intelligence must allow director/manager without sellerId via safe active-seller default");
+assert.match(agenda, /resolveSellerScope[\s\S]*type: "aggregate"/,"agenda intelligence must allow director/manager without sellerId via safe active-seller default");
 assert.match(planning, /português do Brasil/, "weekly planning AI prompt must force Brazilian Portuguese");
 assert.match(scheduler, /authMode: "seller_reference"/, "scheduler diagnostics must support seller credential fallback");
 assert.match(scheduler, /nextAutomaticRunAt = calculateNextAutomaticRunAt\(finishedAt\)/, "scheduler must recalculate next run after failure/success");
@@ -23,6 +23,6 @@ assert.match(sync, /sellerChangedCount/, "seller change diagnostics must be pres
 assert.match(sync, /LEGACY_ARCHIVED_DUPLICATE_PREFIX/, "legacy archived duplicate prefix must be preserved");
 assert.match(sync, /NOT: legacyArchivedDuplicateNameWhere/, "legacy archived duplicates must not block matching");
 assert.match(app, /\["\/health\/version", "\/api\/health\/version"\]/, "version endpoint must be exposed with and without /api prefix");
-assert.match(app, /commit: env\.appCommit\.length > 12/, "version endpoint must expose a short build-provided commit without secrets");
+assert.match(app, /commit: env\.appCommit,/, "version endpoint must expose the full build-provided commit without secrets");
 assert.match(env, /process\.env\.APP_COMMIT/, "build commit must come from deployment environment variables");
 console.log("PR 18A.1 regression smoke passed");

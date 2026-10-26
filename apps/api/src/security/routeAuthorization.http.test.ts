@@ -96,6 +96,7 @@ setModel("tenantMembership", {
   findMany: async ({ where }: any) => membershipsOf(where.userId).map(({ tenantId }) => ({ tenantId })),
 });
 setModel("knowledgeDocument", { findMany: async () => [] });
+setModel("erpOrderSync", { findMany: async () => [] });
 setModel("activity", {
   aggregate: async () => ({ _max: { date: null, createdAt: null } }),
   count: async () => 0,
