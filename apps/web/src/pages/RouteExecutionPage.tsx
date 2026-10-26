@@ -1,7 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { toast } from "sonner";
-import { AGENDA_EVENT_TYPE_OPTIONS } from "@salesforce-pro/shared";
+import { AGENDA_EVENT_TYPE_OPTIONS, AGENDA_NOT_DONE_REASONS } from "@salesforce-pro/shared";
 import { useAuth } from "../context/AuthContext";
 import api from "../lib/apiClient";
 import { getApiErrorMessage } from "../lib/apiError";
@@ -10,7 +10,6 @@ import { triggerDashboardRefresh } from "../lib/dashboardRefresh";
 import { NEXT_STEP_REQUIRED_MESSAGE, needsNextStepDecision, type NextStepMode } from "../lib/agendaActivity";
 import {
   STOP_EXECUTION_STATUS_LABELS,
-  STOP_NOT_DONE_REASONS,
   STOP_SUMMARY_MAX_LENGTH,
   initialStopResultForm,
   isRouteFinished,
@@ -18,6 +17,7 @@ import {
   openStreetMapRouteHref,
   stopExecutionStatus,
   stopMapDestination,
+  stopNotDoneReasonText,
   stopResultError,
   stopResultPayload,
   type StopExecutionStatus,
@@ -381,10 +381,7 @@ export default function RouteExecutionPage() {
 
               {stop.resultStatus === "realizada" && stop.resultSummary ? <p className="break-words text-sm text-slate-700">{stop.resultSummary}</p> : null}
               {stop.resultStatus === "nao_realizada" ? (
-                <p className="text-sm text-rose-800">
-                  Motivo: {STOP_NOT_DONE_REASONS.find((reason) => reason.value === stop.resultReason)?.label || "não informado"}
-                  {stop.resultSummary ? ` · ${stop.resultSummary}` : ""}
-                </p>
+                <p className="break-words text-sm text-rose-800">Motivo: {stopNotDoneReasonText(stop)}</p>
               ) : null}
 
               {!stop.resultStatus ? (
@@ -460,12 +457,12 @@ export default function RouteExecutionPage() {
                       <label className={labelClassName} htmlFor="stop-reason">Motivo (obrigatório)</label>
                       <select id="stop-reason" required className={fieldClassName} value={resultForm.reason} onChange={(change) => setResultForm((current) => ({ ...current, reason: change.target.value }))}>
                         <option value="">Selecione</option>
-                        {STOP_NOT_DONE_REASONS.map((reason) => <option key={reason.value} value={reason.value}>{reason.label}</option>)}
+                        {AGENDA_NOT_DONE_REASONS.map((reason) => <option key={reason.code} value={reason.code}>{reason.label}</option>)}
                       </select>
                     </div>
                     <div>
-                      <label className={labelClassName} htmlFor="stop-not-done-detail">Detalhe (opcional)</label>
-                      <textarea id="stop-not-done-detail" maxLength={STOP_SUMMARY_MAX_LENGTH} className={`${fieldClassName} min-h-20`} value={resultForm.summary} onChange={(change) => setResultForm((current) => ({ ...current, summary: change.target.value }))} />
+                      <label className={labelClassName} htmlFor="stop-not-done-detail">{resultForm.reason === "outro" ? "Descrição (obrigatória)" : "Detalhe (opcional)"}</label>
+                      <textarea id="stop-not-done-detail" required={resultForm.reason === "outro"} maxLength={STOP_SUMMARY_MAX_LENGTH} className={`${fieldClassName} min-h-20`} value={resultForm.summary} onChange={(change) => setResultForm((current) => ({ ...current, summary: change.target.value }))} />
                     </div>
                   </>
                 ) : (

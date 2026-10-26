@@ -53,7 +53,8 @@ export type AgendaStop = {
   checkOutLng?: number | null;
   checkOutAccuracy?: number | null;
   resultStatus?: "realizada" | "nao_realizada" | null;
-  resultReason?: "cliente_ausente" | "chuva" | "estrada" | "reagendar" | "outro" | null;
+  // Código do catálogo de motivos; registros antigos podem ter chuva, estrada ou reagendar.
+  resultReason?: string | null;
   resultSummary?: string | null;
   nextStep?: "criar_followup" | "criar_oportunidade" | "reagendar" | null;
   nextStepDate?: string | null;

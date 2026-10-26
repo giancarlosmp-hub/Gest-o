@@ -14,6 +14,7 @@ const {
   openStreetMapRouteHref,
   stopExecutionStatus,
   stopMapDestination,
+  stopNotDoneReasonText,
   stopResultError,
   stopResultPayload
 } = await import("../src/lib/routeExecution");
@@ -59,8 +60,26 @@ assert.equal(stopResultError({ ...done, summary: "Visita ficticia" }, [], now), 
 // Não realizada: exige o motivo.
 const notDone = initialStopResultForm("nao_realizada");
 assert.equal(stopResultError(notDone, [], now), STOP_REASON_REQUIRED_MESSAGE);
-assert.equal(stopResultError({ ...notDone, reason: "chuva" }, [], now), null);
-assert.deepEqual(stopResultPayload({ ...notDone, reason: "chuva" }), { status: "nao_realizada", reason: "chuva" });
+assert.equal(stopResultError({ ...notDone, reason: "chuva" }, [], now), "Escolha o motivo de não ter sido realizado.", "código antigo não é gravado");
+for (const code of ["cliente_ausente", "cliente_remarcou", "clima_estrada", "veiculo", "demanda_urgente", "falta_tempo"]) {
+  assert.equal(stopResultError({ ...notDone, reason: code }, [], now), null, code);
+  assert.deepEqual(stopResultPayload({ ...notDone, reason: code }), { status: "nao_realizada", reason: code });
+}
+// "Outro" exige descrição, que vai no resumo da parada.
+assert.equal(stopResultError({ ...notDone, reason: "outro" }, [], now), 'Descreva o motivo em "Outro".');
+assert.equal(stopResultError({ ...notDone, reason: "outro", summary: "Porteira ficticia fechada" }, [], now), null);
+assert.deepEqual(stopResultPayload({ ...notDone, reason: "outro", summary: " Porteira ficticia fechada " }), { status: "nao_realizada", reason: "outro", summary: "Porteira ficticia fechada" });
+
+// Motivo exibido: catálogo, detalhe opcional e registros antigos traduzidos só na leitura.
+assert.equal(stopNotDoneReasonText({ resultReason: "veiculo" }), "Problema com veículo");
+assert.equal(stopNotDoneReasonText({ resultReason: "veiculo", resultSummary: "Pneu ficticio" }), "Problema com veículo · Pneu ficticio");
+assert.equal(stopNotDoneReasonText({ resultReason: "outro", resultSummary: "Porteira ficticia fechada" }), "Outro (Porteira ficticia fechada)");
+assert.equal(stopNotDoneReasonText({ resultReason: "cliente_ausente" }), "Cliente ausente / não atendeu");
+assert.equal(stopNotDoneReasonText({ resultReason: "chuva" }), "Clima ou condição da estrada");
+assert.equal(stopNotDoneReasonText({ resultReason: "estrada", resultSummary: "Ponte ficticia" }), "Clima ou condição da estrada · Ponte ficticia");
+assert.equal(stopNotDoneReasonText({ resultReason: "reagendar" }), "Outro (Precisa reagendar)");
+assert.equal(stopNotDoneReasonText({ resultReason: "outro" }), "Outro", "\"outro\" antigo sem detalhe");
+assert.equal(stopNotDoneReasonText({ resultReason: null }), "não informado");
 
 // Oportunidade aberta: com uma, já vem escolhida; com várias, o vendedor escolhe; depois, a regra das atividades.
 assert.equal(initialStopResultForm("realizada", [openOpp]).opportunityId, "opp-ficticia-1");
