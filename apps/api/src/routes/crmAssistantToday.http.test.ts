@@ -104,6 +104,10 @@ setModel("agendaEvent", {
   findMany: async ({ where, select }: any) => agendaEvents.filter((row) => matches(row, where)).map((row) => ({ ...pick(row, select), client: select?.client ? pick(clientOf(row)!, select.client.select) : undefined, opportunity: null, stops: [] }))
 });
 setModel("sellerTerritoryCity", { findMany: async () => [] });
+// Visitas pela carteira (valor estimado do cliente e última visita): valores padrão e nenhuma visita registrada.
+setModel("appConfig", { findMany: async () => [] });
+setModel("agendaStop", { groupBy: async () => [] });
+setModel("activity", { groupBy: async () => [] });
 setModel("erpOrderSync", { findMany: async () => [], findFirst: async () => null });
 setModel("appConfig", { findUnique: async () => null });
 
