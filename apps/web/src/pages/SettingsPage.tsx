@@ -6,6 +6,7 @@ import CrudSimplePage from "./CrudSimplePage";
 import ActivityKpisPage from "./ActivityKpisPage";
 import WeeklyVisitMinimumPanel from "../components/settings/WeeklyVisitMinimumPanel";
 import PlanningVisitRadiusPanel from "../components/settings/PlanningVisitRadiusPanel";
+import PlanningVisitValueRulesPanel from "../components/settings/PlanningVisitValueRulesPanel";
 import TechnicalCulturesPanel from "../components/settings/TechnicalCulturesPanel";
 import ErpIntegrationPanel from "../components/settings/ErpIntegrationPanel";
 import SellerTerritoriesPanel from "../components/settings/SellerTerritoriesPanel";
@@ -168,6 +169,7 @@ export default function SettingsPage() {
         <div className="space-y-4">
           <WeeklyVisitMinimumPanel canEdit={user.role === "diretor"} />
           <PlanningVisitRadiusPanel canEdit={user.role === "diretor" || user.role === "gerente"} />
+          <PlanningVisitValueRulesPanel canEdit={user.role === "diretor" || user.role === "gerente"} />
         </div>
       ) : activeSection === "technical-cultures" ? (
         <TechnicalCulturesPanel />
