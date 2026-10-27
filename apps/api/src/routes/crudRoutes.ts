@@ -27,6 +27,9 @@ import {
   userUpdateSchema,
   weeklyVisitMinimumSchema,
   planningVisitRadiusSchema,
+  planningVisitRulesSchema,
+  arePlanningVisitTiersOrdered,
+  PLANNING_VISIT_TIERS_ORDER_MESSAGE,
   commercialAutomationsConfigSchema,
   erpOrderGenerationSchema,
   knowledgeDocumentCreateSchema,
@@ -127,6 +130,7 @@ import { getCommercialInsights, invalidateCommercialInsightsCache } from "../ser
 import { timelineIntelligenceService } from "../services/timelineIntelligenceService.js";
 import { planningIntelligenceService } from "../services/planningIntelligenceService.js";
 import { getPlanningVisitRadiusKm, parsePlanningVisitRadiusKm, PLANNING_VISIT_RADIUS_KEY } from "../services/planningVisitRadius.js";
+import { getPlanningVisitRules, PLANNING_VISIT_OPPORTUNITY_KEY, PLANNING_VISIT_TIER1_KEY, PLANNING_VISIT_TIER2_KEY } from "../services/planningVisitRules.js";
 import { agendaIntelligenceService } from "../services/agendaIntelligenceService.js";
 import { getErpAutomaticSyncRuntimeStatus, refreshErpAutomaticSyncConfig, runAutomaticErpSyncNow, setErpAutomaticSyncEnabled } from "../jobs/erpSyncScheduler.js";
 import { investigateErpPartnerReadOnly } from "../services/erpPartnerInvestigationService.js";
@@ -10293,6 +10297,23 @@ router.put("/settings/planning-visit-radius", authorize("diretor", "gerente"), v
   return res.json({ radiusKm: parsePlanningVisitRadiusKm(config.value) });
 });
 
+// Valores que fazem o planejamento sugerir visita (valor estimado do cliente por faixa e valor da oportunidade em
+// negociação): vendedor vê, gerente e diretor alteram. Os três gravam juntos; a faixa 2 precisa ser menor que a 1.
+router.get("/settings/planning-visit-rules", authorize("diretor", "gerente", "vendedor"), async (_req, res) => {
+  return res.json(await getPlanningVisitRules());
+});
+
+router.put("/settings/planning-visit-rules", authorize("diretor", "gerente"), validateBody(planningVisitRulesSchema), async (req, res) => {
+  if (!arePlanningVisitTiersOrdered(req.body)) return res.status(400).json({ message: PLANNING_VISIT_TIERS_ORDER_MESSAGE });
+  const entries: Array<[string, number]> = [
+    [PLANNING_VISIT_TIER1_KEY, req.body.tier1MinEstimatedValue],
+    [PLANNING_VISIT_TIER2_KEY, req.body.tier2MinEstimatedValue],
+    [PLANNING_VISIT_OPPORTUNITY_KEY, req.body.opportunityMinValue]
+  ];
+  await prisma.$transaction(entries.map(([key, number]) => prisma.appConfig.upsert({ where: { key }, update: { value: String(number) }, create: { key, value: String(number) }, select: { value: true } })));
+  return res.json(await getPlanningVisitRules());
+});
+
 router.get("/ai/commercial-insights", authorize("diretor", "gerente"), async (req, res) => {
   const refresh = req.query.refresh === "true" || req.query.refresh === "1";
   if (refresh) invalidateCommercialInsightsCache();
@@ -11084,12 +11105,13 @@ router.get("/territories/config/sellers", authorize("diretor", "gerente"), async
     select: { id: true, name: true, role: true, region: true, isActive: true, _count: { select: { territoryCities: { where: territoryScope } } } },
     orderBy: { name: "asc" }
   });
+  // O aviso de transferência só aparece quando o vendedor inativo ainda tem cidades.
   return res.json(users.map(({ _count, ...seller }) => ({
     ...seller,
     territoryCount: _count.territoryCities,
     canEdit: seller.isActive && (actor.role === "diretor" || actor.role === "gerente"),
     canTransfer: actor.role === "diretor" || actor.role === "gerente",
-    territoryWarning: seller.isActive ? null : "Território vinculado a vendedor inativo — transferência necessária"
+    territoryWarning: !seller.isActive && _count.territoryCities > 0 ? "Território vinculado a vendedor inativo — transferência necessária" : null
   })));
 });
 

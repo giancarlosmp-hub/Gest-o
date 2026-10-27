@@ -8,13 +8,16 @@ import { calculateCommercialPriority } from "./commercialPriorityService.js";
 import { isClientCoolingActive, loadLastSentCrmOrderByClient, portfolioStatusOf, resolveLastPurchase } from "./clientPortfolioStatus.js";
 import { loadClientIdsInCollection } from "./clientCollection.js";
 import { getPlanningVisitRadiusKm } from "./planningVisitRadius.js";
+import { getPlanningVisitRules, PLANNING_VISIT_TIER1_DAYS, PLANNING_VISIT_TIER2_DAYS } from "./planningVisitRules.js";
+import { loadClientEstimatedValues } from "./clientEstimatedValue.js";
+import { loadLastVisitByClient } from "./clientLastVisit.js";
+import type { PlanningVisitRules } from "@salesforce-pro/shared";
 import { distanceKm, findOfficialTerritoryCity, isTerritoryAllowedState, normalizeTerritoryCityKey, officialTerritoryCityPoint, TERRITORY_ALLOWED_STATES, type TerritoryCityPoint } from "./territoryOfficialCities.js";
 import type { Prisma, Role } from "@prisma/client";
 
 export const COMMERCIAL_PLANNING_DEFAULTS = {
   maxVisitsPerDay: 3,
   maxActionsPerDay: 8,
-  maxCandidates: 50,
   maxPlannedActions: 30,
   maxReactivationCandidates: 40,
   maxExClientsPerWeek: 5,
@@ -91,6 +94,10 @@ const nextBusinessDays = (from: Date, count: number) => {
 };
 // Só a visita é presencial: ligação, WhatsApp, follow-up, proposta e revisão não definem a cidade do dia.
 const isInPersonAppointment = (type: string) => type === "roteiro_visita" || type === "reuniao_presencial" || type === "visita";
+// Visitas de um compromisso, no limite do dia e no contador da carga: o roteiro conta as paradas (sem parada, 1).
+const appointmentVisitCount = (event: { type: string; stops: unknown[] }) => (!isInPersonAppointment(event.type) ? 0 : event.type === "roteiro_visita" ? Math.max(event.stops.length, 1) : 1);
+const brl = (value: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(value);
+const daysBetweenKeys = (fromKey: string, toKey: string) => Math.round((Date.parse(`${toKey}T00:00:00.000Z`) - Date.parse(`${fromKey}T00:00:00.000Z`)) / DAY_MS);
 const sanitize = (value: string | null | undefined, max = 160) => (value || "").replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[contato]").replace(/\b\d{10,}\b/g, "[numero]").replace(/\b\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}\b/g, "[documento]").slice(0, max);
 const stripInternal = ({ fixedDate, dedupeKey, sourceActivityId, state, ...candidate }: Candidate): PlanAction => candidate;
 
@@ -152,12 +159,14 @@ export class PlanningIntelligenceService {
     const firstOpenDay = firstDay > today ? firstDay : today;
     const openDates = dayDates.filter((date) => date >= firstOpenDay);
     // Agenda e atividades desde a segunda da semana do primeiro dia: o que já foi tratado nela não volta a ser sugerido.
-    const [data, visitRadiusKm] = await Promise.all([
+    const [data, visitRadiusKm, visitRules] = await Promise.all([
       timeAiStage("context", () => this.collectData(sellerId, new Date(mondayOf(firstDay).getTime() + BRAZIL_UTC_OFFSET_MS), new Date(addDays(lastDay, 1).getTime() + BRAZIL_UTC_OFFSET_MS))),
-      getPlanningVisitRadiusKm()
+      getPlanningVisitRadiusKm(),
+      getPlanningVisitRules()
     ]);
     const lastRelevant = this.latestUpdate(data);
-    const cacheKey = ["commercial-planning", sellerId, rolling ? "rolling" : "week", dateOnly(firstDay), dateOnly(today), lastRelevant.toISOString(), `radius-km:${visitRadiusKm}`, "company-scope:futura"].join(":");
+    const visitRulesKey = `visit-rules:${visitRules.tier1MinEstimatedValue}/${visitRules.tier2MinEstimatedValue}/${visitRules.opportunityMinValue}`;
+    const cacheKey = ["commercial-planning", sellerId, rolling ? "rolling" : "week", dateOnly(firstDay), dateOnly(today), lastRelevant.toISOString(), `radius-km:${visitRadiusKm}`, visitRulesKey, "company-scope:futura"].join(":");
     if (!input.refresh) {
       const cached = cache.get(cacheKey);
       if (cached && cached.expiresAt > Date.now()) {
@@ -166,8 +175,8 @@ export class PlanningIntelligenceService {
       }
     }
 
-    const candidates = this.deduplicate(this.buildCandidates(data, openDates));
-    const base = this.distribute(sellerId, dayDates, openDates, data.events, candidates, rolling, visitRadiusKm, visitPlaceLocator(data.territoryCities));
+    const candidates = this.deduplicate(this.buildCandidates(data, openDates, visitRules));
+    const base = this.distribute(sellerId, dayDates, openDates, data.events, this.prioritize(candidates, openDates.length), rolling, visitRadiusKm, visitPlaceLocator(data.territoryCities));
     let result = base;
     let aiUsed = false;
     let fallbackUsed = true;
@@ -236,13 +245,22 @@ export class PlanningIntelligenceService {
     const portfolioClients = allPortfolioClients.filter((client) => !inCollection.has(client.id));
     const lastSentCrmOrderByClient = await loadLastSentCrmOrderByClient({ isArchived: false, OR: [{ ownerSellerId: sellerId }, { id: { in: opportunities.map((opportunity) => opportunity.clientId) } }] });
     const withLastSentCrmOrder = <T extends { id: string }>(client: T) => ({ ...client, lastSentCrmOrderDate: lastSentCrmOrderByClient.get(client.id) ?? null });
+    // Visitas pela carteira: valor estimado do cliente e última visita (de qualquer vendedor) dos clientes do vendedor.
+    const [estimatedValueByClient, lastVisitByClient] = await Promise.all([
+      loadClientEstimatedValues(portfolioClients, dateOnly(brazilToday())),
+      loadLastVisitByClient(portfolioClients.map((client) => client.id))
+    ]);
     return {
       events,
       territoryCities,
       weekActivities: weekActivities.filter((activity) => activity.clientId && activity.createdAt >= from),
       opportunities: opportunities.map((opportunity) => ({ ...opportunity, client: withLastSentCrmOrder(opportunity.client) })),
       activities,
-      inactiveClients: this.selectReactivationClients(portfolioClients, lastSentCrmOrderByClient, new Date()).map(withLastSentCrmOrder)
+      inactiveClients: this.selectReactivationClients(portfolioClients, lastSentCrmOrderByClient, new Date()).map(withLastSentCrmOrder),
+      portfolioClients: portfolioClients.map(withLastSentCrmOrder),
+      lastSentCrmOrderByClient,
+      estimatedValueByClient,
+      lastVisitByClient
     };
   }
 
@@ -259,8 +277,9 @@ export class PlanningIntelligenceService {
 
   // Data fixa: o dia do vencimento quando cai num dos dias abertos (no fim de semana, o próximo dia útil); vencido fica
   // preso no primeiro dia aberto (hoje, ou a segunda de uma semana futura).
-  private buildCandidates(data: Awaited<ReturnType<PlanningIntelligenceService["collectData"]>>, openDates: Date[]): Candidate[] {
+  private buildCandidates(data: Awaited<ReturnType<PlanningIntelligenceService["collectData"]>>, openDates: Date[], rules: PlanningVisitRules): Candidate[] {
     const now = new Date();
+    const todayKey = dateOnly(brazilToday());
     const openKeys = openDates.map(dateOnly);
     const fixedDateFor = (due: Date) => {
       const key = dateOnly(due);
@@ -273,18 +292,59 @@ export class PlanningIntelligenceService {
     for (const opportunity of data.opportunities) {
       const priority = calculateCommercialPriority({ client: opportunity.client as any, opportunity, activities: opportunity.activities, timelineEvents: opportunity.timelineEvents, now });
       const overdueFollow = opportunity.followUpDate < now;
-      const type: ActionType = overdueFollow ? "follow_up" : opportunity.stage === "proposta" ? "proposal" : priority.level === "urgente" || priority.level === "alta" ? "call" : "review";
-      candidates.push({ type, clientId: opportunity.clientId, opportunityId: opportunity.id, title: `${type === "proposal" ? "Enviar/retomar proposta" : overdueFollow ? "Realizar follow-up" : "Atender prioridade"}: ${sanitize(opportunity.client.name, 80)}`, city: opportunity.client.city, score: priority.score, priorityLevel: priority.level, reason: sanitize(priority.reasons.join("; ") || `Oportunidade em ${opportunity.stage}`), objective: sanitize(priority.nextAction || "Avançar oportunidade"), suggestedPeriod: null, estimatedDurationMinutes: COMMERCIAL_PLANNING_DEFAULTS.durations[type], source: overdueFollow ? "follow_up" : "priority", fixedDate: fixedDateFor(opportunity.followUpDate),dedupeKey: `${opportunity.clientId}:${type}` });
+      const baseType: ActionType = overdueFollow ? "follow_up" : opportunity.stage === "proposta" ? "proposal" : priority.level === "urgente" || priority.level === "alta" ? "call" : "review";
+      // Critério 4: oportunidade em proposta ou negociação a partir do valor configurado troca ligação e revisão por
+      // visita. Proposta continua proposta e follow-up vencido continua follow-up.
+      const bigDealVisit = (baseType === "call" || baseType === "review") && (opportunity.stage === "proposta" || opportunity.stage === "negociacao") && opportunity.value >= rules.opportunityMinValue;
+      const type: ActionType = bigDealVisit ? "visit" : baseType;
+      const reasons = [...(bigDealVisit ? [`Oportunidade em negociação a partir de ${brl(rules.opportunityMinValue)}`] : []), ...priority.reasons];
+      candidates.push({ type, clientId: opportunity.clientId, opportunityId: opportunity.id, title: `${type === "proposal" ? "Enviar/retomar proposta" : overdueFollow ? "Realizar follow-up" : type === "visit" ? "Visitar" : "Atender prioridade"}: ${sanitize(opportunity.client.name, 80)}`, city: opportunity.client.city, score: priority.score, priorityLevel: priority.level, reason: sanitize(reasons.join("; ") || `Oportunidade em ${opportunity.stage}`), objective: sanitize(priority.nextAction || "Avançar oportunidade"), suggestedPeriod: null, estimatedDurationMinutes: COMMERCIAL_PLANNING_DEFAULTS.durations[type], source: overdueFollow ? "follow_up" : bigDealVisit ? "opportunity" : "priority", fixedDate: fixedDateFor(opportunity.followUpDate),dedupeKey: `${opportunity.clientId}:${type}`, ...(type === "visit" ? { state: opportunity.client.state } : {}) });
     }
     for (const activity of data.activities) {
       const type: ActionType = String(activity.type).includes("whatsapp") ? "whatsapp" : String(activity.type).includes("proposta") ? "proposal" : String(activity.type).includes("visita") ? "visit" : "follow_up";
       candidates.push({ type, clientId: activity.clientId, opportunityId: activity.opportunityId, title: `${type === "visit" ? "Visitar" : "Concluir atividade"}: ${sanitize(activity.client?.name || "cliente", 80)}`, city: activity.city || activity.client?.city || null, score: activity.dueDate < now ? 90 : 55, priorityLevel: activity.dueDate < now ? "urgente" : "alta", reason: activity.dueDate < now ? "Atividade pendente vencida" : "Atividade pendente", objective: sanitize(activity.description || activity.notes || "Concluir atividade aberta"), suggestedPeriod: null, estimatedDurationMinutes: COMMERCIAL_PLANNING_DEFAULTS.durations[type], source: "follow_up", fixedDate: fixedDateFor(activity.dueDate),dedupeKey: `${activity.clientId || activity.id}:${type}`, sourceActivityId: activity.id, state: activity.client?.state ?? null });
     }
+    const estimatedValue = (clientId: string) => data.estimatedValueByClient.get(clientId) ?? 0;
+    const coolingVisit = (client: (typeof data.portfolioClients)[number]) => isClientCoolingActive(client, data.lastSentCrmOrderByClient, now) && estimatedValue(client.id) >= rules.tier2MinEstimatedValue;
     for (const client of data.inactiveClients) {
+      // Critério 3: esfriando a partir da faixa 2 recebe visita (na carteira, abaixo) em vez da ligação de reativação.
+      if (coolingVisit(client)) continue;
       const priority = calculateCommercialPriority({ client: client as any, now });
       candidates.push({ type: "call", clientId: client.id, title: `Reativar cliente: ${sanitize(client.name, 80)}`, city: client.city, score: priority.score, priorityLevel: priority.level, reason: sanitize(priority.reasons.join("; ") || "Cliente sem compra"), objective: "Identificar demanda e recuperar relacionamento", suggestedPeriod: null, estimatedDurationMinutes: COMMERCIAL_PLANNING_DEFAULTS.durations.call, source: "inactive_client", fixedDate: null, dedupeKey: `${client.id}:call` });
     }
-    return candidates.filter((candidate) => !handled(candidate)).sort((a, b) => b.score - a.score).slice(0, COMMERCIAL_PLANNING_DEFAULTS.maxCandidates);
+    // Critérios 1 a 3, pela carteira (sem arquivados e sem cliente em cobrança): valor estimado do cliente a partir da
+    // faixa 1 e mais de 45 dias sem visita, a partir da faixa 2 e mais de 90 dias, ou esfriando a partir da faixa 2.
+    // Critério 5: inativo recente continua só com a ligação de reativação.
+    for (const client of data.portfolioClients) {
+      if (portfolioStatusOf(client, data.lastSentCrmOrderByClient, now) === "inativoRecente") continue;
+      const value = estimatedValue(client.id);
+      const lastVisit = data.lastVisitByClient.get(client.id);
+      const daysWithoutVisit = lastVisit ? daysBetweenKeys(brazilDateOnly(lastVisit), todayKey) : null;
+      const withoutVisitOver = (days: number) => daysWithoutVisit === null || daysWithoutVisit > days;
+      const cooling = coolingVisit(client);
+      const rule = value >= rules.tier1MinEstimatedValue && withoutVisitOver(PLANNING_VISIT_TIER1_DAYS)
+        ? `Valor estimado do cliente a partir de ${brl(rules.tier1MinEstimatedValue)}`
+        : value >= rules.tier2MinEstimatedValue && withoutVisitOver(PLANNING_VISIT_TIER2_DAYS)
+          ? `Valor estimado do cliente a partir de ${brl(rules.tier2MinEstimatedValue)}`
+          : cooling ? `Cliente esfriando, valor estimado do cliente a partir de ${brl(rules.tier2MinEstimatedValue)}` : null;
+      if (!rule) continue;
+      const priority = calculateCommercialPriority({ client: client as any, now });
+      const visitText = daysWithoutVisit === null ? "sem visita registrada" : `${daysWithoutVisit} dias sem visita`;
+      candidates.push({ type: "visit", clientId: client.id, title: `Visitar: ${sanitize(client.name, 80)}`, city: client.city, score: priority.score, priorityLevel: priority.level, reason: sanitize(`${rule}; ${visitText}`), objective: cooling ? "Entender por que parou de comprar e retomar o pedido" : "Manter o relacionamento e identificar a próxima compra", suggestedPeriod: null, estimatedDurationMinutes: COMMERCIAL_PLANNING_DEFAULTS.durations.visit, source: cooling ? "inactive_client" : "priority", fixedDate: null, dedupeKey: `${client.id}:visit`, state: client.state });
+    }
+    return candidates.filter((candidate) => !handled(candidate));
+  }
+
+  // Ordem do plano, em grupos distribuídos um depois do outro: (a) follow-ups vencidos, propostas e atividades pendentes
+  // sempre entram; (b) visitas, até 3 por dia aberto; (c) o restante (ligações, revisões, reativações) pelo score, até o
+  // máximo de ações. Assim as visitas não são cortadas pelas ligações e não tiram o lugar de follow-ups e propostas.
+  private prioritize(candidates: Candidate[], openDayCount: number): Candidate[][] {
+    const byScore = (a: Candidate, b: Candidate) => b.score - a.score;
+    const isProtected = (candidate: Candidate) => candidate.source === "follow_up" || candidate.type === "proposal";
+    const protectedCandidates = candidates.filter(isProtected).sort(byScore);
+    const visits = candidates.filter((candidate) => !isProtected(candidate) && candidate.type === "visit").sort(byScore).slice(0, openDayCount * COMMERCIAL_PLANNING_DEFAULTS.maxVisitsPerDay);
+    const rest = candidates.filter((candidate) => !isProtected(candidate) && candidate.type !== "visit").sort(byScore);
+    return [protectedCandidates, visits, rest.slice(0, Math.max(0, COMMERCIAL_PLANNING_DEFAULTS.maxPlannedActions - protectedCandidates.length - visits.length))];
   }
 
   // Sugestão já tratada na semana não volta: compromisso na agenda (Agendar) ou atividade registrada (Registrar) para o
@@ -306,16 +366,18 @@ export class PlanningIntelligenceService {
     return [...map.values()];
   }
 
-  private distribute(sellerId: string, dayDates: Date[], openDates: Date[], events: Awaited<ReturnType<PlanningIntelligenceService["collectData"]>>["events"], candidates: Candidate[], rolling: boolean, visitRadiusKm: number, locator: ReturnType<typeof visitPlaceLocator>): WeeklyCommercialPlan {
-    const days = dayDates.map((date) => { return { date: dateOnly(date), label: labels[date.getUTCDay()], existingAppointments: events.filter((event) => brazilDateOnly(event.startDateTime) === dateOnly(date)).map((event) => ({ id: event.id, title: event.title, type: event.type, startsAt: event.startDateTime.toISOString(), endsAt: event.endDateTime.toISOString(), city: event.city || event.stops.find((s) => s.city)?.city || null, clientId: event.clientId, opportunityId: event.opportunityId })), suggestedActions: [] as PlanAction[], routeLinks: [] as string[] }; });
-    const state = new Map(days.map((day): [string, DayState] => { const inPerson = day.existingAppointments.filter((a) => isInPersonAppointment(a.type)); return [day.date, { actions: day.existingAppointments.length, visits: inPerson.length, places: inPerson.flatMap((a) => locator.locate(a.city) ?? []) }]; }));
+  private distribute(sellerId: string, dayDates: Date[], openDates: Date[], events: Awaited<ReturnType<PlanningIntelligenceService["collectData"]>>["events"], groups: Candidate[][], rolling: boolean, visitRadiusKm: number, locator: ReturnType<typeof visitPlaceLocator>): WeeklyCommercialPlan {
+    const eventsOfDay = (date: Date) => events.filter((event) => brazilDateOnly(event.startDateTime) === dateOnly(date));
+    const days = dayDates.map((date) => { return { date: dateOnly(date), label: labels[date.getUTCDay()], existingAppointments: eventsOfDay(date).map((event) => ({ id: event.id, title: event.title, type: event.type, startsAt: event.startDateTime.toISOString(), endsAt: event.endDateTime.toISOString(), city: event.city || event.stops.find((s) => s.city)?.city || null, clientId: event.clientId, opportunityId: event.opportunityId })), suggestedActions: [] as PlanAction[], routeLinks: [] as string[] }; });
+    const existingVisitsByDay = new Map(dayDates.map((date) => [dateOnly(date), eventsOfDay(date).reduce((total, event) => total + appointmentVisitCount(event), 0)]));
+    const state = new Map(days.map((day): [string, DayState] => { const inPerson = day.existingAppointments.filter((a) => isInPersonAppointment(a.type)); return [day.date, { actions: day.existingAppointments.length, visits: existingVisitsByDay.get(day.date)!, places: inPerson.flatMap((a) => locator.locate(a.city) ?? []) }]; }));
     const openKeys = new Set(openDates.map(dateOnly));
     const openDays = days.filter((day) => openKeys.has(day.date));
     const unallocated: PlanAction[] = [];
-    const planned = candidates.slice(0, COMMERCIAL_PLANNING_DEFAULTS.maxPlannedActions);
-    // Visita com data marcada entra primeiro: o dia dela já está definido e as outras visitas se agrupam em volta.
+    // Grupo a grupo (prioritize); dentro do grupo, visita com data marcada entra primeiro: o dia dela já está definido e
+    // as outras visitas se agrupam em volta.
     const isFixedVisit = (candidate: Candidate) => candidate.type === "visit" && Boolean(candidate.fixedDate);
-    for (const candidate of [...planned.filter(isFixedVisit), ...planned.filter((candidate) => !isFixedVisit(candidate))]) {
+    for (const candidate of groups.flatMap((group) => [...group.filter(isFixedVisit), ...group.filter((candidate) => !isFixedVisit(candidate))])) {
       const place = candidate.type === "visit" ? locator.locate(candidate.city, candidate.state) : null;
       const action = { ...stripInternal(candidate), ...(place && locator.isOutsideTerritory(place) ? { outsideTerritory: true } : {}) };
       const target = this.pickDay(openDays, state, candidate, place, visitRadiusKm);
@@ -328,7 +390,8 @@ export class PlanningIntelligenceService {
     const placeKey = (place: VisitPlace) => place.ibgeCode ?? `${place.state ?? ""}:${place.nameKey}`;
     for (const day of days) day.routeLinks = buildDayRouteLinks(state.get(day.date)!.places.filter((place, index, list) => list.findIndex((other) => placeKey(other) === placeKey(place)) === index).map((place) => place.routeLabel));
     const allActions = days.flatMap((d) => d.suggestedActions);
-    const visits = allActions.filter((a) => a.type === "visit").length;
+    // Visitas da carga: as sugeridas e as já marcadas na Agenda nos dias do plano (compromissos de visita e paradas).
+    const visits = allActions.filter((a) => a.type === "visit").length + [...existingVisitsByDay.values()].reduce((total, count) => total + count, 0);
     const calls = allActions.filter((a) => a.type === "call" || a.type === "whatsapp").length;
     const proposals = allActions.filter((a) => a.type === "proposal").length;
     const followUps = allActions.filter((a) => a.type === "follow_up").length;

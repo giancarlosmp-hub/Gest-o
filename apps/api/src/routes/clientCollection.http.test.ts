@@ -133,6 +133,10 @@ setModel("activity", {
 setModel("timelineEvent", { findFirst: async () => null, findMany: async () => [] });
 setModel("agendaEvent", { findMany: async () => [] });
 setModel("sellerTerritoryCity", { findMany: async () => [] });
+// Visitas pela carteira (valor estimado do cliente e última visita): valores padrão e nenhuma visita registrada.
+setModel("appConfig", { findMany: async () => [] });
+setModel("agendaStop", { groupBy: async () => [] });
+setModel("activity", { groupBy: async () => [] });
 setModel("erpOrderSync", { findMany: async () => [], findFirst: async () => null });
 setModel("product", { findMany: async () => [] });
 setModel("opportunityItem", { findMany: async () => [] });

@@ -51,6 +51,10 @@ setModel("activity", { findMany: async () => activities });
 setModel("client", { findMany: async () => [] });
 setModel("erpOrderSync", { findMany: async () => [] });
 setModel("sellerTerritoryCity", { findMany: async () => [] });
+// Visitas pela carteira (valor estimado do cliente e última visita): valores padrão e nenhuma visita registrada.
+setModel("appConfig", { findMany: async () => [] });
+setModel("agendaStop", { groupBy: async () => [] });
+setModel("activity", { groupBy: async () => [] });
 // Raio do agrupamento de visitas: sem configuração, o padrão.
 setModel("appConfig", { findUnique: async () => null });
 

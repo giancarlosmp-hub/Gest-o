@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import api from "../../lib/apiClient";
 import { getApiErrorMessage } from "../../lib/apiError";
 import { useAuth } from "../../context/AuthContext";
+import { initialTerritorySellerId, territoryReadOnlyMessage } from "../../lib/territorySellerSelection";
 
 type SellerOption = {
   id: string;
@@ -160,7 +161,7 @@ export default function SellerTerritoriesPanel() {
         if (!mounted) return;
         const loadedSellers = Array.isArray(data) ? data : [];
         setSellers(loadedSellers);
-        setSelectedSellerId((current) => current || loadedSellers[0]?.id || "");
+        setSelectedSellerId((current) => initialTerritorySellerId(loadedSellers, current));
       })
       .catch((err) => {
         if (!mounted) return;
@@ -584,7 +585,7 @@ export default function SellerTerritoriesPanel() {
 
           {!canEditSelectedSeller ? (
             <div className="rounded-xl bg-slate-100 p-3 text-xs text-slate-600">
-              Seu perfil permite apenas visualizar este território. Alterações são restritas a Diretor/Gerente conforme escopo da equipe.
+              {territoryReadOnlyMessage(selectedSeller)}
             </div>
           ) : null}
 

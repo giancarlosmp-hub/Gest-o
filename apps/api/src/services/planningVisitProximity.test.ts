@@ -35,6 +35,10 @@ setModel("activity", { findMany: async () => activities });
 setModel("client", { findMany: async () => [] });
 setModel("erpOrderSync", { findMany: async () => [] });
 setModel("sellerTerritoryCity", { findMany: async () => territoryCities });
+// Visitas pela carteira (valor estimado do cliente e última visita): valores padrão e nenhuma visita registrada.
+setModel("appConfig", { findMany: async () => [] });
+setModel("agendaStop", { groupBy: async () => [] });
+setModel("activity", { groupBy: async () => [] });
 setModel("appConfig", { findUnique: async () => (storedRadius === null ? null : { value: storedRadius }) });
 
 const generate = (refresh = true) => planningIntelligenceService.generateWeeklyCommercialPlan({ viewerUserId: "seller-a", viewerRole: "vendedor", weekStart: WEEK, refresh }) as Promise<Row>;

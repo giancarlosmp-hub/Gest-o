@@ -314,6 +314,19 @@ export const planningVisitRadiusSchema = z.object({
   radiusKm: z.number().int().min(10).max(300)
 });
 
+// Visitas sugeridas pelo valor estimado do cliente (R$, inteiros): faixa 1 (45 dias sem visita), faixa 2 (90 dias),
+// e o valor da oportunidade em negociação que troca a ligação por visita. A faixa 2 é menor que a faixa 1.
+export const PLANNING_VISIT_VALUE_MAX = 100_000_000;
+export const planningVisitRulesSchema = z.object({
+  tier1MinEstimatedValue: z.number().int().min(1).max(PLANNING_VISIT_VALUE_MAX),
+  tier2MinEstimatedValue: z.number().int().min(1).max(PLANNING_VISIT_VALUE_MAX),
+  opportunityMinValue: z.number().int().min(1).max(PLANNING_VISIT_VALUE_MAX)
+});
+export type PlanningVisitRules = z.infer<typeof planningVisitRulesSchema>;
+export const PLANNING_VISIT_TIERS_ORDER_MESSAGE = "A faixa 2 precisa ser menor que a faixa 1.";
+export const arePlanningVisitTiersOrdered = (rules: Pick<PlanningVisitRules, "tier1MinEstimatedValue" | "tier2MinEstimatedValue">) =>
+  rules.tier2MinEstimatedValue < rules.tier1MinEstimatedValue;
+
 
 // Etapas abertas do funil em que a automação pode criar a oportunidade de reativação.
 export const INACTIVE_CLIENT_WORKFLOW_STAGES = ["prospeccao", "negociacao", "proposta"] as const;
