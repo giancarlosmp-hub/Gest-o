@@ -1145,3 +1145,36 @@ transferência, ou sem cidades). Diretor e gerente continuam editando vendedor a
 
 Pendente (fora deste PR): a API aceita `PUT /territories/config/sellers/:sellerId/cities` (e as demais rotas de edição
 de cidades) para vendedor inativo; só a tela bloqueia. Não alterado.
+
+### TD-WRITE-CLIENT-SCOPE — rotas de escrita aceitam cliente fora da carteira
+
+Resolvido no código em 27/10/2026, aguardando merge: `POST /opportunities` e a troca de `clientId` em
+`PUT /opportunities/:id` buscam o cliente com `sellerWhere` somado ao tenant (`resolveRequestTenantId`), para todos
+os perfis. Fora do escopo ou inexistente: 403 "Cliente fora da sua carteira." sem revelar se o cliente existe;
+arquivado no escopo: 409 com a mensagem atual. O `PUT` também passou a buscar a oportunidade com `sellerWhere` +
+tenant (fora do escopo: 404 "Oportunidade não encontrada"); antes buscava só pelo id e o vendedor editava a
+oportunidade de outro. Vendedor continua sem poder trocar o dono (403). Teste com dados fictícios em
+`routeAuthorization.http.test.ts` (o CI roda).
+
+Escopo hoje: `sellerWhere` (`apps/api/src/utils/access.ts`) restringe o vendedor à própria carteira; gerente e diretor
+veem todo o tenant (`?sellerId=` só filtra). Não existe escopo regional de gerente: o campo `User.region` não entra em
+nenhuma regra de acesso.
+
+Pendente (próximo PR) — levantamento de 27/10/2026 das demais rotas de escrita com `clientId`:
+
+| Rota | Confere o escopo do cliente? |
+|---|---|
+| `POST /contacts` | Não: cria com o `clientId` do body sem conferir. |
+| `POST /activities` | Parcial: com `opportunityId` confere a oportunidade (`sellerWhere`) e exige o mesmo cliente; só com `clientId`, não confere. |
+| `PUT /activities/:id` | A atividade é conferida (`sellerWhere`), mas `clientId`, `opportunityId` e `agendaEventId` novos não são. |
+| `POST /agenda` e `/agenda/events` | Não: nem o `clientId` do compromisso, nem o das paradas, nem o `opportunityId`. |
+| `POST /agenda/events/:id/stops` | Confere o dono do evento; o `clientId` da parada não. |
+| `PATCH /agenda/:id` e `/agenda/events/:id` | Sem `clientId`; o `opportunityId` não foi conferido a fundo. |
+| `GET/POST/PUT/DELETE /opportunities/:id/items*` | Conferem a oportunidade com `sellerWhere`, sem tenant. |
+| `PUT /contacts/:id` | Sim (`tenantId` + `sellerWhere`, 404). |
+| `POST`/`PUT /clients/:id/contacts` | Sim (`sellerWhere` + `isArchived: false`, 404), sem tenant. |
+| `POST /events` | Sim, pelo cliente da oportunidade (`sellerWhere`), sem tenant. |
+| `POST /assistant-whatsapp/contact` | Sim (`sellerWhere` + `isArchived: false`). |
+
+Observação: em `POST /opportunities`, gerente e diretor ainda podem informar `ownerSellerId` sem conferência de
+tenant ou perfil do responsável (`resolveOwnerId`). Não alterado.
