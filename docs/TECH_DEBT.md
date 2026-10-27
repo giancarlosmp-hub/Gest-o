@@ -1088,3 +1088,60 @@ nos testes, em 26/10/2026). Nenhuma foi removida; a remoção fica para um PR de
   `debug-payload` e `last-order-error`, `/erp-integration/salesmen-diagnostic`, `/clients/diagnostics/*`,
   `POST /erp/ultrafv3/sync/partners/by-user/:userId` e os GETs de leitura do `ultraFv3Routes.ts` (`health`,
   `products`, `partners`, `price-variations`, `prices`, `order-status`).
+
+### TD-CLIENT-ESTIMATED-VALUE — "valor estimado do cliente" é aproximação
+
+**Em uso no planejamento da Agenda (aguardando deploy).** O CRM não tem compras do ERP por cliente com data (ver
+TD-CLIENTS-ABC-FILTER). Decisão do Giancarlos de 27/10/2026: até o ERP enviar notas ou vendas por cliente, o planejamento
+usa o "valor estimado do cliente" (`apps/api/src/services/clientEstimatedValue.ts`), o maior entre:
+
+- (a) os ganhos efetivos do CRM nos 365 dias de Brasília até hoje, na mesma base da Curva ABC (pedido cancelado no ERP
+  zera o ganho; qualquer dono da oportunidade);
+- (b) o `VALOR_ULTFATURA` do `financialProfile`, só quando o `DATA_ULTFATURA` cai nos mesmos 365 dias (senão 0).
+
+Na tela e no código o nome é "valor estimado do cliente", nunca faturamento nem valor comprado. A distribuição foi
+conferida com um SELECT só de leitura (contagens e valores agregados) antes de definir as faixas.
+
+Pendente: quando o ERP enviar notas ou vendas por cliente com data de emissão, trocar a base pelo faturamento real dos
+12 meses (com regra para não contar em dobro o pedido do CRM já faturado) e rever as faixas.
+
+### TD-PLANNING-VISIT-SUGGESTIONS — planejamento semanal sem visitas depois da separação Agenda × Atividades
+
+**Resolvido no código, aguardando deploy.** Depois de #987–#989 o planejamento só gerava visita a partir de atividade
+pendente de visita, que não existe mais: vendedores recebiam 0 visitas (havia vendedor com 30 ações e 0 visitas).
+Regra da diretoria de 26/10/2026, decisões do Giancarlos de 27/10/2026:
+
+- Última visita = último check-out de parada de roteiro ou última atividade presencial realizada (`visita`,
+  `visita_tecnica`, `reuniao_presencial`) do cliente, de qualquer vendedor (`clientLastVisit.ts`).
+- Visita sugerida para cliente não arquivado: valor estimado do cliente a partir da faixa 1 e mais de 45 dias sem
+  visita; a partir da faixa 2 e mais de 90 dias; esfriando a partir da faixa 2 (visita no lugar da ligação de
+  reativação); oportunidade em negociação a partir do valor configurado (visita no lugar de ligação ou revisão).
+  Proposta continua proposta, follow-up vencido continua follow-up, inativo recente continua ligação. Atividade
+  pendente de visita antiga continua gerando visita.
+- Faixas em `AppConfig` (`planning.visitTier1MinEstimatedValue` = 20.000, `planning.visitTier2MinEstimatedValue` =
+  5.000, `planning.visitOpportunityMinValue` = 20.000), editáveis por gerente e diretor na Disciplina Semanal, junto
+  do raio. A API recusa faixa 2 maior ou igual à faixa 1.
+- Ordem do plano: follow-ups vencidos, propostas e atividades pendentes sempre entram; depois as visitas, até 3 por dia
+  aberto; depois ligações, revisões e reativações pelo score, até 30 ações.
+- Paradas de roteiro contam no limite de 3 visitas por dia (roteiro sem parada conta 1) e no contador de visitas da
+  carga, que soma as sugeridas e as já marcadas na Agenda.
+
+Testes (dados fictícios): `planningVisitSuggestions.test.ts`, `clientEstimatedValue.test.ts` e
+`planningVisitRules.http.test.ts`, encadeados em `test:agenda-activity-split` (o CI roda) e em
+`test:portfolio-priority-planning`.
+
+Pendente (fora deste PR):
+
+- `AgendaStop` não tem índice em `clientId`: a busca da última visita lê a tabela de paradas a cada geração do plano
+  (aceito com o cache de 30 min). Numa migration futura, índice aditivo
+  `CREATE INDEX "AgendaStop_clientId_checkOutAt_idx" ON "AgendaStop"("clientId", "checkOutAt")`.
+- As chaves das faixas são únicas no `AppConfig` (empresa toda, não por tenant), como o raio.
+
+Territórios Comerciais (no mesmo PR): a tela abria no primeiro vendedor por nome, mesmo inativo; o aviso "transferência
+necessária" aparecia para inativo com 0 cidades; e o diretor via "Seu perfil permite apenas visualizar" num vendedor
+inativo. Agora a tela abre no primeiro ativo, o aviso só aparece com cidades e o texto diz o caso real (inativo: só
+transferência, ou sem cidades). Diretor e gerente continuam editando vendedor ativo (`territoryConfig.http.test.ts`,
+`territorySellerSelection.test.ts`).
+
+Pendente (fora deste PR): a API aceita `PUT /territories/config/sellers/:sellerId/cities` (e as demais rotas de edição
+de cidades) para vendedor inativo; só a tela bloqueia. Não alterado.
