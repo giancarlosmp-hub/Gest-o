@@ -17,9 +17,12 @@ const users: Row[] = [
   { id: "vendedor-a", role: "vendedor", name: "Vendedor Ficticio A", region: null, isActive: true },
   { id: "vendedor-destino", role: "vendedor", name: "Vendedor Ficticio Destino", region: null, isActive: true },
   { id: "vendedor-terceiro", role: "vendedor", name: "Vendedor Ficticio Terceiro", region: null, isActive: true },
-  { id: "vendedor-desligado", role: "vendedor", name: "Vendedor Ficticio Desligado", region: null, isActive: false }
+  { id: "vendedor-desligado", role: "vendedor", name: "Vendedor Ficticio Desligado", region: null, isActive: false },
+  { id: "gerente-ficticio", role: "gerente", name: "Gerente Ficticio", region: null, isActive: true },
+  // Desligado sem cidades, ainda com vínculo ativo no tenant: aparece na lista, sem aviso de transferência.
+  { id: "vendedor-desligado-vazio", role: "vendedor", name: "Vendedor Ficticio Desligado Vazio", region: null, isActive: false }
 ];
-const memberships: Row[] = users.filter((user) => user.isActive).map((user) => ({ userId: user.id, tenantId: TENANT, status: "active" }));
+const memberships: Row[] = users.filter((user) => user.isActive || user.id === "vendedor-desligado-vazio").map((user) => ({ userId: user.id, tenantId: TENANT, status: "active" }));
 
 let sequence = 0;
 const city = (sellerId: string, name: string, state: string, ibgeCode: string, tenantId: string | null = null): Row =>
@@ -208,6 +211,17 @@ try {
     const byId = Object.fromEntries(sellers.json.map((seller: Row) => [seller.id, seller]));
     assert.equal(byId["vendedor-a"].territoryCount, 3, "cidades sem tenant contam");
     assert.equal(byId["vendedor-desligado"].territoryCount, 4, "desligado aparece como origem com as cidades sem tenant");
+    // Aviso de transferência só com cidades; diretor e gerente editam vendedor ativo, inativo só transfere.
+    assert.equal(byId["vendedor-desligado"].territoryWarning, "Território vinculado a vendedor inativo — transferência necessária");
+    assert.equal(byId["vendedor-desligado-vazio"].territoryCount, 0);
+    assert.equal(byId["vendedor-desligado-vazio"].territoryWarning, null, "inativo sem cidades: sem aviso");
+    assert.equal(byId["vendedor-a"].territoryWarning, null);
+    assert.deepEqual([byId["vendedor-a"].canEdit, byId["vendedor-a"].canTransfer], [true, true], "diretor edita vendedor ativo");
+    assert.deepEqual([byId["vendedor-desligado"].canEdit, byId["vendedor-desligado"].canTransfer], [false, true], "inativo: só transferência");
+    const managerToken = signAccessToken({ id: "gerente-ficticio", email: "gerente-ficticio@test.invalid", role: "gerente" });
+    const managerSellers = (await (await fetch(`${baseUrl}/territories/config/sellers`, { headers: { Authorization: `Bearer ${managerToken}` } })).json()) as Row[];
+    const managerView = managerSellers.find((seller) => seller.id === "vendedor-a")!;
+    assert.deepEqual([managerView.canEdit, managerView.canTransfer], [true, true], "gerente edita vendedor ativo");
     const list = await call("GET", "/territories/config/cities?sellerId=vendedor-a");
     assert.deepEqual(list.json.map((row: Row) => `${row.city}/${row.state}`), ["Cascavel/PR", "Toledo/PR", "Joinville/SC"]);
     const links = await call("GET", "/territories/config/city-links");

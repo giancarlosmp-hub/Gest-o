@@ -11105,12 +11105,13 @@ router.get("/territories/config/sellers", authorize("diretor", "gerente"), async
     select: { id: true, name: true, role: true, region: true, isActive: true, _count: { select: { territoryCities: { where: territoryScope } } } },
     orderBy: { name: "asc" }
   });
+  // O aviso de transferência só aparece quando o vendedor inativo ainda tem cidades.
   return res.json(users.map(({ _count, ...seller }) => ({
     ...seller,
     territoryCount: _count.territoryCities,
     canEdit: seller.isActive && (actor.role === "diretor" || actor.role === "gerente"),
     canTransfer: actor.role === "diretor" || actor.role === "gerente",
-    territoryWarning: seller.isActive ? null : "Território vinculado a vendedor inativo — transferência necessária"
+    territoryWarning: !seller.isActive && _count.territoryCities > 0 ? "Território vinculado a vendedor inativo — transferência necessária" : null
   })));
 });
 
