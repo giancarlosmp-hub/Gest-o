@@ -15,7 +15,8 @@ export type AiFlow =
   | "assistant-whatsapp"
   | "timeline-intelligence"
   | "agenda-intelligence"
-  | "commercial-planning";
+  | "commercial-planning"
+  | "opportunity-draft";
 
 export const AI_FLOW_BUDGET_MS: Record<AiFlow, number> = {
   "crm-assistant": 12_000,
@@ -25,7 +26,8 @@ export const AI_FLOW_BUDGET_MS: Record<AiFlow, number> = {
   "assistant-whatsapp": 12_000,
   "timeline-intelligence": 12_000,
   "agenda-intelligence": 12_000,
-  "commercial-planning": 12_000
+  "commercial-planning": 12_000,
+  "opportunity-draft": 12_000
 };
 // Folga entre o fim do orçamento e o timeout de resposta da API.
 export const AI_BUDGET_RESPONSE_MARGIN_MS = 3_000;
