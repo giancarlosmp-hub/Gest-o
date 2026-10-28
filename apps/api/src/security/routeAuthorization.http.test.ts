@@ -20,6 +20,7 @@ let opportunities: Row[] = [];
 let contacts: Row[] = [];
 let activities: Row[] = [];
 let agendaEvents: Row[] = [];
+let agendaStops: Row[] = [];
 
 const resetData = () => {
   clients = [
@@ -51,10 +52,12 @@ const resetData = () => {
       dueDate: new Date("2026-10-20T12:00:00.000Z"), clientId: "client-a", opportunityId: null, agendaEventId: null, ownerSellerId: "seller-a",
     },
   ];
+  agendaStops = [];
+  const eventDates = { startDateTime: new Date("2026-11-03T12:00:00.000Z"), endDateTime: new Date("2026-11-03T13:00:00.000Z") };
   agendaEvents = [
-    { id: "evt-a", title: "Compromisso A", type: "ligacao", status: "agendado", sellerId: "seller-a", clientId: "client-a", opportunityId: null },
-    { id: "evt-b", title: "Compromisso B", type: "ligacao", status: "agendado", sellerId: "seller-b", clientId: "client-b", opportunityId: null },
-    { id: "evt-other", title: "Compromisso Outro Tenant", type: "ligacao", status: "agendado", sellerId: "seller-c", clientId: "client-other", opportunityId: null },
+    { id: "evt-a", title: "Compromisso A", type: "ligacao", status: "agendado", sellerId: "seller-a", clientId: "client-a", opportunityId: null, ...eventDates },
+    { id: "evt-b", title: "Compromisso B", type: "ligacao", status: "agendado", sellerId: "seller-b", clientId: "client-b", opportunityId: null, ...eventDates },
+    { id: "evt-other", title: "Compromisso Outro Tenant", type: "ligacao", status: "agendado", sellerId: "seller-c", clientId: "client-other", opportunityId: null, ...eventDates },
   ];
 };
 
@@ -78,7 +81,12 @@ const opportunityView = (row: Row) => ({
   timelineEvents: [],
   activities: [],
 });
-const agendaEventView = (row: Row) => ({ ...row, seller: { tenantMemberships: membershipsOf(row.sellerId) } });
+const agendaEventView = (row: Row) => ({
+  ...row,
+  seller: { tenantMemberships: membershipsOf(row.sellerId) },
+  stops: agendaStops.filter((stop) => stop.agendaEventId === row.id),
+  _count: { activities: 0 },
+});
 const contactView = (row: Row) => ({ ...row, client: clientById(row.clientId), ownerSeller: { tenantMemberships: membershipsOf(row.ownerSellerId) } });
 
 // Strict evaluator: any where key the fixture does not model fails the test instead of matching silently.
@@ -129,10 +137,28 @@ setModel("activity", {
 });
 setModel("agendaEvent", {
   findFirst: async ({ where }: any) => agendaEvents.map(agendaEventView).find((row) => matches(row, where)) ?? null,
+  findUnique: async ({ where }: any) => {
+    const row = agendaEvents.find((candidate) => candidate.id === where.id);
+    return row ? agendaEventView(row) : null;
+  },
+  create: async ({ data }: any) => {
+    const { stops, ...rest } = data;
+    const created = { id: `evt-new-${agendaEvents.length + 1}`, status: "agendado", ...rest };
+    agendaEvents.push(created);
+    for (const [index, stop] of (stops?.create ?? []).entries()) agendaStops.push({ id: `${created.id}-stop-${index + 1}`, agendaEventId: created.id, ...stop });
+    return agendaEventView(created);
+  },
   update: async ({ where, data }: any) => {
     const index = agendaEvents.findIndex((row) => row.id === where.id);
     agendaEvents[index] = { ...agendaEvents[index], ...data };
-    return agendaEvents[index];
+    return agendaEventView(agendaEvents[index]);
+  },
+});
+setModel("agendaStop", {
+  create: async ({ data }: any) => {
+    const created = { id: `stop-new-${agendaStops.length + 1}`, ...data };
+    agendaStops.push(created);
+    return { ...created, client: null };
   },
 });
 setModel("opportunity", {
@@ -444,6 +470,64 @@ try {
   assert.equal(await status("manager-a", "PUT", "/api/activities/act-a", { clientId: "client-b", agendaEventId: "evt-b" }), 200);
   assert.deepEqual([actA().clientId, actA().agendaEventId], ["client-b", "evt-b"]);
 
+  // Agenda. POST: cliente do compromisso e de cada parada no escopo (403), exceto o cliente da oportunidade do usuário;
+  // oportunidade fora do escopo: 404. PATCH confere a oportunidade só quando muda; parada nova confere o cliente.
+  resetData();
+  addArchivedClientA();
+  opportunities.push({ id: "opp-a-on-b", clientId: "client-b", ownerSellerId: "seller-a" });
+  const newEvent = (extra: Row) => ({
+    title: "Compromisso ficticio", type: "ligacao", startDateTime: "2026-11-04T12:00:00.000Z", endDateTime: "2026-11-04T13:00:00.000Z", ...extra,
+  });
+  const newRoute = (stopClientIds: string[], extra: Row = {}) => newEvent({
+    type: "roteiro_visita", stops: stopClientIds.map((clientId) => ({ clientId, city: "Cidade Ficticia" })), ...extra,
+  });
+  const eventCount = () => agendaEvents.length;
+  assert.equal(await status("seller-a", "POST", "/api/agenda/events", newEvent({ clientId: "client-a" })), 201);
+  assert.equal(await status("seller-a", "POST", "/api/agenda", newEvent({ clientId: "client-a-archived" })), 201, "arquivado no escopo: resposta atual");
+  assert.equal(await status("seller-a", "POST", "/api/agenda/events", newEvent({ clientId: "client-b", opportunityId: "opp-a-on-b" })), 201, "cliente da oportunidade do vendedor");
+  assert.equal(await status("seller-a", "POST", "/api/agenda/events", newRoute(["client-a", "client-b"], { opportunityId: "opp-a-on-b" })), 201);
+  assert.equal(await status("seller-a", "POST", "/api/agenda/events", newRoute(["client-a"])), 201);
+  const beforeEvents = eventCount();
+  for (const clientId of ["client-b", "client-other", "client-inexistente"]) {
+    await outOfScope("seller-a", "POST", "/api/agenda/events", newEvent({ clientId }));
+    await outOfScope("seller-a", "POST", "/api/agenda", newRoute(["client-a", clientId]));
+  }
+  await outOfScope("seller-a", "POST", "/api/agenda/events", newEvent({ clientId: "client-b", opportunityId: "opp-b" }));
+  await outOfScope("seller-a", "POST", "/api/agenda/events", newEvent({ clientId: "client-other", opportunityId: "opp-a-on-b" }));
+  const foreignOpportunity = await call("seller-a", "POST", "/api/agenda/events", newEvent({ clientId: "client-a", opportunityId: "opp-b" }));
+  assert.equal(foreignOpportunity.status, 404);
+  assert.equal(((await foreignOpportunity.json()) as Row).message, "Oportunidade não encontrada");
+  for (const userId of ["manager-a", "director-a"]) {
+    await outOfScope(userId, "POST", "/api/agenda/events", newEvent({ clientId: "client-other", ownerSellerId: "seller-a" }));
+    await outOfScope(userId, "POST", "/api/agenda/events", newRoute(["client-b", "client-other"], { ownerSellerId: "seller-a" }));
+    assert.equal(await status(userId, "POST", "/api/agenda/events", newEvent({ clientId: "client-b", opportunityId: "opp-other", ownerSellerId: "seller-b" })), 404);
+  }
+  assert.equal(eventCount(), beforeEvents, "nada criado fora do escopo");
+  assert.equal(await status("manager-a", "POST", "/api/agenda/events", newEvent({ clientId: "client-b", opportunityId: "opp-b", ownerSellerId: "seller-a" })), 201);
+  assert.equal(await status("director-a", "POST", "/api/agenda/events", newRoute(["client-a", "client-b"], { ownerSellerId: "seller-b" })), 201);
+
+  // PATCH: reenviar a mesma oportunidade segue; trocar exige a nova no escopo.
+  const evtA = () => agendaEvents.find((row) => row.id === "evt-a")!;
+  assert.equal(await status("seller-a", "PATCH", "/api/agenda/evt-a", { opportunityId: "opp-a", notes: "Nota ficticia" }), 200);
+  assert.equal(await status("seller-a", "PATCH", "/api/agenda/events/evt-a", { opportunityId: "opp-a", notes: "Mesma oportunidade" }), 200);
+  assert.equal(evtA().notes, "Mesma oportunidade");
+  assert.equal(await status("seller-a", "PATCH", "/api/agenda/evt-a", { opportunityId: "opp-b" }), 404);
+  for (const userId of ["manager-a", "director-a"]) {
+    assert.equal(await status(userId, "PATCH", "/api/agenda/events/evt-a", { opportunityId: "opp-other" }), 404);
+  }
+  assert.equal(evtA().opportunityId, "opp-a", "oportunidade não trocada fora do escopo");
+  assert.equal(await status("manager-a", "PATCH", "/api/agenda/evt-a", { opportunityId: "opp-b" }), 200);
+  assert.equal(evtA().opportunityId, "opp-b");
+
+  // Parada nova: cliente no escopo.
+  assert.equal(await status("seller-a", "POST", "/api/agenda/events/evt-a/stops", { clientId: "client-a" }), 201);
+  assert.equal(await status("seller-a", "POST", "/api/agenda/events/evt-a/stops", { clientId: "client-a-archived" }), 201, "arquivado no escopo: resposta atual");
+  const stopsBefore = agendaStops.length;
+  for (const clientId of ["client-b", "client-other", "client-inexistente"]) await outOfScope("seller-a", "POST", "/api/agenda/events/evt-a/stops", { clientId });
+  for (const userId of ["manager-a", "director-a"]) await outOfScope(userId, "POST", "/api/agenda/events/evt-b/stops", { clientId: "client-other" });
+  assert.equal(agendaStops.length, stopsBefore, "nenhuma parada fora do escopo");
+  assert.equal(await status("manager-a", "POST", "/api/agenda/events/evt-b/stops", { clientId: "client-a" }), 201);
+
   // Sem tenant ativo: 403 explícito, sem tocar nos dados.
   resetData();
   assert.equal(await status("seller-no-tenant", "POST", "/api/opportunities", newOpportunity("client-a")), 403);
@@ -453,6 +537,9 @@ try {
   const activitiesBeforeNoTenant = activities.length;
   assert.equal(await status("seller-no-tenant", "POST", "/api/activities", { type: "ligacao", description: "Ficticio", date: "2026-10-20T12:00:00.000Z" }), 403);
   assert.equal(activities.length, activitiesBeforeNoTenant);
+  const eventsBeforeNoTenant = agendaEvents.length;
+  assert.equal(await status("seller-no-tenant", "POST", "/api/agenda/events", { title: "Ficticio", type: "ligacao", startDateTime: "2026-11-04T12:00:00.000Z", endDateTime: "2026-11-04T13:00:00.000Z" }), 403);
+  assert.equal(agendaEvents.length, eventsBeforeNoTenant);
   assert.equal(await status("seller-no-tenant", "DELETE", "/api/opportunities/opp-a"), 403);
   assert.equal(await status("seller-no-tenant", "GET", "/api/ai/opportunity-message?opportunityId=opp-a"), 403);
   assert(exists(opportunities, "opp-a"));

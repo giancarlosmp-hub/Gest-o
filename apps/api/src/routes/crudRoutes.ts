@@ -9014,6 +9014,20 @@ router.post(["/agenda", "/agenda/events"], validateBody(agendaEventCreateSchema)
     return res.status(400).json({ message: "Roteiro de visita deve conter ao menos uma parada." });
   }
 
+  const tenantId = await resolveRequestTenantId(req, res);
+  if (!tenantId) return;
+  // Com oportunidade do usuário vale o cliente dela, mesmo de outra carteira; os demais clientes (do compromisso e das
+  // paradas) precisam estar no escopo. Cliente fora vem antes da oportunidade fora, como nas demais rotas.
+  const opportunity = req.body.opportunityId
+    ? await prisma.opportunity.findFirst({ where: opportunityInScopeWhere(req, tenantId, req.body.opportunityId), select: { clientId: true } })
+    : null;
+  const clientIds = new Set<string>([req.body.clientId, ...(req.body.stops ?? []).map((stop: { clientId?: string }) => stop.clientId)].filter(Boolean));
+  if (opportunity) clientIds.delete(opportunity.clientId);
+  for (const clientId of clientIds) {
+    if (!await findOpportunityClientInScope(req, tenantId, clientId)) return res.status(403).json({ message: OPPORTUNITY_CLIENT_OUT_OF_SCOPE_MESSAGE });
+  }
+  if (req.body.opportunityId && !opportunity) return res.status(404).json({ message: "Oportunidade não encontrada" });
+
   const event = await prisma.agendaEvent.create({
     data: {
       title: req.body.title,
@@ -9071,11 +9085,20 @@ router.post(["/agenda", "/agenda/events"], validateBody(agendaEventCreateSchema)
 router.patch(["/agenda/:id", "/agenda/events/:id"], validateBody(agendaEventUpdateSchema), async (req, res) => {
   const event = await prisma.agendaEvent.findUnique({
     where: { id: req.params.id },
-    select: { sellerId: true, title: true, type: true, status: true, clientId: true, _count: { select: { activities: true } } }
+    select: { sellerId: true, title: true, type: true, status: true, clientId: true, opportunityId: true, _count: { select: { activities: true } } }
   });
   if (!event) return res.status(404).json({ message: "Evento não encontrado." });
   if (req.user!.role === "vendedor" && event.sellerId !== req.user!.id) {
     return res.status(403).json({ message: "Acesso negado." });
+  }
+
+  // Trocar a oportunidade exige a nova no escopo; reenviar a mesma segue como antes.
+  if (req.body.opportunityId !== undefined && req.body.opportunityId !== event.opportunityId) {
+    const tenantId = await resolveRequestTenantId(req, res);
+    if (!tenantId) return;
+    if (!await prisma.opportunity.findFirst({ where: opportunityInScopeWhere(req, tenantId, req.body.opportunityId), select: { id: true } })) {
+      return res.status(404).json({ message: "Oportunidade não encontrada" });
+    }
   }
 
   // Realizado só com atividade vinculada ("Concluir"); o roteiro fica realizado pelas paradas.
@@ -9313,6 +9336,11 @@ router.post("/agenda/events/:id/stops", validateBody(agendaStopCreateSchema), as
   if (!event) return res.status(404).json({ message: "Evento não encontrado." });
   if (req.user!.role === "vendedor" && event.sellerId !== req.user!.id) {
     return res.status(403).json({ message: "Acesso negado." });
+  }
+  if (req.body.clientId) {
+    const tenantId = await resolveRequestTenantId(req, res);
+    if (!tenantId) return;
+    if (!await findOpportunityClientInScope(req, tenantId, req.body.clientId)) return res.status(403).json({ message: OPPORTUNITY_CLIENT_OUT_OF_SCOPE_MESSAGE });
   }
 
   const stop = await prisma.agendaStop.create({
