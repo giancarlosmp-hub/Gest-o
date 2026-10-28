@@ -8172,6 +8172,13 @@ router.post(
   },
 );
 
+const OPPORTUNITY_CLIENT_OUT_OF_SCOPE_MESSAGE = "Cliente fora da sua carteira.";
+
+// Cliente de oportunidade: mesmo escopo das listagens (sellerWhere) somado ao tenant, para todos os perfis.
+// Fora do escopo ou inexistente responde igual (403), sem revelar se o cliente existe.
+const findOpportunityClientInScope = (req: Request, tenantId: string, clientId: string) =>
+  prisma.client.findFirst({ where: { id: clientId, tenantId, ...sellerWhere(req) }, select: { isArchived: true, archiveReason: true } });
+
 router.post("/opportunities", validateBody(opportunitySchema), async (req, res) => {
   if (!assertProbability(req.body.probability)) return res.status(400).json({ message: "probability deve estar entre 0 e 100" });
 
@@ -8181,9 +8188,12 @@ router.post("/opportunities", validateBody(opportunitySchema), async (req, res) 
     return res.status(400).json({ message: "expectedReturnDate não pode ser anterior a proposalEntryDate" });
   }
 
+  const tenantId = await resolveRequestTenantId(req, res);
+  if (!tenantId) return;
+  const client = await findOpportunityClientInScope(req, tenantId, req.body.clientId);
+  if (!client) return res.status(403).json({ message: OPPORTUNITY_CLIENT_OUT_OF_SCOPE_MESSAGE });
   // Cliente arquivado não recebe oportunidade nova: o gerente reativa o cadastro antes.
-  const client = await prisma.client.findUnique({ where: { id: req.body.clientId }, select: { isArchived: true, archiveReason: true } });
-  if (client?.isArchived) {
+  if (client.isArchived) {
     return res.status(409).json({ message: archivedClientOpportunityMessage(client.archiveReason) });
   }
 
@@ -8224,10 +8234,20 @@ router.put("/opportunities/:id", validateBody(opportunitySchema.partial()), asyn
     return res.status(400).json({ message: "expectedReturnDate não pode ser anterior a proposalEntryDate" });
   }
 
-  const previous = await prisma.opportunity.findUnique({
-    where: { id: req.params.id },
+  const tenantId = await resolveRequestTenantId(req, res);
+  if (!tenantId) return;
+  const previous = await prisma.opportunity.findFirst({
+    where: { id: req.params.id, ...sellerWhere(req), client: { tenantId } },
     select: { stage: true, notes: true, clientId: true, ownerSellerId: true, followUpDate: true, probability: true, ownerSeller: { select: { name: true } }, client: { select: { tenantId: true } } }
   });
+  if (!previous) return res.status(404).json({ message: "Oportunidade não encontrada" });
+
+  // Trocar o cliente exige o novo cliente no escopo; manter o mesmo segue como antes.
+  if (typeof req.body.clientId === "string" && req.body.clientId !== previous.clientId) {
+    const nextClient = await findOpportunityClientInScope(req, tenantId, req.body.clientId);
+    if (!nextClient) return res.status(403).json({ message: OPPORTUNITY_CLIENT_OUT_OF_SCOPE_MESSAGE });
+    if (nextClient.isArchived) return res.status(409).json({ message: archivedClientOpportunityMessage(nextClient.archiveReason) });
+  }
 
   const requestedOwnerSellerId = typeof req.body.ownerSellerId === "string" ? req.body.ownerSellerId.trim() : undefined;
   if (requestedOwnerSellerId && previous && requestedOwnerSellerId !== previous.ownerSellerId) {

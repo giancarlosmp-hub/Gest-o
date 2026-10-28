@@ -9,7 +9,7 @@
     "start": "node dist/server.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma db push",
-    "prisma:seed": "tsx prisma/seed.js",
+    "prisma:seed": "node -e \"if (process.env.DATABASE_SCHEMA_MODE !== 'ephemeral-push') { console.error('prisma:seed recusado: só roda em banco descartável (DATABASE_SCHEMA_MODE=ephemeral-push)'); process.exit(1); }\" && tsx prisma/seed.js",
     "seed:preview": "tsx prisma/seedPreview.ts",
     "clients:backfill-normalized": "tsx src/scripts/backfillClientNormalized.ts",
     "docker:start": "node dist/scripts/bootstrap.js",

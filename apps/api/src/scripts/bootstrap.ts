@@ -3,6 +3,7 @@ import { app } from "../app.js";
 import { env } from "../config/env.js";
 import { prisma } from "../config/prisma.js";
 import { ensureSmokeBootstrap } from "./ensureSmokeBootstrap.js";
+import { ensureSeedTenant } from "./ensureSeedTenant.js";
 import { ensureAdminBootstrap } from "../bootstrap/ensureAdminBootstrap.js";
 import { validateDatabaseHealth } from "../utils/databaseHealth.js";
 import { logApiEvent } from "../utils/logger.js";
@@ -143,6 +144,11 @@ async function runDatabaseBootstrap() {
       runStep("npm run prisma:seed -w @salesforce-pro/api", "seed");
     } catch (error) {
       console.error("SEED FAILED (non-blocking):", error);
+    }
+    try {
+      await ensureSeedTenant(schemaMode);
+    } catch (error) {
+      console.error("SEED TENANT FAILED (non-blocking):", error);
     }
   } else {
     console.log("Seed automático desabilitado (SEED_ON_BOOTSTRAP=false)");

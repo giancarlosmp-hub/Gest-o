@@ -91,6 +91,7 @@ const setModel = (model: string, methods: Record<string, unknown>) => {
 
 setModel("user", {
   findFirst: async ({ where }: any) => (users[where?.id] ? { id: where.id, email: `${where.id}@test.invalid`, role: users[where.id].role, region: null } : null),
+  findUnique: async ({ where }: any) => (users[where?.id] ? { name: where.id } : null),
 });
 setModel("tenantMembership", {
   findMany: async ({ where }: any) => membershipsOf(where.userId).map(({ tenantId }) => ({ tenantId })),
@@ -104,12 +105,25 @@ setModel("activity", {
 setModel("opportunity", {
   count: async () => 0,
   findFirst: async ({ where }: any) => opportunities.map(opportunityView).find((row) => matches(row, where)) ?? null,
+  create: async ({ data }: any) => {
+    const created = { id: `opp-new-${opportunities.length + 1}`, ...data };
+    opportunities.push(created);
+    return created;
+  },
+  update: async ({ where, data }: any) => {
+    const index = opportunities.findIndex((row) => row.id === where.id);
+    opportunities[index] = { ...opportunities[index], ...data };
+    return opportunityView(opportunities[index]);
+  },
   delete: async ({ where }: any) => {
     const removed = opportunities.find((row) => row.id === where.id);
     opportunities = opportunities.filter((row) => row.id !== where.id);
     return removed;
   },
 });
+setModel("timelineEvent", { create: async ({ data }: any) => data });
+setModel("opportunityChangeLog", { create: async ({ data }: any) => data });
+(prisma as any).$transaction = async (input: any) => (typeof input === "function" ? input(prisma) : Promise.all(input));
 setModel("client", {
   findFirst: async ({ where }: any) => clients.find((row) => matches(row, where)) ?? null,
   findMany: async ({ where }: any) => clients.filter((row) => matches(row, where)).map((row) => ({ ...row, _count: { opportunities: 0, activities: 0, timelineEvents: 0 } })),
@@ -246,7 +260,66 @@ try {
   assert.deepEqual(list.map((client) => client.id), ["client-a"]);
   list.forEach(assertProjectedClient);
 
+  // Oportunidade só em cliente do escopo (sellerWhere + tenant). Fora do escopo ou inexistente: 403 sem revelar existência.
+  resetData();
+  clients.push({ id: "client-a-archived", tenantId: "tenant-a", ownerSellerId: "seller-a", name: "Cliente A Arquivado", cnpjNormalized: "22222222000122", isArchived: true, archiveReason: "MERGED_INTO:client-a" });
+  const newOpportunity = (clientId: string, extra: Row = {}) => ({
+    title: "Oportunidade Ficticia", value: 100, stage: "prospeccao", clientId,
+    proposalDate: "2026-10-18", followUpDate: "2026-10-25", expectedCloseDate: "2026-11-30", ...extra,
+  });
+  const outOfScope = async (userId: string, method: string, path: string, body: Row) => {
+    const response = await call(userId, method, path, body);
+    assert.equal(response.status, 403, `${userId} ${method} ${path} ${body.clientId}`);
+    assert.equal(((await response.json()) as Row).message, "Cliente fora da sua carteira.");
+  };
+  const opportunityCount = () => opportunities.length;
+
+  // Vendedor: só a própria carteira; o dono fica sempre com ele.
+  const ownCreate = await call("seller-a", "POST", "/api/opportunities", newOpportunity("client-a", { ownerSellerId: "seller-b" }));
+  assert.equal(ownCreate.status, 201);
+  assert.equal(((await ownCreate.json()) as Row).ownerSellerId, "seller-a");
+  const before = opportunityCount();
+  await outOfScope("seller-a", "POST", "/api/opportunities", newOpportunity("client-b"));
+  await outOfScope("seller-a", "POST", "/api/opportunities", newOpportunity("client-other"));
+  await outOfScope("seller-a", "POST", "/api/opportunities", newOpportunity("client-inexistente"));
+  assert.equal(opportunityCount(), before, "nada criado fora do escopo");
+  const archived = await call("seller-a", "POST", "/api/opportunities", newOpportunity("client-a-archived"));
+  assert.equal(archived.status, 409);
+  assert.equal(((await archived.json()) as Row).message, "Cliente arquivado. Peça ao gerente para reativar o cadastro.");
+
+  // Edição: sem trocar cliente segue como antes; troca exige o novo cliente no escopo; oportunidade de outro vendedor é 404.
+  assert.equal(await status("seller-a", "PUT", "/api/opportunities/opp-a", { title: "Editada pelo vendedor", clientId: "client-a" }), 200);
+  assert.equal(opportunities.find((row) => row.id === "opp-a")?.title, "Editada pelo vendedor");
+  await outOfScope("seller-a", "PUT", "/api/opportunities/opp-a", { clientId: "client-b" });
+  await outOfScope("seller-a", "PUT", "/api/opportunities/opp-a", { clientId: "client-inexistente" });
+  assert.equal((await call("seller-a", "PUT", "/api/opportunities/opp-a", { clientId: "client-a-archived" })).status, 409);
+  assert.equal(opportunities.find((row) => row.id === "opp-a")?.clientId, "client-a", "cliente da oportunidade não muda fora do escopo");
+  const foreign = await call("seller-a", "PUT", "/api/opportunities/opp-b", { title: "Invasor" });
+  assert.equal(foreign.status, 404);
+  assert.equal(((await foreign.json()) as Row).message, "Oportunidade não encontrada");
+  assert.equal(await status("seller-a", "PUT", "/api/opportunities/opp-other", { title: "Invasor" }), 404);
+  assert.equal(opportunities.find((row) => row.id === "opp-b")?.title, undefined, "oportunidade de B não pode ser editada por A");
+  assert.equal(await status("seller-a", "PUT", "/api/opportunities/opp-a", { ownerSellerId: "seller-b" }), 403);
+  assert.equal(opportunities.find((row) => row.id === "opp-a")?.ownerSellerId, "seller-a", "vendedor não muda o dono");
+
+  // Gerente e diretor: qualquer cliente do tenant; outro tenant é 403 (cliente) ou 404 (oportunidade).
+  for (const userId of ["manager-a", "director-a"]) {
+    assert.equal(await status(userId, "POST", "/api/opportunities", newOpportunity("client-b")), 201, `${userId}: cliente do tenant`);
+    await outOfScope(userId, "POST", "/api/opportunities", newOpportunity("client-other"));
+    await outOfScope(userId, "POST", "/api/opportunities", newOpportunity("client-inexistente"));
+    assert.equal((await call(userId, "POST", "/api/opportunities", newOpportunity("client-a-archived"))).status, 409);
+    await outOfScope(userId, "PUT", "/api/opportunities/opp-a2", { clientId: "client-other" });
+    assert.equal(await status(userId, "PUT", "/api/opportunities/opp-other", { title: "Cross-tenant" }), 404);
+  }
+  assert.equal(await status("manager-a", "PUT", "/api/opportunities/opp-a2", { clientId: "client-b" }), 200);
+  assert.equal(opportunities.find((row) => row.id === "opp-a2")?.clientId, "client-b");
+  assert.equal(await status("director-a", "PUT", "/api/opportunities/opp-a2", { ownerSellerId: "seller-b" }), 200);
+  assert.equal(opportunities.find((row) => row.id === "opp-a2")?.ownerSellerId, "seller-b", "diretor transfere dentro do tenant");
+  assert.equal(opportunities.find((row) => row.id === "opp-other")?.clientId, "client-other");
+
   // Sem tenant ativo: 403 explícito, sem tocar nos dados.
+  resetData();
+  assert.equal(await status("seller-no-tenant", "POST", "/api/opportunities", newOpportunity("client-a")), 403);
   assert.equal(await status("seller-no-tenant", "DELETE", "/api/opportunities/opp-a"), 403);
   assert.equal(await status("seller-no-tenant", "GET", "/api/ai/opportunity-message?opportunityId=opp-a"), 403);
   assert(exists(opportunities, "opp-a"));

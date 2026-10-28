@@ -986,7 +986,8 @@ Pendente (fora deste PR):
 
 ### TD-CLIENT-TENANT-BACKFILL — clientes ativos sem tenant
 
-**Script pronto, aguardando merge; não rodado.** SELECT de 25/10/2026 (1 tenant ativo, só contagens): 62 clientes
+**Mergeado (#1000) e rodado em produção:** os 62 clientes ativos sem tenant foram atualizados; SELECT de 28/10/2026:
+0 clientes ativos sem tenant, de 2.175 ativos. Levantamento anterior, SELECT de 25/10/2026 (1 tenant ativo, só contagens): 62 clientes
 ativos sem `tenantId`, todos sem código do ERP (os 9 do MS já foram corrigidos pelo #999); 8 deles de vendedor
 inativo. Nenhum casaria com parceiro do cache do `/partners` pela regra da sincronização (0 trocas de dono, 0
 mesclas, 0 ambíguos). Nenhum caminho de produção cria cliente sem tenant depois do #999. Decisões do Giancarlos de
@@ -1005,7 +1006,9 @@ Pendente (fora deste PR):
 - 1.902 arquivados sem tenant (241 sem código, 1.661 com código): com tenant, o scheduler passaria a casá-los com o
   `/partners` e a reativar os que o ERP marca como cliente (exceto os da limpeza da carteira). Decidir antes.
 - Transferir a carteira dos 8 clientes de vendedor inativo.
-- `ensureSmokeBootstrap.ts` e os seeds de preview/teste criam cliente sem tenant (não rodam em produção).
+- `ensureSmokeBootstrap.ts` e os seeds de preview/teste criam cliente sem tenant (não rodam em produção). No compose
+  do CI, o `ensureSeedTenant` preenche o tenant depois do seed; o `seedTestFixture.ts` segue sem tenant (ver
+  “TD-SEED-GUARD”).
 
 ### TD-AGENDA-NOT-DONE-REASONS — motivo de "Não realizado" em texto livre e resultado da parada fora da fila offline
 
@@ -1145,3 +1148,58 @@ transferência, ou sem cidades). Diretor e gerente continuam editando vendedor a
 
 Pendente (fora deste PR): a API aceita `PUT /territories/config/sellers/:sellerId/cities` (e as demais rotas de edição
 de cidades) para vendedor inativo; só a tela bloqueia. Não alterado.
+
+### TD-WRITE-CLIENT-SCOPE — rotas de escrita aceitam cliente fora da carteira
+
+Resolvido no código em 27/10/2026, aguardando merge: `POST /opportunities` e a troca de `clientId` em
+`PUT /opportunities/:id` buscam o cliente com `sellerWhere` somado ao tenant (`resolveRequestTenantId`), para todos
+os perfis. Fora do escopo ou inexistente: 403 "Cliente fora da sua carteira." sem revelar se o cliente existe;
+arquivado no escopo: 409 com a mensagem atual. O `PUT` também passou a buscar a oportunidade com `sellerWhere` +
+tenant (fora do escopo: 404 "Oportunidade não encontrada"); antes buscava só pelo id e o vendedor editava a
+oportunidade de outro. Vendedor continua sem poder trocar o dono (403). Teste com dados fictícios em
+`routeAuthorization.http.test.ts` (o CI roda).
+
+Escopo hoje: `sellerWhere` (`apps/api/src/utils/access.ts`) restringe o vendedor à própria carteira; gerente e diretor
+veem todo o tenant (`?sellerId=` só filtra). Não existe escopo regional de gerente: o campo `User.region` não entra em
+nenhuma regra de acesso.
+
+Pendente (próximo PR) — levantamento de 27/10/2026 das demais rotas de escrita com `clientId`:
+
+| Rota | Confere o escopo do cliente? |
+|---|---|
+| `POST /contacts` | Não: cria com o `clientId` do body sem conferir. |
+| `POST /activities` | Parcial: com `opportunityId` confere a oportunidade (`sellerWhere`) e exige o mesmo cliente; só com `clientId`, não confere. |
+| `PUT /activities/:id` | A atividade é conferida (`sellerWhere`), mas `clientId`, `opportunityId` e `agendaEventId` novos não são. |
+| `POST /agenda` e `/agenda/events` | Não: nem o `clientId` do compromisso, nem o das paradas, nem o `opportunityId`. |
+| `POST /agenda/events/:id/stops` | Confere o dono do evento; o `clientId` da parada não. |
+| `PATCH /agenda/:id` e `/agenda/events/:id` | Sem `clientId`; o `opportunityId` não foi conferido a fundo. |
+| `GET/POST/PUT/DELETE /opportunities/:id/items*` | Conferem a oportunidade com `sellerWhere`, sem tenant. |
+| `PUT /contacts/:id` | Sim (`tenantId` + `sellerWhere`, 404). |
+| `POST`/`PUT /clients/:id/contacts` | Sim (`sellerWhere` + `isArchived: false`, 404), sem tenant. |
+| `POST /events` | Sim, pelo cliente da oportunidade (`sellerWhere`), sem tenant. |
+| `POST /assistant-whatsapp/contact` | Sim (`sellerWhere` + `isArchived: false`). |
+
+Observação: em `POST /opportunities`, gerente e diretor ainda podem informar `ownerSellerId` sem conferência de
+tenant ou perfil do responsável (`resolveOwnerId`). Não alterado.
+
+### TD-SEED-GUARD — `prisma/seed.js` apaga dados e não tem trava própria
+
+`apps/api/prisma/seed.js` começa com `deleteMany` em paradas, compromissos, metas, territórios, vendas, atividades,
+oportunidades, contatos e clientes. O bootstrap só o chama com `DATABASE_SCHEMA_MODE=ephemeral-push` e
+`SEED_ON_BOOTSTRAP=true` (só o compose do CI); em produção os dois são literais (`external` e `"false"`). Mas a
+imagem de produção contém `prisma/` e o `tsx`, então dava para rodar o seed à mão dentro do container.
+
+Resolvido no código em 28/10/2026, aguardando merge: o script `prisma:seed` do `apps/api/package.json` recusa com
+erro antes de chamar o `seed.js` quando `DATABASE_SCHEMA_MODE` não é `ephemeral-push` (ausente também recusa). O
+compose do CI ganhou um tenant fictício depois do seed (`apps/api/src/scripts/ensureSeedTenant.ts`, idempotente, só
+em `ephemeral-push`): vincula os usuários do seed e preenche o tenant dos clientes sem tenant. O
+`production-deploy-safety` confere as duas coisas lendo os arquivos.
+
+Pendente:
+
+- (a) Trava dentro do próprio `seed.js`, antes dos imports e do primeiro `deleteMany`, no próximo PR que já tiver
+  migration (ex.: o índice aditivo em `AgendaStop.clientId`, ver “TD-PLANNING-VISIT-SUGGESTIONS”): qualquer mudança
+  em `apps/api/prisma/` (exceto `seedPreview.ts` e o validador do preview) exige evidência de schema nova
+  (`schema_prisma_trees_equivalent`).
+- (b) Até lá, `tsx prisma/seed.js` chamado direto (sem `npm run prisma:seed`) continua sem trava.
+- (c) `apps/api/prisma/seedTestFixture.ts` cria cliente sem tenant; rotas que exigem tenant recusam esses dados.

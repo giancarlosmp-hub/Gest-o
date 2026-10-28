@@ -14,9 +14,11 @@
   exclui). Relatório Execução Comercial mostra o não realizado por motivo (vendedor e equipe). Detalhes:
   `TECH_DEBT.md`, “TD-AGENDA-NOT-DONE-REASONS”.
 
-# Tenant dos clientes ativos sem tenant (script) — código pronto, aguardando merge — 25/10/2026
+# Tenant dos clientes ativos sem tenant (script) — mergeado (#1000) e rodado em produção — 25/10/2026
 
-- Script `backfillClientTenant` (simulação por padrão; `--apply --expect=N`), não rodado: preenche o `tenantId` dos
+- Rodado em produção depois do merge do #1000: os 62 clientes ativos sem tenant foram atualizados. SELECT de
+  28/10/2026: 0 clientes ativos sem tenant, de 2.175 ativos.
+- Script `backfillClientTenant` (simulação por padrão; `--apply --expect=N`): preenche o `tenantId` dos
   clientes ativos sem código do ERP e sem tenant (SELECT de 25/10/2026: 62) com o único tenant ativo e grava uma
   auditoria por cliente em `ClientCodeAudit`; nenhum outro campo muda. Arquivados sem tenant ficam fora (só contados).
 - Nada muda em listas, carteira, ABC, automações e IA (já mostram esses clientes); passam a funcionar pedido no ERP,

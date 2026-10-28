@@ -45,6 +45,7 @@ geral está no [`README.md`](README.md) e o estado oficial, decisões e procedim
   PRs ou logs.
 - Se algum comando for recusado, pare e pergunte antes de tentar de novo ou contornar.
 - Em `apps/api/prisma/` só entram schema, migrations e os scripts já existentes. Fixtures e
-  helpers de preview ou de teste ficam em `apps/api/src/preview/`: qualquer arquivo novo em
-  `prisma/` bloqueia o cutover pela checagem de evidência de schema
+  helpers de preview ou de teste ficam em `apps/api/src/preview/`: qualquer mudança em
+  `apps/api/prisma/` (arquivo novo ou edição de um existente, exceto `seedPreview.ts` e o validador
+  do preview) exige evidência de schema nova e bloqueia o cutover até lá
   (`schema_prisma_trees_equivalent` em `scripts/schema-evidence-validation.sh`).
