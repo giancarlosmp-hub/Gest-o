@@ -368,4 +368,18 @@ assert.doesNotMatch(preview,/npx\s+prisma|npm\s+(install|i)\b|npx\s+--yes/); ass
 for (const [name,text] of [["compose",compose],["deploy",deploy],["preflight",pre],["rollback",rollback],["preview",preview],["unit",unit],["workflow",workflow]]) {
   for (const forbidden of ["down -v","volume rm","migrate reset","prisma:seed"]) assert.ok(!text.includes(forbidden),`${name} contém operação proibida`);
 }
+// prisma/seed.js apaga dados: o script prisma:seed recusa fora do banco descartável antes de chamar o seed, e o tenant
+// fictício do seed só age em ephemeral-push. Só lê arquivos; nada é executado.
+const seedScript = JSON.parse(read("apps/api/package.json")).scripts["prisma:seed"];
+const seedGuard = "node -e \"if (process.env.DATABASE_SCHEMA_MODE !== 'ephemeral-push') { console.error('prisma:seed recusado: só roda em banco descartável (DATABASE_SCHEMA_MODE=ephemeral-push)'); process.exit(1); }\" && ";
+assert.ok(seedScript.startsWith(seedGuard), "prisma:seed deve começar pela trava de DATABASE_SCHEMA_MODE");
+assert.equal(seedScript.slice(seedGuard.length), "tsx prisma/seed.js", "prisma:seed só chama o seed.js depois da trava");
+assert.equal(JSON.parse(read("package.json")).scripts["prisma:seed"], "npm run prisma:seed -w @salesforce-pro/api", "prisma:seed da raiz passa pela trava do workspace");
+const seedTenant = read("apps/api/src/scripts/ensureSeedTenant.ts");
+const seedTenantBody = seedTenant.slice(seedTenant.indexOf("export async function ensureSeedTenant"));
+assert.match(seedTenantBody, /^export async function ensureSeedTenant\([^)]*\) \{\s*if \(schemaMode !== "ephemeral-push"\) \{[^}]*return;\s*\}/, "ensureSeedTenant deve começar recusando fora de ephemeral-push");
+const bootstrapSource = read("apps/api/src/scripts/bootstrap.ts");
+const seedBlock = bootstrapSource.slice(bootstrapSource.indexOf('if (schemaMode === "ephemeral-push" && env.seedOnBootstrap) {'), bootstrapSource.indexOf('Seed automático desabilitado'));
+assert.ok(seedBlock.includes("await ensureSeedTenant(schemaMode);"), "bootstrap chama ensureSeedTenant só no bloco ephemeral-push + SEED_ON_BOOTSTRAP");
+assert.equal(bootstrapSource.split("ensureSeedTenant(").length - 1, 1, "ensureSeedTenant é chamado num único lugar do bootstrap");
 console.log("production deploy safety smoke passed");
