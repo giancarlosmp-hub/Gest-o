@@ -126,6 +126,7 @@ import { buildControlledErpOrderFailurePayload, safeJsonStringify } from "../uti
 import { decryptErpCredential, encryptErpCredential, isErpCredentialEncryptionConfigured } from "../services/erpCredentialCrypto.js";
 import { buildErpOrderPdf, getErpOrderPdfCompany, getErpOrderPdfFilename, getErpOrderPdfMetadata, type ErpOrderPdfRecord } from "../services/erpOrderPdfService.js";
 import { calculateOpportunityPriceForTable, isOpportunityProductSelectable, normalizeOpportunityPriceTableCode } from "../services/opportunityPriceService.js";
+import { isSynchronizedProduct, loadOpportunityPriceRules } from "../services/opportunityPriceRules.js";
 import { getCommercialInsights, invalidateCommercialInsightsCache } from "../services/commercialInsightsService.js";
 import { timelineIntelligenceService } from "../services/timelineIntelligenceService.js";
 import { planningIntelligenceService } from "../services/planningIntelligenceService.js";
@@ -6446,36 +6447,6 @@ const productSearchQuerySchema = z.object({
   priceTableCode: z.string().trim().min(1).max(60).optional()
 });
 
-const loadOpportunityPriceRules = async () => {
-  const configs = await prisma.appConfig.findMany({
-    where: { key: { in: ["erp.ultrafv3.priceVariations", "erp.ultrafv3.prices"] } },
-    select: { key: true, value: true },
-  });
-  const configByKey = new Map(configs.map((config) => [config.key, config.value]));
-
-  const parseRows = (value: string | undefined) => {
-    if (!value?.trim()) return [];
-    try {
-      const parsed = JSON.parse(value);
-      if (Array.isArray(parsed)) return parsed;
-      if (parsed && typeof parsed === "object") {
-        const record = parsed as Record<string, unknown>;
-        for (const key of ["items", "data", "rows", "results", "content"]) {
-          if (Array.isArray(record[key])) return record[key] as unknown[];
-        }
-      }
-    } catch {
-      return [];
-    }
-    return [];
-  };
-
-  return {
-    priceVariations: parseRows(configByKey.get("erp.ultrafv3.priceVariations")),
-    erpPrices: parseRows(configByKey.get("erp.ultrafv3.prices")),
-  };
-};
-
 const opportunityItemPayloadSchema = z.object({
   productId: z.string().optional(),
   lineNumber: z.number().int().positive().optional(),
@@ -6536,13 +6507,6 @@ router.get("/products", async (_req, res) => {
   });
   return res.json(products);
 });
-
-const isSynchronizedProduct = (product: { rawErpPayload?: Prisma.JsonValue | null }) => {
-  if (product.rawErpPayload == null) return false;
-  if (typeof product.rawErpPayload !== "object") return true;
-  if (Array.isArray(product.rawErpPayload)) return product.rawErpPayload.length > 0;
-  return Object.keys(product.rawErpPayload).length > 0;
-};
 
 type HiddenProductDiagnosticReason = "inactive" | "not_synchronized" | "invalid_price";
 

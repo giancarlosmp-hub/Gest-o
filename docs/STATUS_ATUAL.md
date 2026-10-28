@@ -1,3 +1,13 @@
+# Oportunidade por voz no Assistente Comercial, fase 1 (interpretação) — código pronto, aguardando merge — 28/10/2026
+
+- `POST /ai/crm-assistant/opportunity-draft/parse` recebe `{ text }` (a frase ditada) e devolve o rascunho sem gravar:
+  candidatos de cliente (carteira, até 5) com o responsável sugerido, itens com até 5 produtos e preços da tabela
+  escolhida, diferença em % do preço informado (sem bloquear), etapa e probabilidade 20/50/70, datas, notas, avisos,
+  campos pendentes e campos vindos da IA. A IA só recebe a frase (até 300 caracteres) e só entra quando as regras fixas
+  não acham os campos ou a data da observação.
+- Sem migration e sem tela. Fases 2 (confirmação na tela) e 3 (microfone) em PRs seguintes. Detalhes: `TECH_DEBT.md`,
+  “TD-OPPORTUNITY-VOICE-DRAFT”.
+
 # Escopo do cliente nas demais rotas de escrita — código pronto, aguardando merge — 28/10/2026
 
 - Continuação do #1006 (oportunidade): contatos, atividades, agenda (compromisso, paradas e oportunidade), itens da

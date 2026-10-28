@@ -1226,3 +1226,48 @@ Pendente:
   (`schema_prisma_trees_equivalent`).
 - (b) Até lá, `tsx prisma/seed.js` chamado direto (sem `npm run prisma:seed`) continua sem trava.
 - (c) `apps/api/prisma/seedTestFixture.ts` cria cliente sem tenant; rotas que exigem tenant recusam esses dados.
+
+### TD-OPPORTUNITY-VOICE-DRAFT — oportunidade por voz no Assistente Comercial (fase 1: interpretação)
+
+Resolvido no código em 28/10/2026, aguardando merge: `POST /ai/crm-assistant/opportunity-draft/parse` recebe
+`{ text }` e devolve o rascunho sem gravar nada (`opportunityDraftService.ts`, leitura da frase em
+`opportunityDraftParser.ts`). Regras decididas pela diretoria em 28/10/2026:
+
+- Cliente: até 5 candidatos da carteira (`sellerWhere` + tenant, sem arquivados), por palavras do nome/fantasia e pela
+  cidade; o vendedor sempre escolhe. Responsável: vendedor = ele mesmo; gerente/diretor = dono do cliente escolhido,
+  devolvido em cada candidato; dono que não é vendedor ativo com vínculo no tenant deixa o responsável pendente.
+- Produto: até 5 candidatos ativos, sincronizados e com preço válido na tabela escolhida (mesma regra de
+  `/products/search`), pontuados por palavras em `name`, `className` e `brand` e por `PESO_PRODUTO` = kg falado.
+- Preço: cadastrado = `calculateOpportunityPriceForTable`; informado = diferença em %, sem bloquear (não há regra de
+  desconto, ver abaixo). Probabilidade: não existe padrão por etapa no sistema; usa 20/50/70 (prospecção, negociação,
+  proposta). Etapa ganho/perdido é recusada com aviso.
+- Datas: entrada hoje (Brasília), retorno hoje + 3 dias (fim de semana vai para a segunda) ou a data citada na
+  observação ("sugerida pela IA"; dia da semana é sempre o próximo; data passada é ignorada com aviso), fechamento
+  hoje + 30.
+- IA (fluxo `opportunity-draft`, 12 s, cota diária de quem pediu, filtro de dados atual): só quando falta o cliente,
+  quando a frase fala de sacas/quilos/dinheiro que as regras não leram, ou para uma data da observação que as regras
+  não entendem. Recebe só a frase (até 300 caracteres) ou só a observação; resposta validada com Zod; preenche só o
+  que as regras não acharam. Sem `isMalicious` nesta rota.
+- `loadOpportunityPriceRules` e `isSynchronizedProduct` saíram do `crudRoutes.ts` sem mudança, para
+  `services/opportunityPriceRules.ts`.
+- Testes com dados fictícios: `opportunityDraftParser.test.ts` e `opportunityDraft.http.test.ts`, encadeados em
+  `test:crm-assistant-today` (o CI já roda) e em `test:opportunity-draft`.
+
+Pendente:
+
+- (a) Fases 2 (rascunho no aparelho e confirmação na tela) e 3 (microfone pelo Web Speech API).
+- (b) Limite de desconto por perfil: não existe regra para item de oportunidade. `computeOpportunityItemTotals`
+  (`crudRoutes.ts`) só confere desconto entre 0 e 100% e até o valor bruto, com o TODO "adicionar limites de desconto
+  por perfil via Configurações". `Product.minPrice` não é usado como regra (a sincronização preenche com o próprio
+  preço quando o ERP não manda `PRECO_MINIMO`). Quando a regra existir, o rascunho deve aplicar a mesma ("precisa de
+  liberação").
+- (c) Busca de produto sem tenant: `/products/search` e o rascunho não filtram `Product.tenantId` (nulo em parte do
+  catálogo). Não alterado.
+- (d) Números falados por extenso ("dez quilos", "cem sacas") não são lidos pelas regras; só dígitos (a IA cobre se a
+  frase ficar fora do padrão). Cada produto precisa da palavra "produto"; "valor" depois de um produto é o valor da
+  oportunidade (com produtos, é ignorado com aviso), não o preço.
+- (e) Data com mês e sem ano fica no ano corrente: "dia 5 de janeiro" dito em dezembro volta como data passada.
+- (f) Etapa só é lida depois da palavra "etapa" (sem ela, prospecção). Tabela 2 usa o preço sem filial, como a busca
+  de produtos.
+- (g) Os testes novos rodam dentro do passo `test:crm-assistant-today` do CI; um passo próprio
+  (`test:opportunity-draft`) exige mudar `.github/workflows`.
