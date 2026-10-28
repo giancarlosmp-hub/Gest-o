@@ -21,6 +21,8 @@ export type ParsedDraftText = {
   priceTableUnrecognized: boolean;
   items: SpokenItem[];
   value: number | null;
+  // A frase fala de sacas, quilos ou dinheiro (mesmo sem produto ou valor lidos pelas regras): sinal de frase fora do padrão.
+  productOrValueHint: boolean;
   notes: string | null;
   observationDate: ObservationDate | null;
   observationHasDateHint: boolean;
@@ -70,6 +72,7 @@ const parseMoney = (folded: string) => {
 
 const cleanSegment = (text: string) => text.replace(/^[\s:,.;-]+/, "").replace(/[\s:,.;-]+$/, "").trim();
 const collapse = (text: string) => text.replace(/[\s,;.]+/g, " ").trim();
+const firstSentence = (text: string) => cleanSegment(text.split(/[.;!?](?:\s|$)/)[0]);
 
 const parseStage = (folded: string): DraftStage | RefusedStage | null => {
   for (const [pattern, stage] of STAGE_PATTERNS) if (pattern.test(folded)) return stage;
@@ -190,6 +193,7 @@ export const parseDraftText = (text: string, today: string): ParsedDraftText => 
     priceTableUnrecognized: false,
     items: [],
     value: null,
+    productOrValueHint: /\b(sacas?|sacos?|kg|quilos?|kilos?|reais|mil)\b|r\s?\$/.test(folded),
     notes,
     observationDate: notes ? parseObservationDate(notes, today) : null,
     observationHasDateHint: notes ? observationHasDateHint(notes) : false
@@ -207,19 +211,21 @@ export const parseDraftText = (text: string, today: string): ParsedDraftText => 
     const segment = foldText(original);
     switch (match[1]) {
       case "cliente": {
-        // "CB Agro, Guarapuava": o que vem depois da última vírgula é a cidade (curta), se a cidade não foi dita à parte.
-        const comma = original.lastIndexOf(",");
-        const tail = comma >= 0 ? cleanSegment(original.slice(comma + 1)) : "";
+        // Nome e cidade terminam no fim da sentença. "Agro X, Cidade Y": o que vem depois da última vírgula é a cidade
+        // (curta), se a cidade não foi dita à parte.
+        const sentence = firstSentence(original);
+        const comma = sentence.lastIndexOf(",");
+        const tail = comma >= 0 ? cleanSegment(sentence.slice(comma + 1)) : "";
         if (tail && tail.split(/\s+/).length <= 4) {
-          result.clientName = cleanSegment(original.slice(0, comma)) || null;
+          result.clientName = cleanSegment(sentence.slice(0, comma)) || null;
           result.clientCity ??= tail;
         } else {
-          result.clientName = original || null;
+          result.clientName = sentence || null;
         }
         break;
       }
       case "cidade":
-        result.clientCity = cleanSegment(original.replace(/^d[ae]\s+/i, "")) || result.clientCity;
+        result.clientCity = cleanSegment(firstSentence(original).replace(/^d[ae]\s+/i, "")) || result.clientCity;
         break;
       case "etapa": {
         const stage = parseStage(segment);

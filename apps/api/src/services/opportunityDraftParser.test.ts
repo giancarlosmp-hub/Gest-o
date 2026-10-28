@@ -74,6 +74,12 @@ assert.equal(valueOnly.value, 50000);
 assert.equal(valueOnly.items.length, 0);
 assert.equal(parseDraftText("Cliente Agro Teste Beta. Valor 12.500", WEDNESDAY).value, 12500);
 
+// Sinal de frase fora do padrão: falou de sacas/dinheiro sem a palavra-chave produto ou valor.
+assert.equal(parseDraftText("Cliente Agro Teste Beta. Etapa proposta", WEDNESDAY).productOrValueHint, false);
+const hinted = parseDraftText("Cliente Agro Teste Beta. Quer 20 sacas de aurora", WEDNESDAY);
+assert.equal(hinted.productOrValueHint, true);
+assert.equal(hinted.clientName, "Agro Teste Beta", "o nome do cliente termina no fim da sentença");
+
 // Etapa "ganho"/"perdido" é recusada; etapa com apelido é aceita; etapa desconhecida vira aviso.
 assert.equal(parseDraftText("Cliente Agro Teste Alfa. Etapa ganho", WEDNESDAY).refusedStage, "ganho");
 assert.equal(parseDraftText("Cliente Agro Teste Alfa. Etapa perdida", WEDNESDAY).refusedStage, "perdido");
