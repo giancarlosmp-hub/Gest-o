@@ -1253,9 +1253,29 @@ Resolvido no código em 28/10/2026, aguardando merge: `POST /ai/crm-assistant/op
 - Testes com dados fictícios: `opportunityDraftParser.test.ts` e `opportunityDraft.http.test.ts`, encadeados em
   `test:crm-assistant-today` (o CI já roda) e em `test:opportunity-draft`.
 
+Fase 2 (resolvido no código em 28/10/2026, aguardando merge): bloco "Nova oportunidade por frase" no Assistente
+Comercial (`OpportunityDraftSection.tsx`, `OpportunityDraftCard.tsx`; regras em `lib/opportunityDraft.ts`, guarda em
+`lib/opportunityDraftStore.ts`). Decisões da diretoria em 28/10/2026:
+
+- Cartão sem nada pré-escolhido: cliente entre os candidatos ou pela busca da carteira (`ClientSelect`); produto entre
+  os candidatos ou pela busca manual (`/products/search` na tabela do rascunho, preço da própria busca). Tabela só
+  leitura; "Interpretar de novo" reabre a frase e refaz as escolhas do cartão.
+- Responsável: vendedor = ele mesmo (não manda `ownerSellerId`); gerente/diretor = dono do candidato, editável entre
+  `/opportunities/seller-options`. Trocar a etapa volta a probabilidade para 20/50/70, salvo se já foi editada.
+- Sem item, o valor é obrigatório. Retorno → `followUpDate`/`expectedReturnDate`; fechamento → `expectedCloseDate`.
+  Item sem desconto: o preço informado vai como `unitPrice`, com a diferença em % visível. Pendências recalculadas na
+  tela; "Criar oportunidade" só habilita sem elas.
+- Confirmação: `POST /opportunities` uma vez só (o id fica no rascunho) e `POST /opportunities/:id/items` por item; item
+  que falha fica pendente, os gravados travam, e "Tentar de novo" só reenvia os pendentes. 403/409 mostram a mensagem
+  da API e o rascunho continua.
+- Rascunhos no aparelho por usuário (até 20), salvos ao interpretar e a cada edição, try/catch em tudo; validade de 7
+  dias desde a interpretação; vencido fica na lista para descartar ou refazer; não são apagados no logout.
+- Testes com dados fictícios em `apps/web/tests/opportunityDraft.test.ts`, encadeado em `test:crm-assistant-evidence`
+  (o CI já roda) e em `test:opportunity-draft`.
+
 Pendente:
 
-- (a) Fases 2 (rascunho no aparelho e confirmação na tela) e 3 (microfone pelo Web Speech API).
+- (a) Fase 3 (microfone pelo Web Speech API). A fase 2 está descrita abaixo.
 - (b) Limite de desconto por perfil: não existe regra para item de oportunidade. `computeOpportunityItemTotals`
   (`crudRoutes.ts`) só confere desconto entre 0 e 100% e até o valor bruto, com o TODO "adicionar limites de desconto
   por perfil via Configurações". `Product.minPrice` não é usado como regra (a sincronização preenche com o próprio
