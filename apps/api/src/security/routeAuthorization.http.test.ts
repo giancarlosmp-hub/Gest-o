@@ -6,13 +6,14 @@ import { signAccessToken } from "../utils/jwt.js";
 
 type Row = Record<string, any>;
 
-const users: Record<string, { role: "vendedor" | "gerente" | "diretor"; tenants: string[] }> = {
+const users: Record<string, { role: "vendedor" | "gerente" | "diretor"; tenants: string[]; isActive?: boolean }> = {
   "seller-a": { role: "vendedor", tenants: ["tenant-a"] },
   "seller-b": { role: "vendedor", tenants: ["tenant-a"] },
   "manager-a": { role: "gerente", tenants: ["tenant-a"] },
   "director-a": { role: "diretor", tenants: ["tenant-a"] },
   "seller-c": { role: "vendedor", tenants: ["tenant-b"] },
   "seller-no-tenant": { role: "vendedor", tenants: [] },
+  "seller-inactive": { role: "vendedor", tenants: ["tenant-a"], isActive: false },
 };
 
 let clients: Row[] = [];
@@ -112,7 +113,11 @@ const setModel = (model: string, methods: Record<string, unknown>) => {
 };
 
 setModel("user", {
-  findFirst: async ({ where }: any) => (users[where?.id] ? { id: where.id, email: `${where.id}@test.invalid`, role: users[where.id].role, region: null } : null),
+  findFirst: async ({ where }: any) => {
+    const user = users[where?.id];
+    const row = user && { id: where.id, email: `${where.id}@test.invalid`, role: user.role, region: null, isActive: user.isActive ?? true, tenantMemberships: membershipsOf(where.id) };
+    return row && matches(row, where) ? row : null;
+  },
   findUnique: async ({ where }: any) => (users[where?.id] ? { name: where.id } : null),
 });
 setModel("tenantMembership", {
@@ -384,6 +389,25 @@ try {
   assert.equal(await status("director-a", "PUT", "/api/opportunities/opp-a2", { ownerSellerId: "seller-b" }), 200);
   assert.equal(opportunities.find((row) => row.id === "opp-a2")?.ownerSellerId, "seller-b", "diretor transfere dentro do tenant");
   assert.equal(opportunities.find((row) => row.id === "opp-other")?.clientId, "client-other");
+
+  // Responsável escolhido por gerente ou diretor: vendedor ativo com vínculo ativo no tenant; senão 409.
+  resetData();
+  for (const userId of ["manager-a", "director-a"]) {
+    for (const ownerSellerId of ["seller-c", "seller-inactive", "seller-no-tenant", "manager-a", "seller-inexistente"]) {
+      const response = await call(userId, "POST", "/api/opportunities", newOpportunity("client-b", { ownerSellerId }));
+      assert.equal(response.status, 409, `${userId} -> ${ownerSellerId}`);
+      assert.equal(((await response.json()) as Row).message, "O responsável deve ser um vendedor ativo.");
+    }
+  }
+  assert.equal(opportunities.length, 4, "nada criado com responsável inválido");
+  const managerCreate = await call("manager-a", "POST", "/api/opportunities", newOpportunity("client-b", { ownerSellerId: "seller-a" }));
+  assert.equal(managerCreate.status, 201);
+  assert.equal(((await managerCreate.json()) as Row).ownerSellerId, "seller-a");
+  assert.equal(await status("director-a", "POST", "/api/opportunities", newOpportunity("client-b", { ownerSellerId: "seller-b" })), 201);
+  // Vendedor: o responsável segue sendo ele, sem conferir o ownerSellerId enviado.
+  const sellerCreate = await call("seller-a", "POST", "/api/opportunities", newOpportunity("client-a", { ownerSellerId: "seller-c" }));
+  assert.equal(sellerCreate.status, 201);
+  assert.equal(((await sellerCreate.json()) as Row).ownerSellerId, "seller-a");
 
   // Contatos: cliente no escopo (sellerWhere + tenant). POST /contacts fora do escopo ou inexistente é 403 sem revelar
   // existência; arquivado no escopo segue aceito. As rotas /clients/:id/contacts seguem 404, agora também por tenant.

@@ -8225,6 +8225,14 @@ router.post("/opportunities", validateBody(opportunitySchema), async (req, res) 
   if (client.isArchived) {
     return res.status(409).json({ message: archivedClientOpportunityMessage(client.archiveReason) });
   }
+  // Gerente e diretor escolhem o responsável: vendedor ativo com vínculo ativo no tenant (mesma regra da transferência).
+  if (req.user!.role !== "vendedor" && req.body.ownerSellerId) {
+    const owner = await prisma.user.findFirst({
+      where: { id: req.body.ownerSellerId, role: "vendedor", isActive: true, tenantMemberships: { some: { tenantId, status: "active" } } },
+      select: { id: true }
+    });
+    if (!owner) return res.status(409).json({ message: "O responsável deve ser um vendedor ativo." });
+  }
 
   const ownerSellerId = resolveOwnerId(req, req.body.ownerSellerId);
   const data = await prisma.opportunity.create({
