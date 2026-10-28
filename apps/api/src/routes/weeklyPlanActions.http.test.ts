@@ -38,7 +38,7 @@ const users: Row[] = [
 // Título de venda vencido há 40 dias: cliente em cobrança, fora das sugestões.
 const overdueTitle = { DOCTO: "DOC-FICTICIO", PARCELA: 1, DATA_VENCIMENTO: new Date(NOW - 40 * DAY_MS).toISOString(), DSCRECEITA: "VENDAS", VALOR: 10, SALDO_CAPITAL: 10 };
 const client = (id: string, ownerSellerId: string, extra: Row = {}): Row => ({
-  id, name: `Cliente Ficticio ${id}`, city: "Cidade Ficticia", state: "PR", ownerSellerId, isArchived: false, lastPurchaseDate: daysAgo(30),
+  id, name: `Cliente Ficticio ${id}`, city: "Cidade Ficticia", state: "PR", ownerSellerId, tenantId: "tenant-a", isArchived: false, lastPurchaseDate: daysAgo(30),
   lastPurchaseValue: null, financialProfile: null, partnerTitles: null, openTitlesTotal: 0, overdueTitlesTotal: 0, createdAt: daysAgo(2000), ...extra,
 });
 const clients: Row[] = [
@@ -90,7 +90,10 @@ setModel("user", {
   },
 });
 setModel("tenantMembership", { findMany: async ({ where }: any) => (users.some((user) => user.id === where?.userId) ? [{ tenantId: "tenant-a" }] : []) });
-setModel("client", { findMany: async ({ where, select }: any) => clients.filter((row) => matches(row, where)).map((row) => pick(row, select)) });
+setModel("client", {
+  findMany: async ({ where, select }: any) => clients.filter((row) => matches(row, where)).map((row) => pick(row, select)),
+  findFirst: async ({ where, select }: any) => { const row = clients.find((candidate) => matches(candidate, where)); return row ? pick(row, select) : null; },
+});
 setModel("opportunity", {
   findMany: async ({ where, select }: any) => opportunities.filter((row) => matches(row, where)).map((row) => ({ ...pick(row, select), client: pick(clientOf(row)!, select?.client?.select), activities: [], timelineEvents: [] })),
   findFirst: async ({ where }: any) => opportunities.find((row) => matches(row, where)) ?? null,

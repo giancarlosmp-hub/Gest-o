@@ -8189,6 +8189,17 @@ const OPPORTUNITY_CLIENT_OUT_OF_SCOPE_MESSAGE = "Cliente fora da sua carteira.";
 const findOpportunityClientInScope = (req: Request, tenantId: string, clientId: string) =>
   prisma.client.findFirst({ where: { id: clientId, tenantId, ...sellerWhere(req) }, select: { isArchived: true, archiveReason: true } });
 
+// Oportunidade no escopo do usuário: sellerWhere somado ao tenant do cliente dela. Fora do escopo: 404 de cada rota.
+const opportunityInScopeWhere = (req: Request, tenantId: string, id: string) => ({ id, ...sellerWhere(req), client: { tenantId } });
+
+// Compromisso no escopo: vendedor só os próprios. AgendaEvent não recebe tenantId na criação, então o tenant vem do
+// vínculo do vendedor do compromisso (mesmo padrão de contactTenantWhere).
+const agendaEventInScopeWhere = (req: Request, tenantId: string, id: string) => ({
+  id,
+  ...(req.user!.role === "vendedor" ? { sellerId: req.user!.id } : {}),
+  seller: { tenantMemberships: { some: { tenantId, status: "active" as const } } }
+});
+
 router.post("/opportunities", validateBody(opportunitySchema), async (req, res) => {
   if (!assertProbability(req.body.probability)) return res.status(400).json({ message: "probability deve estar entre 0 e 100" });
 
@@ -8538,13 +8549,12 @@ const createExecutedActivityInTx = async (
 router.post("/activities", validateBody(activitySchema), async (req, res) => {
   const ownerSellerId = resolveOwnerId(req, req.body.ownerSellerId || req.body.ownerId);
   const notes = (req.body.notes || req.body.description || "Sem notas").trim();
+  const tenantId = await resolveRequestTenantId(req, res);
+  if (!tenantId) return;
 
   const relatedOpportunity = req.body.opportunityId
     ? await prisma.opportunity.findFirst({
-      where: {
-        id: req.body.opportunityId,
-        ...sellerWhere(req)
-      },
+      where: opportunityInScopeWhere(req, tenantId, req.body.opportunityId),
       select: { id: true, clientId: true, title: true, stage: true }
     })
     : null;
@@ -8559,15 +8569,16 @@ router.post("/activities", validateBody(activitySchema), async (req, res) => {
   if (providedClientId && relatedOpportunity && providedClientId !== relatedOpportunity.clientId) {
     return res.status(400).json({ message: "Cliente informado é diferente do cliente da oportunidade" });
   }
+  // Com oportunidade vale o cliente dela, mesmo de outra carteira; sem oportunidade, o cliente precisa estar no escopo.
+  if (providedClientId && !relatedOpportunity && !await findOpportunityClientInScope(req, tenantId, providedClientId)) {
+    return res.status(403).json({ message: OPPORTUNITY_CLIENT_OUT_OF_SCOPE_MESSAGE });
+  }
 
   const agendaEventId = req.body.agendaEventId || undefined;
   let linkedAgendaEventType: AgendaEventType | null = null;
   if (agendaEventId) {
     const agendaEvent = await prisma.agendaEvent.findFirst({
-      where: {
-        id: agendaEventId,
-        ...(req.user!.role === "vendedor" ? { sellerId: req.user!.id } : {})
-      },
+      where: agendaEventInScopeWhere(req, tenantId, agendaEventId),
       select: { id: true, type: true }
     });
 
@@ -8671,12 +8682,29 @@ router.put("/activities/:id", validateBody(activityUpdateSchema), async (req, re
       result: true,
       clientId: true,
       opportunityId: true,
+      agendaEventId: true,
       ownerSellerId: true
     }
   });
 
   if (!existingActivity) {
     return res.status(404).json({ message: "Atividade não encontrada" });
+  }
+
+  // Trocar cliente, oportunidade ou compromisso exige o novo no escopo; reenviar o mesmo valor segue como antes.
+  const changes = (field: "clientId" | "opportunityId" | "agendaEventId") => req.body[field] !== undefined && req.body[field] !== existingActivity[field];
+  if (changes("clientId") || changes("opportunityId") || changes("agendaEventId")) {
+    const tenantId = await resolveRequestTenantId(req, res);
+    if (!tenantId) return;
+    if (changes("clientId") && !await findOpportunityClientInScope(req, tenantId, req.body.clientId)) {
+      return res.status(403).json({ message: OPPORTUNITY_CLIENT_OUT_OF_SCOPE_MESSAGE });
+    }
+    if (changes("opportunityId") && !await prisma.opportunity.findFirst({ where: opportunityInScopeWhere(req, tenantId, req.body.opportunityId), select: { id: true } })) {
+      return res.status(404).json({ message: "Oportunidade não encontrada" });
+    }
+    if (changes("agendaEventId") && !await prisma.agendaEvent.findFirst({ where: agendaEventInScopeWhere(req, tenantId, req.body.agendaEventId), select: { id: true } })) {
+      return res.status(404).json({ message: "Evento da agenda não encontrado." });
+    }
   }
 
   // Atividade realizada não volta a pendente. A pendente antiga só pode ser reagendada ou concluída.
