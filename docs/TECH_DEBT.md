@@ -1151,7 +1151,7 @@ de cidades) para vendedor inativo; só a tela bloqueia. Não alterado.
 
 ### TD-WRITE-CLIENT-SCOPE — rotas de escrita aceitam cliente fora da carteira
 
-Resolvido no código em 27/10/2026, aguardando merge: `POST /opportunities` e a troca de `clientId` em
+Mergeado (#1006) em 28/10/2026: `POST /opportunities` e a troca de `clientId` em
 `PUT /opportunities/:id` buscam o cliente com `sellerWhere` somado ao tenant (`resolveRequestTenantId`), para todos
 os perfis. Fora do escopo ou inexistente: 403 "Cliente fora da sua carteira." sem revelar se o cliente existe;
 arquivado no escopo: 409 com a mensagem atual. O `PUT` também passou a buscar a oportunidade com `sellerWhere` +
@@ -1163,24 +1163,42 @@ Escopo hoje: `sellerWhere` (`apps/api/src/utils/access.ts`) restringe o vendedor
 veem todo o tenant (`?sellerId=` só filtra). Não existe escopo regional de gerente: o campo `User.region` não entra em
 nenhuma regra de acesso.
 
-Pendente (próximo PR) — levantamento de 27/10/2026 das demais rotas de escrita com `clientId`:
+Demais rotas de escrita — resolvido no código em 28/10/2026, aguardando merge. Mesma regra e o mesmo helper
+(`findOpportunityClientInScope`); arquivado no escopo mantém a resposta atual de cada rota. Oportunidade no escopo =
+`sellerWhere` + tenant do cliente dela; compromisso no escopo = vendedor só os próprios + vínculo ativo do vendedor do
+compromisso com o tenant (o `AgendaEvent` não recebe `tenantId`, ver abaixo). Testes com dados fictícios em
+`routeAuthorization.http.test.ts`; `weeklyPlanActions` e `agendaActivitySplit` ajustados só no necessário.
 
-| Rota | Confere o escopo do cliente? |
+| Rota | Agora |
 |---|---|
-| `POST /contacts` | Não: cria com o `clientId` do body sem conferir. |
-| `POST /activities` | Parcial: com `opportunityId` confere a oportunidade (`sellerWhere`) e exige o mesmo cliente; só com `clientId`, não confere. |
-| `PUT /activities/:id` | A atividade é conferida (`sellerWhere`), mas `clientId`, `opportunityId` e `agendaEventId` novos não são. |
-| `POST /agenda` e `/agenda/events` | Não: nem o `clientId` do compromisso, nem o das paradas, nem o `opportunityId`. |
-| `POST /agenda/events/:id/stops` | Confere o dono do evento; o `clientId` da parada não. |
-| `PATCH /agenda/:id` e `/agenda/events/:id` | Sem `clientId`; o `opportunityId` não foi conferido a fundo. |
-| `GET/POST/PUT/DELETE /opportunities/:id/items*` | Conferem a oportunidade com `sellerWhere`, sem tenant. |
-| `PUT /contacts/:id` | Sim (`tenantId` + `sellerWhere`, 404). |
-| `POST`/`PUT /clients/:id/contacts` | Sim (`sellerWhere` + `isArchived: false`, 404), sem tenant. |
-| `POST /events` | Sim, pelo cliente da oportunidade (`sellerWhere`), sem tenant. |
-| `POST /assistant-whatsapp/contact` | Sim (`sellerWhere` + `isArchived: false`). |
+| `POST /contacts` | Cliente no escopo (403); arquivado segue aceito. |
+| `POST /activities` | Sem oportunidade: cliente no escopo (403). Com oportunidade do usuário: vale o cliente dela, mesmo de outra carteira; cliente diferente segue 400. Oportunidade fora: 404 "Oportunidade não encontrada"; compromisso fora: 404 "Evento da agenda não encontrado.". |
+| `PUT /activities/:id` | `clientId` (403), `opportunityId` e `agendaEventId` (404) conferidos só quando mudam; reenviar o mesmo valor segue como antes. |
+| `POST /agenda` e `/agenda/events` | Cliente do compromisso e de cada parada no escopo (403), exceto o cliente da oportunidade do usuário; oportunidade fora: 404. Cliente fora é conferido antes da oportunidade. |
+| `POST /agenda/events/:id/stops` | Cliente da parada no escopo (403). |
+| `PATCH /agenda/:id` e `/agenda/events/:id` | `opportunityId` conferido só quando muda (404). |
+| `GET/POST/PUT/DELETE /opportunities/:id/items*` | Oportunidade com `sellerWhere` + tenant (404). |
+| `POST /events` | Oportunidade com `sellerWhere` + tenant (404). |
+| `POST`/`PUT`/`DELETE /clients/:id/contacts*` | Somam o tenant à conferência existente (404). |
+| `POST /opportunities` com `ownerSellerId` (gerente/diretor) | Responsável precisa ser vendedor ativo com vínculo ativo no tenant; senão 409 "O responsável deve ser um vendedor ativo.". Vendedor segue sempre como responsável. |
 
-Observação: em `POST /opportunities`, gerente e diretor ainda podem informar `ownerSellerId` sem conferência de
-tenant ou perfil do responsável (`resolveOwnerId`). Não alterado.
+Por que a oportunidade libera o cliente: o planejamento sugere oportunidades e atividades pendentes do vendedor cujo
+cliente pode ser de outra carteira (`planningIntelligenceService`, `relatedClientIds`); "Agendar" e "Registrar" dessas
+sugestões continuam funcionando quando há oportunidade. Atividade pendente sem oportunidade em cliente de outra
+carteira passa a receber 403 ao registrar. Cliente arquivado sem tenant (só arquivados restam sem tenant) fica fora do
+escopo: 403 onde antes era aceito.
+
+Sem efeito na fila offline da Rota (check-in, check-out e resultado da parada não mudaram). O rascunho de visita salva
+pelo `POST /activities`: num 403 a tela mostra a mensagem e mantém o rascunho.
+
+Pendente, não alterado:
+
+- `AgendaEvent.tenantId` existe no schema, mas nenhuma rota o preenche na criação; por isso o tenant do compromisso
+  vem do vínculo do vendedor.
+- `GET /opportunities/seller-options` lista os vendedores ativos de todos os tenants para gerente e diretor.
+- `GET /agenda` (e `/agenda/events`) e `PATCH /agenda/:id` de gerente e diretor não filtram tenant: buscam o
+  compromisso só pelo id ou pelo período.
+- `POST /assistant-whatsapp/contact` confere `sellerWhere` + `isArchived: false`, sem tenant.
 
 ### TD-SEED-GUARD — `prisma/seed.js` apaga dados e não tem trava própria
 
