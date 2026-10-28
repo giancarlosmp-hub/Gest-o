@@ -140,6 +140,11 @@ setModel("client", {
 });
 setModel("contact", {
   findFirst: async ({ where }: any) => contacts.map(contactView).find((row) => matches(row, where)) ?? null,
+  create: async ({ data }: any) => {
+    const created = { id: `contact-new-${contacts.length + 1}`, ...data };
+    contacts.push(created);
+    return created;
+  },
   update: async ({ where, data }: any) => {
     const index = contacts.findIndex((row) => row.id === where.id);
     contacts[index] = { ...contacts[index], ...data };
@@ -261,8 +266,9 @@ try {
   list.forEach(assertProjectedClient);
 
   // Oportunidade só em cliente do escopo (sellerWhere + tenant). Fora do escopo ou inexistente: 403 sem revelar existência.
+  const addArchivedClientA = () => clients.push({ id: "client-a-archived", tenantId: "tenant-a", ownerSellerId: "seller-a", name: "Cliente A Arquivado", cnpjNormalized: "22222222000122", isArchived: true, archiveReason: "MERGED_INTO:client-a" });
   resetData();
-  clients.push({ id: "client-a-archived", tenantId: "tenant-a", ownerSellerId: "seller-a", name: "Cliente A Arquivado", cnpjNormalized: "22222222000122", isArchived: true, archiveReason: "MERGED_INTO:client-a" });
+  addArchivedClientA();
   const newOpportunity = (clientId: string, extra: Row = {}) => ({
     title: "Oportunidade Ficticia", value: 100, stage: "prospeccao", clientId,
     proposalDate: "2026-10-18", followUpDate: "2026-10-25", expectedCloseDate: "2026-11-30", ...extra,
@@ -317,9 +323,50 @@ try {
   assert.equal(opportunities.find((row) => row.id === "opp-a2")?.ownerSellerId, "seller-b", "diretor transfere dentro do tenant");
   assert.equal(opportunities.find((row) => row.id === "opp-other")?.clientId, "client-other");
 
+  // Contatos: cliente no escopo (sellerWhere + tenant). POST /contacts fora do escopo ou inexistente é 403 sem revelar
+  // existência; arquivado no escopo segue aceito. As rotas /clients/:id/contacts seguem 404, agora também por tenant.
+  resetData();
+  addArchivedClientA();
+  const newContact = (clientId: string) => ({ name: "Contato Ficticio", phone: "11900000000", email: "contato@test.invalid", clientId });
+  const contactCount = () => contacts.length;
+  assert.equal(await status("seller-a", "POST", "/api/contacts", newContact("client-a")), 201);
+  assert.equal(await status("seller-a", "POST", "/api/contacts", newContact("client-a-archived")), 201, "arquivado no escopo: resposta atual");
+  const beforeContacts = contactCount();
+  for (const clientId of ["client-b", "client-other", "client-inexistente"]) await outOfScope("seller-a", "POST", "/api/contacts", newContact(clientId));
+  for (const userId of ["manager-a", "director-a"]) {
+    await outOfScope(userId, "POST", "/api/contacts", newContact("client-other"));
+    await outOfScope(userId, "POST", "/api/contacts", newContact("client-inexistente"));
+  }
+  assert.equal(contactCount(), beforeContacts, "nada criado fora do escopo");
+  assert.equal(await status("manager-a", "POST", "/api/contacts", newContact("client-b")), 201);
+  assert.equal(await status("director-a", "POST", "/api/contacts", newContact("client-b")), 201);
+  // Edição sem trocar o cliente segue como antes.
+  assert.equal(await status("seller-a", "PUT", "/api/contacts/contact-a", { name: "Contato A editado", clientId: "client-a" }), 200);
+
+  const clientContact = { name: "Contato Ficticio", phone: "11900000000", email: "contato@test.invalid" };
+  assert.equal(await status("seller-a", "POST", "/api/clients/client-a/contacts", clientContact), 201);
+  assert.equal(await status("seller-a", "POST", "/api/clients/client-b/contacts", clientContact), 404);
+  assert.equal(await status("seller-a", "POST", "/api/clients/client-a-archived/contacts", clientContact), 404, "arquivado: resposta atual");
+  assert.equal(await status("seller-a", "PUT", "/api/clients/client-a/contacts/contact-a", { name: "Contato A2" }), 200);
+  assert.equal(await status("seller-a", "PUT", "/api/clients/client-b/contacts/contact-b", { name: "Invasor" }), 404);
+  assert.equal(await status("seller-a", "DELETE", "/api/clients/client-b/contacts/contact-b"), 404);
+  for (const userId of ["manager-a", "director-a"]) {
+    assert.equal(await status(userId, "POST", "/api/clients/client-b/contacts", clientContact), 201);
+    assert.equal(await status(userId, "POST", "/api/clients/client-other/contacts", clientContact), 404);
+    assert.equal(await status(userId, "PUT", "/api/clients/client-other/contacts/contact-other", { name: "Cross-tenant" }), 404);
+    assert.equal(await status(userId, "DELETE", "/api/clients/client-other/contacts/contact-other"), 404);
+  }
+  assert.equal(contacts.find((row) => row.id === "contact-other")?.name, "Contato Outro Tenant", "contato de outro tenant intacto");
+  assert.equal(contacts.find((row) => row.id === "contact-b")?.name, "Contato B");
+  assert.equal(await status("manager-a", "DELETE", "/api/clients/client-b/contacts/contact-b"), 204);
+  assert(!exists(contacts, "contact-b"));
+
   // Sem tenant ativo: 403 explícito, sem tocar nos dados.
   resetData();
   assert.equal(await status("seller-no-tenant", "POST", "/api/opportunities", newOpportunity("client-a")), 403);
+  assert.equal(await status("seller-no-tenant", "POST", "/api/contacts", newContact("client-a")), 403);
+  assert.equal(await status("seller-no-tenant", "DELETE", "/api/clients/client-a/contacts/contact-a"), 403);
+  assert(exists(contacts, "contact-a"));
   assert.equal(await status("seller-no-tenant", "DELETE", "/api/opportunities/opp-a"), 403);
   assert.equal(await status("seller-no-tenant", "GET", "/api/ai/opportunity-message?opportunityId=opp-a"), 403);
   assert(exists(opportunities, "opp-a"));

@@ -5192,9 +5192,12 @@ router.post(
   "/clients/:id/contacts",
   validateBody(clientContactSchema),
   async (req, res) => {
+    const tenantId = await resolveRequestTenantId(req, res);
+    if (!tenantId) return;
     const client = await prisma.client.findFirst({
       where: {
         id: req.params.id,
+        tenantId,
         ...sellerWhere(req),
         isArchived: false
       },
@@ -5219,9 +5222,12 @@ router.put(
   "/clients/:id/contacts/:contactId",
   validateBody(clientContactSchema.partial()),
   async (req, res) => {
+    const tenantId = await resolveRequestTenantId(req, res);
+    if (!tenantId) return;
     const client = await prisma.client.findFirst({
       where: {
         id: req.params.id,
+        tenantId,
         ...sellerWhere(req),
         isArchived: false
       },
@@ -5251,11 +5257,14 @@ router.put(
 );
 
 router.delete("/clients/:id/contacts/:contactId", async (req, res) => {
+  const tenantId = await resolveRequestTenantId(req, res);
+  if (!tenantId) return;
   const existingContact = await prisma.contact.findFirst({
     where: {
       id: req.params.contactId,
       clientId: req.params.id,
-      ...sellerWhere(req)
+      ...sellerWhere(req),
+      client: { tenantId }
     },
     select: { id: true }
   });
@@ -5403,11 +5412,12 @@ router.get("/contacts", async (req, res) => {
   res.json(contacts.map((contact) => ({ ...contact, client: contact.client ? projectClientForResponse(contact.client) : contact.client })));
 });
 
-router.post("/contacts", validateBody(contactSchema), async (req, res) =>
-  res
-    .status(201)
-    .json(await prisma.contact.create({ data: { ...req.body, ownerSellerId: resolveOwnerId(req, req.body.ownerSellerId) } }))
-);
+router.post("/contacts", validateBody(contactSchema), async (req, res) => {
+  const tenantId = await resolveRequestTenantId(req, res);
+  if (!tenantId) return;
+  if (!await findOpportunityClientInScope(req, tenantId, req.body.clientId)) return res.status(403).json({ message: OPPORTUNITY_CLIENT_OUT_OF_SCOPE_MESSAGE });
+  res.status(201).json(await prisma.contact.create({ data: { ...req.body, ownerSellerId: resolveOwnerId(req, req.body.ownerSellerId) } }));
+});
 
 router.put("/contacts/:id", validateBody(contactSchema.partial()), async (req, res) => {
   const tenantId = await resolveRequestTenantId(req, res);
@@ -8174,8 +8184,8 @@ router.post(
 
 const OPPORTUNITY_CLIENT_OUT_OF_SCOPE_MESSAGE = "Cliente fora da sua carteira.";
 
-// Cliente de oportunidade: mesmo escopo das listagens (sellerWhere) somado ao tenant, para todos os perfis.
-// Fora do escopo ou inexistente responde igual (403), sem revelar se o cliente existe.
+// Cliente de oportunidade (e das demais rotas de escrita com clientId): mesmo escopo das listagens (sellerWhere)
+// somado ao tenant, para todos os perfis. Fora do escopo ou inexistente responde igual (403), sem revelar se o cliente existe.
 const findOpportunityClientInScope = (req: Request, tenantId: string, clientId: string) =>
   prisma.client.findFirst({ where: { id: clientId, tenantId, ...sellerWhere(req) }, select: { isArchived: true, archiveReason: true } });
 
