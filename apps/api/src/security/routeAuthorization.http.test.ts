@@ -6,18 +6,22 @@ import { signAccessToken } from "../utils/jwt.js";
 
 type Row = Record<string, any>;
 
-const users: Record<string, { role: "vendedor" | "gerente" | "diretor"; tenants: string[] }> = {
+const users: Record<string, { role: "vendedor" | "gerente" | "diretor"; tenants: string[]; isActive?: boolean }> = {
   "seller-a": { role: "vendedor", tenants: ["tenant-a"] },
   "seller-b": { role: "vendedor", tenants: ["tenant-a"] },
   "manager-a": { role: "gerente", tenants: ["tenant-a"] },
   "director-a": { role: "diretor", tenants: ["tenant-a"] },
   "seller-c": { role: "vendedor", tenants: ["tenant-b"] },
   "seller-no-tenant": { role: "vendedor", tenants: [] },
+  "seller-inactive": { role: "vendedor", tenants: ["tenant-a"], isActive: false },
 };
 
 let clients: Row[] = [];
 let opportunities: Row[] = [];
 let contacts: Row[] = [];
+let activities: Row[] = [];
+let agendaEvents: Row[] = [];
+let agendaStops: Row[] = [];
 
 const resetData = () => {
   clients = [
@@ -43,6 +47,19 @@ const resetData = () => {
     { id: "contact-orphan-b", clientId: null, ownerSellerId: "seller-b", name: "Contato sem cliente B" },
     { id: "contact-other", clientId: "client-other", ownerSellerId: "seller-c", name: "Contato Outro Tenant" },
   ];
+  activities = [
+    {
+      id: "act-a", type: "ligacao", done: true, description: "Resumo ficticio", result: null, date: new Date("2026-10-20T12:00:00.000Z"),
+      dueDate: new Date("2026-10-20T12:00:00.000Z"), clientId: "client-a", opportunityId: null, agendaEventId: null, ownerSellerId: "seller-a",
+    },
+  ];
+  agendaStops = [];
+  const eventDates = { startDateTime: new Date("2026-11-03T12:00:00.000Z"), endDateTime: new Date("2026-11-03T13:00:00.000Z") };
+  agendaEvents = [
+    { id: "evt-a", title: "Compromisso A", type: "ligacao", status: "agendado", sellerId: "seller-a", clientId: "client-a", opportunityId: null, ...eventDates },
+    { id: "evt-b", title: "Compromisso B", type: "ligacao", status: "agendado", sellerId: "seller-b", clientId: "client-b", opportunityId: null, ...eventDates },
+    { id: "evt-other", title: "Compromisso Outro Tenant", type: "ligacao", status: "agendado", sellerId: "seller-c", clientId: "client-other", opportunityId: null, ...eventDates },
+  ];
 };
 
 const membershipsOf = (userId: string) => (users[userId]?.tenants ?? []).map((tenantId) => ({ tenantId, status: "active" }));
@@ -64,6 +81,12 @@ const opportunityView = (row: Row) => ({
   ownerSeller: { name: row.ownerSellerId },
   timelineEvents: [],
   activities: [],
+});
+const agendaEventView = (row: Row) => ({
+  ...row,
+  seller: { tenantMemberships: membershipsOf(row.sellerId) },
+  stops: agendaStops.filter((stop) => stop.agendaEventId === row.id),
+  _count: { activities: 0 },
 });
 const contactView = (row: Row) => ({ ...row, client: clientById(row.clientId), ownerSeller: { tenantMemberships: membershipsOf(row.ownerSellerId) } });
 
@@ -90,7 +113,11 @@ const setModel = (model: string, methods: Record<string, unknown>) => {
 };
 
 setModel("user", {
-  findFirst: async ({ where }: any) => (users[where?.id] ? { id: where.id, email: `${where.id}@test.invalid`, role: users[where.id].role, region: null } : null),
+  findFirst: async ({ where }: any) => {
+    const user = users[where?.id];
+    const row = user && { id: where.id, email: `${where.id}@test.invalid`, role: user.role, region: null, isActive: user.isActive ?? true, tenantMemberships: membershipsOf(where.id) };
+    return row && matches(row, where) ? row : null;
+  },
   findUnique: async ({ where }: any) => (users[where?.id] ? { name: where.id } : null),
 });
 setModel("tenantMembership", {
@@ -101,10 +128,48 @@ setModel("erpOrderSync", { findMany: async () => [] });
 setModel("activity", {
   aggregate: async () => ({ _max: { date: null, createdAt: null } }),
   count: async () => 0,
+  findFirst: async ({ where }: any) => activities.find((row) => matches(row, where)) ?? null,
+  create: async ({ data }: any) => {
+    const created = { id: `act-new-${activities.length + 1}`, createdAt: new Date(), ...data };
+    activities.push(created);
+    return created;
+  },
+  update: async ({ where, data }: any) => {
+    const index = activities.findIndex((row) => row.id === where.id);
+    activities[index] = { ...activities[index], ...data };
+    return activities[index];
+  },
+});
+setModel("agendaEvent", {
+  findFirst: async ({ where }: any) => agendaEvents.map(agendaEventView).find((row) => matches(row, where)) ?? null,
+  findUnique: async ({ where }: any) => {
+    const row = agendaEvents.find((candidate) => candidate.id === where.id);
+    return row ? agendaEventView(row) : null;
+  },
+  create: async ({ data }: any) => {
+    const { stops, ...rest } = data;
+    const created = { id: `evt-new-${agendaEvents.length + 1}`, status: "agendado", ...rest };
+    agendaEvents.push(created);
+    for (const [index, stop] of (stops?.create ?? []).entries()) agendaStops.push({ id: `${created.id}-stop-${index + 1}`, agendaEventId: created.id, ...stop });
+    return agendaEventView(created);
+  },
+  update: async ({ where, data }: any) => {
+    const index = agendaEvents.findIndex((row) => row.id === where.id);
+    agendaEvents[index] = { ...agendaEvents[index], ...data };
+    return agendaEventView(agendaEvents[index]);
+  },
+});
+setModel("agendaStop", {
+  create: async ({ data }: any) => {
+    const created = { id: `stop-new-${agendaStops.length + 1}`, ...data };
+    agendaStops.push(created);
+    return { ...created, client: null };
+  },
 });
 setModel("opportunity", {
   count: async () => 0,
   findFirst: async ({ where }: any) => opportunities.map(opportunityView).find((row) => matches(row, where)) ?? null,
+  updateMany: async () => ({ count: 0 }),
   create: async ({ data }: any) => {
     const created = { id: `opp-new-${opportunities.length + 1}`, ...data };
     opportunities.push(created);
@@ -122,6 +187,8 @@ setModel("opportunity", {
   },
 });
 setModel("timelineEvent", { create: async ({ data }: any) => data });
+// Itens: a oportunidade é conferida antes; sem itens na simulação, "Item não encontrado" prova que a conferência passou.
+setModel("opportunityItem", { findMany: async () => [], findFirst: async () => null });
 setModel("opportunityChangeLog", { create: async ({ data }: any) => data });
 (prisma as any).$transaction = async (input: any) => (typeof input === "function" ? input(prisma) : Promise.all(input));
 setModel("client", {
@@ -140,6 +207,11 @@ setModel("client", {
 });
 setModel("contact", {
   findFirst: async ({ where }: any) => contacts.map(contactView).find((row) => matches(row, where)) ?? null,
+  create: async ({ data }: any) => {
+    const created = { id: `contact-new-${contacts.length + 1}`, ...data };
+    contacts.push(created);
+    return created;
+  },
   update: async ({ where, data }: any) => {
     const index = contacts.findIndex((row) => row.id === where.id);
     contacts[index] = { ...contacts[index], ...data };
@@ -261,8 +333,9 @@ try {
   list.forEach(assertProjectedClient);
 
   // Oportunidade só em cliente do escopo (sellerWhere + tenant). Fora do escopo ou inexistente: 403 sem revelar existência.
+  const addArchivedClientA = () => clients.push({ id: "client-a-archived", tenantId: "tenant-a", ownerSellerId: "seller-a", name: "Cliente A Arquivado", cnpjNormalized: "22222222000122", isArchived: true, archiveReason: "MERGED_INTO:client-a" });
   resetData();
-  clients.push({ id: "client-a-archived", tenantId: "tenant-a", ownerSellerId: "seller-a", name: "Cliente A Arquivado", cnpjNormalized: "22222222000122", isArchived: true, archiveReason: "MERGED_INTO:client-a" });
+  addArchivedClientA();
   const newOpportunity = (clientId: string, extra: Row = {}) => ({
     title: "Oportunidade Ficticia", value: 100, stage: "prospeccao", clientId,
     proposalDate: "2026-10-18", followUpDate: "2026-10-25", expectedCloseDate: "2026-11-30", ...extra,
@@ -317,9 +390,212 @@ try {
   assert.equal(opportunities.find((row) => row.id === "opp-a2")?.ownerSellerId, "seller-b", "diretor transfere dentro do tenant");
   assert.equal(opportunities.find((row) => row.id === "opp-other")?.clientId, "client-other");
 
+  // Responsável escolhido por gerente ou diretor: vendedor ativo com vínculo ativo no tenant; senão 409.
+  resetData();
+  for (const userId of ["manager-a", "director-a"]) {
+    for (const ownerSellerId of ["seller-c", "seller-inactive", "seller-no-tenant", "manager-a", "seller-inexistente"]) {
+      const response = await call(userId, "POST", "/api/opportunities", newOpportunity("client-b", { ownerSellerId }));
+      assert.equal(response.status, 409, `${userId} -> ${ownerSellerId}`);
+      assert.equal(((await response.json()) as Row).message, "O responsável deve ser um vendedor ativo.");
+    }
+  }
+  assert.equal(opportunities.length, 4, "nada criado com responsável inválido");
+  const managerCreate = await call("manager-a", "POST", "/api/opportunities", newOpportunity("client-b", { ownerSellerId: "seller-a" }));
+  assert.equal(managerCreate.status, 201);
+  assert.equal(((await managerCreate.json()) as Row).ownerSellerId, "seller-a");
+  assert.equal(await status("director-a", "POST", "/api/opportunities", newOpportunity("client-b", { ownerSellerId: "seller-b" })), 201);
+  // Vendedor: o responsável segue sendo ele, sem conferir o ownerSellerId enviado.
+  const sellerCreate = await call("seller-a", "POST", "/api/opportunities", newOpportunity("client-a", { ownerSellerId: "seller-c" }));
+  assert.equal(sellerCreate.status, 201);
+  assert.equal(((await sellerCreate.json()) as Row).ownerSellerId, "seller-a");
+
+  // Contatos: cliente no escopo (sellerWhere + tenant). POST /contacts fora do escopo ou inexistente é 403 sem revelar
+  // existência; arquivado no escopo segue aceito. As rotas /clients/:id/contacts seguem 404, agora também por tenant.
+  resetData();
+  addArchivedClientA();
+  const newContact = (clientId: string) => ({ name: "Contato Ficticio", phone: "11900000000", email: "contato@test.invalid", clientId });
+  const contactCount = () => contacts.length;
+  assert.equal(await status("seller-a", "POST", "/api/contacts", newContact("client-a")), 201);
+  assert.equal(await status("seller-a", "POST", "/api/contacts", newContact("client-a-archived")), 201, "arquivado no escopo: resposta atual");
+  const beforeContacts = contactCount();
+  for (const clientId of ["client-b", "client-other", "client-inexistente"]) await outOfScope("seller-a", "POST", "/api/contacts", newContact(clientId));
+  for (const userId of ["manager-a", "director-a"]) {
+    await outOfScope(userId, "POST", "/api/contacts", newContact("client-other"));
+    await outOfScope(userId, "POST", "/api/contacts", newContact("client-inexistente"));
+  }
+  assert.equal(contactCount(), beforeContacts, "nada criado fora do escopo");
+  assert.equal(await status("manager-a", "POST", "/api/contacts", newContact("client-b")), 201);
+  assert.equal(await status("director-a", "POST", "/api/contacts", newContact("client-b")), 201);
+  // Edição sem trocar o cliente segue como antes.
+  assert.equal(await status("seller-a", "PUT", "/api/contacts/contact-a", { name: "Contato A editado", clientId: "client-a" }), 200);
+
+  const clientContact = { name: "Contato Ficticio", phone: "11900000000", email: "contato@test.invalid" };
+  assert.equal(await status("seller-a", "POST", "/api/clients/client-a/contacts", clientContact), 201);
+  assert.equal(await status("seller-a", "POST", "/api/clients/client-b/contacts", clientContact), 404);
+  assert.equal(await status("seller-a", "POST", "/api/clients/client-a-archived/contacts", clientContact), 404, "arquivado: resposta atual");
+  assert.equal(await status("seller-a", "PUT", "/api/clients/client-a/contacts/contact-a", { name: "Contato A2" }), 200);
+  assert.equal(await status("seller-a", "PUT", "/api/clients/client-b/contacts/contact-b", { name: "Invasor" }), 404);
+  assert.equal(await status("seller-a", "DELETE", "/api/clients/client-b/contacts/contact-b"), 404);
+  for (const userId of ["manager-a", "director-a"]) {
+    assert.equal(await status(userId, "POST", "/api/clients/client-b/contacts", clientContact), 201);
+    assert.equal(await status(userId, "POST", "/api/clients/client-other/contacts", clientContact), 404);
+    assert.equal(await status(userId, "PUT", "/api/clients/client-other/contacts/contact-other", { name: "Cross-tenant" }), 404);
+    assert.equal(await status(userId, "DELETE", "/api/clients/client-other/contacts/contact-other"), 404);
+  }
+  assert.equal(contacts.find((row) => row.id === "contact-other")?.name, "Contato Outro Tenant", "contato de outro tenant intacto");
+  assert.equal(contacts.find((row) => row.id === "contact-b")?.name, "Contato B");
+  assert.equal(await status("manager-a", "DELETE", "/api/clients/client-b/contacts/contact-b"), 204);
+  assert(!exists(contacts, "contact-b"));
+
+  // Atividades. POST sem oportunidade: cliente no escopo (403). Com oportunidade do usuário (sellerWhere + tenant): vale o
+  // cliente dela, mesmo de outra carteira; cliente diferente do dela segue 400. Oportunidade e compromisso fora: 404.
+  resetData();
+  addArchivedClientA();
+  opportunities.push({ id: "opp-a-on-b", clientId: "client-b", ownerSellerId: "seller-a" });
+  const newActivity = (extra: Row) => ({ type: "ligacao", description: "Resultado ficticio", date: "2026-10-20T12:00:00.000Z", noNextStepReason: "Motivo ficticio", ...extra });
+  const activityCount = () => activities.length;
+  assert.equal(await status("seller-a", "POST", "/api/activities", newActivity({ clientId: "client-a" })), 201);
+  assert.equal(await status("seller-a", "POST", "/api/activities", newActivity({ clientId: "client-a-archived" })), 201, "arquivado no escopo: resposta atual");
+  assert.equal(await status("seller-a", "POST", "/api/activities", newActivity({ clientId: "client-b", opportunityId: "opp-a-on-b" })), 201, "cliente da oportunidade do vendedor");
+  assert.equal(activities.at(-1)?.clientId, "client-b");
+  const beforeActivities = activityCount();
+  for (const clientId of ["client-b", "client-other", "client-inexistente"]) await outOfScope("seller-a", "POST", "/api/activities", newActivity({ clientId }));
+  assert.equal(await status("seller-a", "POST", "/api/activities", newActivity({ clientId: "client-a", opportunityId: "opp-a-on-b" })), 400);
+  assert.equal(await status("seller-a", "POST", "/api/activities", newActivity({ clientId: "client-b", opportunityId: "opp-b" })), 404);
+  assert.equal(await status("seller-a", "POST", "/api/activities", newActivity({ opportunityId: "opp-other" })), 404);
+  const foreignEvent = await call("seller-a", "POST", "/api/activities", newActivity({ clientId: "client-a", agendaEventId: "evt-b" }));
+  assert.equal(foreignEvent.status, 404);
+  assert.equal(((await foreignEvent.json()) as Row).message, "Evento da agenda não encontrado.");
+  for (const userId of ["manager-a", "director-a"]) {
+    await outOfScope(userId, "POST", "/api/activities", newActivity({ clientId: "client-other" }));
+    assert.equal(await status(userId, "POST", "/api/activities", newActivity({ opportunityId: "opp-other" })), 404);
+    assert.equal(await status(userId, "POST", "/api/activities", newActivity({ clientId: "client-b", agendaEventId: "evt-other" })), 404, "compromisso de outro tenant");
+  }
+  assert.equal(activityCount(), beforeActivities, "nada criado fora do escopo");
+  assert.equal(await status("seller-a", "POST", "/api/activities", newActivity({ clientId: "client-a", agendaEventId: "evt-a" })), 201);
+  assert.equal(await status("manager-a", "POST", "/api/activities", newActivity({ clientId: "client-b" })), 201);
+  assert.equal(await status("director-a", "POST", "/api/activities", newActivity({ clientId: "client-b", agendaEventId: "evt-b" })), 201);
+
+  // PUT: só confere cliente, oportunidade e compromisso quando mudam; reenviar o mesmo segue como antes.
+  const actA = () => activities.find((row) => row.id === "act-a")!;
+  assert.equal(await status("seller-a", "PUT", "/api/activities/act-a", { clientId: "client-a", description: "Resumo editado" }), 200);
+  assert.equal(actA().description, "Resumo editado");
+  await outOfScope("seller-a", "PUT", "/api/activities/act-a", { clientId: "client-b" });
+  await outOfScope("seller-a", "PUT", "/api/activities/act-a", { clientId: "client-inexistente" });
+  assert.equal(await status("seller-a", "PUT", "/api/activities/act-a", { opportunityId: "opp-b" }), 404);
+  assert.equal(await status("seller-a", "PUT", "/api/activities/act-a", { agendaEventId: "evt-b" }), 404);
+  for (const userId of ["manager-a", "director-a"]) {
+    await outOfScope(userId, "PUT", "/api/activities/act-a", { clientId: "client-other" });
+    assert.equal(await status(userId, "PUT", "/api/activities/act-a", { opportunityId: "opp-other" }), 404);
+    assert.equal(await status(userId, "PUT", "/api/activities/act-a", { agendaEventId: "evt-other" }), 404);
+  }
+  assert.deepEqual([actA().clientId, actA().opportunityId, actA().agendaEventId], ["client-a", null, null], "nada trocado fora do escopo");
+  assert.equal(await status("seller-a", "PUT", "/api/activities/act-a", { opportunityId: "opp-a", agendaEventId: "evt-a" }), 200);
+  assert.deepEqual([actA().opportunityId, actA().agendaEventId], ["opp-a", "evt-a"]);
+  assert.equal(await status("seller-a", "PUT", "/api/activities/act-a", { opportunityId: "opp-a", agendaEventId: "evt-a", clientId: "client-a" }), 200, "mesmos valores");
+  assert.equal(await status("manager-a", "PUT", "/api/activities/act-a", { clientId: "client-b", agendaEventId: "evt-b" }), 200);
+  assert.deepEqual([actA().clientId, actA().agendaEventId], ["client-b", "evt-b"]);
+
+  // Agenda. POST: cliente do compromisso e de cada parada no escopo (403), exceto o cliente da oportunidade do usuário;
+  // oportunidade fora do escopo: 404. PATCH confere a oportunidade só quando muda; parada nova confere o cliente.
+  resetData();
+  addArchivedClientA();
+  opportunities.push({ id: "opp-a-on-b", clientId: "client-b", ownerSellerId: "seller-a" });
+  const newEvent = (extra: Row) => ({
+    title: "Compromisso ficticio", type: "ligacao", startDateTime: "2026-11-04T12:00:00.000Z", endDateTime: "2026-11-04T13:00:00.000Z", ...extra,
+  });
+  const newRoute = (stopClientIds: string[], extra: Row = {}) => newEvent({
+    type: "roteiro_visita", stops: stopClientIds.map((clientId) => ({ clientId, city: "Cidade Ficticia" })), ...extra,
+  });
+  const eventCount = () => agendaEvents.length;
+  assert.equal(await status("seller-a", "POST", "/api/agenda/events", newEvent({ clientId: "client-a" })), 201);
+  assert.equal(await status("seller-a", "POST", "/api/agenda", newEvent({ clientId: "client-a-archived" })), 201, "arquivado no escopo: resposta atual");
+  assert.equal(await status("seller-a", "POST", "/api/agenda/events", newEvent({ clientId: "client-b", opportunityId: "opp-a-on-b" })), 201, "cliente da oportunidade do vendedor");
+  assert.equal(await status("seller-a", "POST", "/api/agenda/events", newRoute(["client-a", "client-b"], { opportunityId: "opp-a-on-b" })), 201);
+  assert.equal(await status("seller-a", "POST", "/api/agenda/events", newRoute(["client-a"])), 201);
+  const beforeEvents = eventCount();
+  for (const clientId of ["client-b", "client-other", "client-inexistente"]) {
+    await outOfScope("seller-a", "POST", "/api/agenda/events", newEvent({ clientId }));
+    await outOfScope("seller-a", "POST", "/api/agenda", newRoute(["client-a", clientId]));
+  }
+  await outOfScope("seller-a", "POST", "/api/agenda/events", newEvent({ clientId: "client-b", opportunityId: "opp-b" }));
+  await outOfScope("seller-a", "POST", "/api/agenda/events", newEvent({ clientId: "client-other", opportunityId: "opp-a-on-b" }));
+  const foreignOpportunity = await call("seller-a", "POST", "/api/agenda/events", newEvent({ clientId: "client-a", opportunityId: "opp-b" }));
+  assert.equal(foreignOpportunity.status, 404);
+  assert.equal(((await foreignOpportunity.json()) as Row).message, "Oportunidade não encontrada");
+  for (const userId of ["manager-a", "director-a"]) {
+    await outOfScope(userId, "POST", "/api/agenda/events", newEvent({ clientId: "client-other", ownerSellerId: "seller-a" }));
+    await outOfScope(userId, "POST", "/api/agenda/events", newRoute(["client-b", "client-other"], { ownerSellerId: "seller-a" }));
+    assert.equal(await status(userId, "POST", "/api/agenda/events", newEvent({ clientId: "client-b", opportunityId: "opp-other", ownerSellerId: "seller-b" })), 404);
+  }
+  assert.equal(eventCount(), beforeEvents, "nada criado fora do escopo");
+  assert.equal(await status("manager-a", "POST", "/api/agenda/events", newEvent({ clientId: "client-b", opportunityId: "opp-b", ownerSellerId: "seller-a" })), 201);
+  assert.equal(await status("director-a", "POST", "/api/agenda/events", newRoute(["client-a", "client-b"], { ownerSellerId: "seller-b" })), 201);
+
+  // PATCH: reenviar a mesma oportunidade segue; trocar exige a nova no escopo.
+  const evtA = () => agendaEvents.find((row) => row.id === "evt-a")!;
+  assert.equal(await status("seller-a", "PATCH", "/api/agenda/evt-a", { opportunityId: "opp-a", notes: "Nota ficticia" }), 200);
+  assert.equal(await status("seller-a", "PATCH", "/api/agenda/events/evt-a", { opportunityId: "opp-a", notes: "Mesma oportunidade" }), 200);
+  assert.equal(evtA().notes, "Mesma oportunidade");
+  assert.equal(await status("seller-a", "PATCH", "/api/agenda/evt-a", { opportunityId: "opp-b" }), 404);
+  for (const userId of ["manager-a", "director-a"]) {
+    assert.equal(await status(userId, "PATCH", "/api/agenda/events/evt-a", { opportunityId: "opp-other" }), 404);
+  }
+  assert.equal(evtA().opportunityId, "opp-a", "oportunidade não trocada fora do escopo");
+  assert.equal(await status("manager-a", "PATCH", "/api/agenda/evt-a", { opportunityId: "opp-b" }), 200);
+  assert.equal(evtA().opportunityId, "opp-b");
+
+  // Parada nova: cliente no escopo.
+  assert.equal(await status("seller-a", "POST", "/api/agenda/events/evt-a/stops", { clientId: "client-a" }), 201);
+  assert.equal(await status("seller-a", "POST", "/api/agenda/events/evt-a/stops", { clientId: "client-a-archived" }), 201, "arquivado no escopo: resposta atual");
+  const stopsBefore = agendaStops.length;
+  for (const clientId of ["client-b", "client-other", "client-inexistente"]) await outOfScope("seller-a", "POST", "/api/agenda/events/evt-a/stops", { clientId });
+  for (const userId of ["manager-a", "director-a"]) await outOfScope(userId, "POST", "/api/agenda/events/evt-b/stops", { clientId: "client-other" });
+  assert.equal(agendaStops.length, stopsBefore, "nenhuma parada fora do escopo");
+  assert.equal(await status("manager-a", "POST", "/api/agenda/events/evt-b/stops", { clientId: "client-a" }), 201);
+
+  // Itens da oportunidade e comentário (POST /events): oportunidade com sellerWhere + tenant; fora do escopo segue 404.
+  resetData();
+  const opportunityNotFound = async (userId: string, method: string, path: string, body?: Row) => {
+    const response = await call(userId, method, path, body);
+    assert.equal(response.status, 404, `${userId} ${method} ${path}`);
+    assert.equal(((await response.json()) as Row).message, "Oportunidade não encontrada");
+  };
+  const itemRoutes = (opportunityId: string): Array<[string, string, Row?]> => [
+    ["GET", `/api/opportunities/${opportunityId}/items`],
+    ["POST", `/api/opportunities/${opportunityId}/items`, { quantity: 1, unitPrice: 10 }],
+    ["PUT", `/api/opportunities/${opportunityId}/items/item-inexistente`, { quantity: 2 }],
+    ["DELETE", `/api/opportunities/${opportunityId}/items/item-inexistente`],
+  ];
+  const comment = (opportunityId: string) => ({ description: "Comentario ficticio", opportunityId });
+  for (const [method, path, body] of itemRoutes("opp-b")) await opportunityNotFound("seller-a", method, path, body);
+  await opportunityNotFound("seller-a", "POST", "/api/events", comment("opp-b"));
+  for (const userId of ["manager-a", "director-a"]) {
+    for (const [method, path, body] of itemRoutes("opp-other")) await opportunityNotFound(userId, method, path, body);
+    await opportunityNotFound(userId, "POST", "/api/events", comment("opp-other"));
+    assert.equal(await status(userId, "GET", "/api/opportunities/opp-b/items"), 200);
+    assert.equal(((await (await call(userId, "PUT", "/api/opportunities/opp-b/items/item-inexistente", { quantity: 2 })).json()) as Row).message, "Item não encontrado");
+    assert.equal(await status(userId, "POST", "/api/events", comment("opp-b")), 201);
+  }
+  assert.equal(await status("seller-a", "GET", "/api/opportunities/opp-a/items"), 200);
+  assert.equal(((await (await call("seller-a", "DELETE", "/api/opportunities/opp-a/items/item-inexistente")).json()) as Row).message, "Item não encontrado");
+  assert.equal(await status("seller-a", "POST", "/api/opportunities/opp-a/items", { quantity: 0 }), 400, "payload validado depois da oportunidade");
+  assert.equal(await status("seller-a", "POST", "/api/events", comment("opp-a")), 201);
+
   // Sem tenant ativo: 403 explícito, sem tocar nos dados.
   resetData();
   assert.equal(await status("seller-no-tenant", "POST", "/api/opportunities", newOpportunity("client-a")), 403);
+  assert.equal(await status("seller-no-tenant", "POST", "/api/contacts", newContact("client-a")), 403);
+  assert.equal(await status("seller-no-tenant", "DELETE", "/api/clients/client-a/contacts/contact-a"), 403);
+  assert(exists(contacts, "contact-a"));
+  const activitiesBeforeNoTenant = activities.length;
+  assert.equal(await status("seller-no-tenant", "POST", "/api/activities", { type: "ligacao", description: "Ficticio", date: "2026-10-20T12:00:00.000Z" }), 403);
+  assert.equal(activities.length, activitiesBeforeNoTenant);
+  const eventsBeforeNoTenant = agendaEvents.length;
+  assert.equal(await status("seller-no-tenant", "POST", "/api/agenda/events", { title: "Ficticio", type: "ligacao", startDateTime: "2026-11-04T12:00:00.000Z", endDateTime: "2026-11-04T13:00:00.000Z" }), 403);
+  assert.equal(agendaEvents.length, eventsBeforeNoTenant);
+  assert.equal(await status("seller-no-tenant", "GET", "/api/opportunities/opp-a/items"), 403);
+  assert.equal(await status("seller-no-tenant", "POST", "/api/events", { description: "Comentario ficticio", opportunityId: "opp-a" }), 403);
   assert.equal(await status("seller-no-tenant", "DELETE", "/api/opportunities/opp-a"), 403);
   assert.equal(await status("seller-no-tenant", "GET", "/api/ai/opportunity-message?opportunityId=opp-a"), 403);
   assert(exists(opportunities, "opp-a"));

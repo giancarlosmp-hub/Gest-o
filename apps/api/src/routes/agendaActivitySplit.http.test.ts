@@ -31,8 +31,8 @@ const users: Row[] = [
   { id: "seller-b", role: "vendedor" },
 ];
 const clients: Row[] = [
-  { id: "cli-a", name: "Cliente Ficticio A", ownerSellerId: "seller-a" },
-  { id: "cli-b", name: "Cliente Ficticio B", ownerSellerId: "seller-b" },
+  { id: "cli-a", name: "Cliente Ficticio A", ownerSellerId: "seller-a", tenantId: "tenant-a" },
+  { id: "cli-b", name: "Cliente Ficticio B", ownerSellerId: "seller-b", tenantId: "tenant-a" },
 ];
 const opportunities: Row[] = [
   { id: "opp-open", title: "Oportunidade ficticia aberta", clientId: "cli-a", ownerSellerId: "seller-a", stage: "negociacao", lastContactAt: daysAgo(12) },
@@ -128,6 +128,7 @@ setModel("user", {
   },
 });
 setModel("tenantMembership", { findMany: async ({ where }: any) => (users.some((user) => user.id === where?.userId) ? [{ tenantId: "tenant-a" }] : []) });
+setModel("client", { findFirst: async ({ where }: any) => clients.find((row) => matches(row, where)) ?? null });
 setModel("opportunity", {
   findFirst: async ({ where }: any) => opportunities.find((row) => matches(row, where)) ?? null,
   findUnique: async ({ where }: any) => byId(opportunities, where.id),

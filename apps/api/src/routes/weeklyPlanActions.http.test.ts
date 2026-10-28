@@ -38,7 +38,7 @@ const users: Row[] = [
 // Título de venda vencido há 40 dias: cliente em cobrança, fora das sugestões.
 const overdueTitle = { DOCTO: "DOC-FICTICIO", PARCELA: 1, DATA_VENCIMENTO: new Date(NOW - 40 * DAY_MS).toISOString(), DSCRECEITA: "VENDAS", VALOR: 10, SALDO_CAPITAL: 10 };
 const client = (id: string, ownerSellerId: string, extra: Row = {}): Row => ({
-  id, name: `Cliente Ficticio ${id}`, city: "Cidade Ficticia", state: "PR", ownerSellerId, isArchived: false, lastPurchaseDate: daysAgo(30),
+  id, name: `Cliente Ficticio ${id}`, city: "Cidade Ficticia", state: "PR", ownerSellerId, tenantId: "tenant-a", isArchived: false, lastPurchaseDate: daysAgo(30),
   lastPurchaseValue: null, financialProfile: null, partnerTitles: null, openTitlesTotal: 0, overdueTitlesTotal: 0, createdAt: daysAgo(2000), ...extra,
 });
 const clients: Row[] = [
@@ -90,7 +90,10 @@ setModel("user", {
   },
 });
 setModel("tenantMembership", { findMany: async ({ where }: any) => (users.some((user) => user.id === where?.userId) ? [{ tenantId: "tenant-a" }] : []) });
-setModel("client", { findMany: async ({ where, select }: any) => clients.filter((row) => matches(row, where)).map((row) => pick(row, select)) });
+setModel("client", {
+  findMany: async ({ where, select }: any) => clients.filter((row) => matches(row, where)).map((row) => pick(row, select)),
+  findFirst: async ({ where, select }: any) => { const row = clients.find((candidate) => matches(candidate, where)); return row ? pick(row, select) : null; },
+});
 setModel("opportunity", {
   findMany: async ({ where, select }: any) => opportunities.filter((row) => matches(row, where)).map((row) => ({ ...pick(row, select), client: pick(clientOf(row)!, select?.client?.select), activities: [], timelineEvents: [] })),
   findFirst: async ({ where }: any) => opportunities.find((row) => matches(row, where)) ?? null,
@@ -211,9 +214,17 @@ try {
   assert.equal(canActOnPlan({ id: "seller-a", role: "vendedor" }, "seller-b"), false);
   assert.equal(canActOnPlan({ id: "seller-a", role: "vendedor" }, "seller-a"), true);
   assert.equal(canActOnPlan({ id: "director-a", role: "diretor" }, "seller-b"), true);
+  // Cliente de outra carteira: aceito só pela oportunidade do próprio vendedor; oportunidade de outro vendedor é 403.
+  const eventsBeforeForged = agendaEvents.length;
   const forged = await call("POST", "/agenda/events", "seller-a", { ...payload, clientId: "cli-b", opportunityId: "opp-b", ownerSellerId: "seller-b" });
-  assert.equal(forged.status, 201);
-  assert.equal(agendaEvents.at(-1)!.sellerId, "seller-a", "vendedor não cria na agenda de outro");
+  assert.equal(forged.status, 403, "oportunidade de outro vendedor");
+  assert.equal(forged.json.message, "Cliente fora da sua carteira.");
+  assert.equal(agendaEvents.length, eventsBeforeForged, "nada criado");
+  opportunities.push(opportunity("opp-a-cli-b", "cli-b", "seller-a"));
+  const ownOpportunity = await call("POST", "/agenda/events", "seller-a", { ...payload, clientId: "cli-b", opportunityId: "opp-a-cli-b", ownerSellerId: "seller-b" });
+  assert.equal(ownOpportunity.status, 201, "oportunidade do vendedor em cliente de outra carteira");
+  assert.deepEqual([agendaEvents.at(-1)!.sellerId, agendaEvents.at(-1)!.clientId], ["seller-a", "cli-b"], "vendedor não cria na agenda de outro");
+  opportunities.pop();
   const forgedActivity = await call("POST", "/activities", "seller-a", { type: "ligacao", notes: "Ficticio", dueDate: "2026-10-22T12:00:00.000Z", opportunityId: "opp-b", ownerSellerId: "seller-b" });
   assert.equal(forgedActivity.status, 404, "oportunidade de outro vendedor");
   const directorPlan = await getPlan("director-a", "&sellerId=seller-b");

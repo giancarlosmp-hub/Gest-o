@@ -1,3 +1,14 @@
+# Escopo do cliente nas demais rotas de escrita — código pronto, aguardando merge — 28/10/2026
+
+- Continuação do #1006 (oportunidade): contatos, atividades, agenda (compromisso, paradas e oportunidade), itens da
+  oportunidade, comentário (`POST /events`) e contatos do cliente conferem o cliente ou a oportunidade com
+  `sellerWhere` + tenant, para todos os perfis. Cliente fora: 403 "Cliente fora da sua carteira."; oportunidade ou
+  compromisso fora: 404 de cada rota; arquivado no escopo mantém a resposta atual. Com oportunidade do usuário, o
+  cliente dela é aceito mesmo de outra carteira (sugestões do planejamento). Edição só confere o que muda.
+- `POST /opportunities`: responsável informado por gerente ou diretor precisa ser vendedor ativo do tenant (409).
+- Sem migration, sem mudança de tela e sem efeito na fila offline da Rota. Detalhes: `TECH_DEBT.md`,
+  “TD-WRITE-CLIENT-SCOPE”.
+
 # Motivos fixos de "Não realizado" (Agenda e Rota) e resultado da parada na fila offline — código pronto, aguardando merge — 26/10/2026
 
 - Catálogo fixo em `@salesforce-pro/shared` (`agendaNotDoneReasons.ts`), usado pela API e pela web: cliente ausente,

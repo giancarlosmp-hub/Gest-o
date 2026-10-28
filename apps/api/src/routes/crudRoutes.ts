@@ -5192,9 +5192,12 @@ router.post(
   "/clients/:id/contacts",
   validateBody(clientContactSchema),
   async (req, res) => {
+    const tenantId = await resolveRequestTenantId(req, res);
+    if (!tenantId) return;
     const client = await prisma.client.findFirst({
       where: {
         id: req.params.id,
+        tenantId,
         ...sellerWhere(req),
         isArchived: false
       },
@@ -5219,9 +5222,12 @@ router.put(
   "/clients/:id/contacts/:contactId",
   validateBody(clientContactSchema.partial()),
   async (req, res) => {
+    const tenantId = await resolveRequestTenantId(req, res);
+    if (!tenantId) return;
     const client = await prisma.client.findFirst({
       where: {
         id: req.params.id,
+        tenantId,
         ...sellerWhere(req),
         isArchived: false
       },
@@ -5251,11 +5257,14 @@ router.put(
 );
 
 router.delete("/clients/:id/contacts/:contactId", async (req, res) => {
+  const tenantId = await resolveRequestTenantId(req, res);
+  if (!tenantId) return;
   const existingContact = await prisma.contact.findFirst({
     where: {
       id: req.params.contactId,
       clientId: req.params.id,
-      ...sellerWhere(req)
+      ...sellerWhere(req),
+      client: { tenantId }
     },
     select: { id: true }
   });
@@ -5403,11 +5412,12 @@ router.get("/contacts", async (req, res) => {
   res.json(contacts.map((contact) => ({ ...contact, client: contact.client ? projectClientForResponse(contact.client) : contact.client })));
 });
 
-router.post("/contacts", validateBody(contactSchema), async (req, res) =>
-  res
-    .status(201)
-    .json(await prisma.contact.create({ data: { ...req.body, ownerSellerId: resolveOwnerId(req, req.body.ownerSellerId) } }))
-);
+router.post("/contacts", validateBody(contactSchema), async (req, res) => {
+  const tenantId = await resolveRequestTenantId(req, res);
+  if (!tenantId) return;
+  if (!await findOpportunityClientInScope(req, tenantId, req.body.clientId)) return res.status(403).json({ message: OPPORTUNITY_CLIENT_OUT_OF_SCOPE_MESSAGE });
+  res.status(201).json(await prisma.contact.create({ data: { ...req.body, ownerSellerId: resolveOwnerId(req, req.body.ownerSellerId) } }));
+});
 
 router.put("/contacts/:id", validateBody(contactSchema.partial()), async (req, res) => {
   const tenantId = await resolveRequestTenantId(req, res);
@@ -6807,7 +6817,9 @@ router.get("/products/:id", async (req, res) => {
 });
 
 router.get("/opportunities/:id/items", async (req, res) => {
-  const opportunity = await prisma.opportunity.findFirst({ where: { id: req.params.id, ...sellerWhere(req) } });
+  const tenantId = await resolveRequestTenantId(req, res);
+  if (!tenantId) return;
+  const opportunity = await prisma.opportunity.findFirst({ where: opportunityInScopeWhere(req, tenantId, req.params.id) });
   if (!opportunity) return res.status(404).json({ message: "Oportunidade não encontrada" });
 
   const items = await prisma.opportunityItem.findMany({
@@ -6832,7 +6844,9 @@ router.get("/opportunities/:id/items", async (req, res) => {
 });
 
 router.post("/opportunities/:id/items", async (req, res) => {
-  const opportunity = await prisma.opportunity.findFirst({ where: { id: req.params.id, ...sellerWhere(req) } });
+  const tenantId = await resolveRequestTenantId(req, res);
+  if (!tenantId) return;
+  const opportunity = await prisma.opportunity.findFirst({ where: opportunityInScopeWhere(req, tenantId, req.params.id) });
   if (!opportunity) return res.status(404).json({ message: "Oportunidade não encontrada" });
 
   const parsed = opportunityItemPayloadSchema.safeParse(req.body);
@@ -6880,7 +6894,9 @@ router.post("/opportunities/:id/items", async (req, res) => {
 });
 
 router.put("/opportunities/:id/items/:itemId", async (req, res) => {
-  const opportunity = await prisma.opportunity.findFirst({ where: { id: req.params.id, ...sellerWhere(req) } });
+  const tenantId = await resolveRequestTenantId(req, res);
+  if (!tenantId) return;
+  const opportunity = await prisma.opportunity.findFirst({ where: opportunityInScopeWhere(req, tenantId, req.params.id) });
   if (!opportunity) return res.status(404).json({ message: "Oportunidade não encontrada" });
 
   const existing = await prisma.opportunityItem.findFirst({ where: { id: req.params.itemId, opportunityId: req.params.id } });
@@ -6936,7 +6952,9 @@ router.put("/opportunities/:id/items/:itemId", async (req, res) => {
 });
 
 router.delete("/opportunities/:id/items/:itemId", async (req, res) => {
-  const opportunity = await prisma.opportunity.findFirst({ where: { id: req.params.id, ...sellerWhere(req) } });
+  const tenantId = await resolveRequestTenantId(req, res);
+  if (!tenantId) return;
+  const opportunity = await prisma.opportunity.findFirst({ where: opportunityInScopeWhere(req, tenantId, req.params.id) });
   if (!opportunity) return res.status(404).json({ message: "Oportunidade não encontrada" });
 
   const existing = await prisma.opportunityItem.findFirst({ where: { id: req.params.itemId, opportunityId: req.params.id } });
@@ -8174,10 +8192,21 @@ router.post(
 
 const OPPORTUNITY_CLIENT_OUT_OF_SCOPE_MESSAGE = "Cliente fora da sua carteira.";
 
-// Cliente de oportunidade: mesmo escopo das listagens (sellerWhere) somado ao tenant, para todos os perfis.
-// Fora do escopo ou inexistente responde igual (403), sem revelar se o cliente existe.
+// Cliente de oportunidade (e das demais rotas de escrita com clientId): mesmo escopo das listagens (sellerWhere)
+// somado ao tenant, para todos os perfis. Fora do escopo ou inexistente responde igual (403), sem revelar se o cliente existe.
 const findOpportunityClientInScope = (req: Request, tenantId: string, clientId: string) =>
   prisma.client.findFirst({ where: { id: clientId, tenantId, ...sellerWhere(req) }, select: { isArchived: true, archiveReason: true } });
+
+// Oportunidade no escopo do usuário: sellerWhere somado ao tenant do cliente dela. Fora do escopo: 404 de cada rota.
+const opportunityInScopeWhere = (req: Request, tenantId: string, id: string) => ({ id, ...sellerWhere(req), client: { tenantId } });
+
+// Compromisso no escopo: vendedor só os próprios. AgendaEvent não recebe tenantId na criação, então o tenant vem do
+// vínculo do vendedor do compromisso (mesmo padrão de contactTenantWhere).
+const agendaEventInScopeWhere = (req: Request, tenantId: string, id: string) => ({
+  id,
+  ...(req.user!.role === "vendedor" ? { sellerId: req.user!.id } : {}),
+  seller: { tenantMemberships: { some: { tenantId, status: "active" as const } } }
+});
 
 router.post("/opportunities", validateBody(opportunitySchema), async (req, res) => {
   if (!assertProbability(req.body.probability)) return res.status(400).json({ message: "probability deve estar entre 0 e 100" });
@@ -8195,6 +8224,14 @@ router.post("/opportunities", validateBody(opportunitySchema), async (req, res) 
   // Cliente arquivado não recebe oportunidade nova: o gerente reativa o cadastro antes.
   if (client.isArchived) {
     return res.status(409).json({ message: archivedClientOpportunityMessage(client.archiveReason) });
+  }
+  // Gerente e diretor escolhem o responsável: vendedor ativo com vínculo ativo no tenant (mesma regra da transferência).
+  if (req.user!.role !== "vendedor" && req.body.ownerSellerId) {
+    const owner = await prisma.user.findFirst({
+      where: { id: req.body.ownerSellerId, role: "vendedor", isActive: true, tenantMemberships: { some: { tenantId, status: "active" } } },
+      select: { id: true }
+    });
+    if (!owner) return res.status(409).json({ message: "O responsável deve ser um vendedor ativo." });
   }
 
   const ownerSellerId = resolveOwnerId(req, req.body.ownerSellerId);
@@ -8528,13 +8565,12 @@ const createExecutedActivityInTx = async (
 router.post("/activities", validateBody(activitySchema), async (req, res) => {
   const ownerSellerId = resolveOwnerId(req, req.body.ownerSellerId || req.body.ownerId);
   const notes = (req.body.notes || req.body.description || "Sem notas").trim();
+  const tenantId = await resolveRequestTenantId(req, res);
+  if (!tenantId) return;
 
   const relatedOpportunity = req.body.opportunityId
     ? await prisma.opportunity.findFirst({
-      where: {
-        id: req.body.opportunityId,
-        ...sellerWhere(req)
-      },
+      where: opportunityInScopeWhere(req, tenantId, req.body.opportunityId),
       select: { id: true, clientId: true, title: true, stage: true }
     })
     : null;
@@ -8549,15 +8585,16 @@ router.post("/activities", validateBody(activitySchema), async (req, res) => {
   if (providedClientId && relatedOpportunity && providedClientId !== relatedOpportunity.clientId) {
     return res.status(400).json({ message: "Cliente informado é diferente do cliente da oportunidade" });
   }
+  // Com oportunidade vale o cliente dela, mesmo de outra carteira; sem oportunidade, o cliente precisa estar no escopo.
+  if (providedClientId && !relatedOpportunity && !await findOpportunityClientInScope(req, tenantId, providedClientId)) {
+    return res.status(403).json({ message: OPPORTUNITY_CLIENT_OUT_OF_SCOPE_MESSAGE });
+  }
 
   const agendaEventId = req.body.agendaEventId || undefined;
   let linkedAgendaEventType: AgendaEventType | null = null;
   if (agendaEventId) {
     const agendaEvent = await prisma.agendaEvent.findFirst({
-      where: {
-        id: agendaEventId,
-        ...(req.user!.role === "vendedor" ? { sellerId: req.user!.id } : {})
-      },
+      where: agendaEventInScopeWhere(req, tenantId, agendaEventId),
       select: { id: true, type: true }
     });
 
@@ -8661,12 +8698,29 @@ router.put("/activities/:id", validateBody(activityUpdateSchema), async (req, re
       result: true,
       clientId: true,
       opportunityId: true,
+      agendaEventId: true,
       ownerSellerId: true
     }
   });
 
   if (!existingActivity) {
     return res.status(404).json({ message: "Atividade não encontrada" });
+  }
+
+  // Trocar cliente, oportunidade ou compromisso exige o novo no escopo; reenviar o mesmo valor segue como antes.
+  const changes = (field: "clientId" | "opportunityId" | "agendaEventId") => req.body[field] !== undefined && req.body[field] !== existingActivity[field];
+  if (changes("clientId") || changes("opportunityId") || changes("agendaEventId")) {
+    const tenantId = await resolveRequestTenantId(req, res);
+    if (!tenantId) return;
+    if (changes("clientId") && !await findOpportunityClientInScope(req, tenantId, req.body.clientId)) {
+      return res.status(403).json({ message: OPPORTUNITY_CLIENT_OUT_OF_SCOPE_MESSAGE });
+    }
+    if (changes("opportunityId") && !await prisma.opportunity.findFirst({ where: opportunityInScopeWhere(req, tenantId, req.body.opportunityId), select: { id: true } })) {
+      return res.status(404).json({ message: "Oportunidade não encontrada" });
+    }
+    if (changes("agendaEventId") && !await prisma.agendaEvent.findFirst({ where: agendaEventInScopeWhere(req, tenantId, req.body.agendaEventId), select: { id: true } })) {
+      return res.status(404).json({ message: "Evento da agenda não encontrado." });
+    }
   }
 
   // Atividade realizada não volta a pendente. A pendente antiga só pode ser reagendada ou concluída.
@@ -8801,11 +8855,10 @@ router.get("/events", async (req, res) => {
   });
 });
 router.post("/events", validateBody(eventSchema), async (req, res) => {
+  const tenantId = await resolveRequestTenantId(req, res);
+  if (!tenantId) return;
   const opportunity = await prisma.opportunity.findFirst({
-    where: {
-      id: req.body.opportunityId,
-      ...sellerWhere(req)
-    },
+    where: opportunityInScopeWhere(req, tenantId, req.body.opportunityId),
     select: {
       clientId: true
     }
@@ -8976,6 +9029,20 @@ router.post(["/agenda", "/agenda/events"], validateBody(agendaEventCreateSchema)
     return res.status(400).json({ message: "Roteiro de visita deve conter ao menos uma parada." });
   }
 
+  const tenantId = await resolveRequestTenantId(req, res);
+  if (!tenantId) return;
+  // Com oportunidade do usuário vale o cliente dela, mesmo de outra carteira; os demais clientes (do compromisso e das
+  // paradas) precisam estar no escopo. Cliente fora vem antes da oportunidade fora, como nas demais rotas.
+  const opportunity = req.body.opportunityId
+    ? await prisma.opportunity.findFirst({ where: opportunityInScopeWhere(req, tenantId, req.body.opportunityId), select: { clientId: true } })
+    : null;
+  const clientIds = new Set<string>([req.body.clientId, ...(req.body.stops ?? []).map((stop: { clientId?: string }) => stop.clientId)].filter(Boolean));
+  if (opportunity) clientIds.delete(opportunity.clientId);
+  for (const clientId of clientIds) {
+    if (!await findOpportunityClientInScope(req, tenantId, clientId)) return res.status(403).json({ message: OPPORTUNITY_CLIENT_OUT_OF_SCOPE_MESSAGE });
+  }
+  if (req.body.opportunityId && !opportunity) return res.status(404).json({ message: "Oportunidade não encontrada" });
+
   const event = await prisma.agendaEvent.create({
     data: {
       title: req.body.title,
@@ -9033,11 +9100,20 @@ router.post(["/agenda", "/agenda/events"], validateBody(agendaEventCreateSchema)
 router.patch(["/agenda/:id", "/agenda/events/:id"], validateBody(agendaEventUpdateSchema), async (req, res) => {
   const event = await prisma.agendaEvent.findUnique({
     where: { id: req.params.id },
-    select: { sellerId: true, title: true, type: true, status: true, clientId: true, _count: { select: { activities: true } } }
+    select: { sellerId: true, title: true, type: true, status: true, clientId: true, opportunityId: true, _count: { select: { activities: true } } }
   });
   if (!event) return res.status(404).json({ message: "Evento não encontrado." });
   if (req.user!.role === "vendedor" && event.sellerId !== req.user!.id) {
     return res.status(403).json({ message: "Acesso negado." });
+  }
+
+  // Trocar a oportunidade exige a nova no escopo; reenviar a mesma segue como antes.
+  if (req.body.opportunityId !== undefined && req.body.opportunityId !== event.opportunityId) {
+    const tenantId = await resolveRequestTenantId(req, res);
+    if (!tenantId) return;
+    if (!await prisma.opportunity.findFirst({ where: opportunityInScopeWhere(req, tenantId, req.body.opportunityId), select: { id: true } })) {
+      return res.status(404).json({ message: "Oportunidade não encontrada" });
+    }
   }
 
   // Realizado só com atividade vinculada ("Concluir"); o roteiro fica realizado pelas paradas.
@@ -9275,6 +9351,11 @@ router.post("/agenda/events/:id/stops", validateBody(agendaStopCreateSchema), as
   if (!event) return res.status(404).json({ message: "Evento não encontrado." });
   if (req.user!.role === "vendedor" && event.sellerId !== req.user!.id) {
     return res.status(403).json({ message: "Acesso negado." });
+  }
+  if (req.body.clientId) {
+    const tenantId = await resolveRequestTenantId(req, res);
+    if (!tenantId) return;
+    if (!await findOpportunityClientInScope(req, tenantId, req.body.clientId)) return res.status(403).json({ message: OPPORTUNITY_CLIENT_OUT_OF_SCOPE_MESSAGE });
   }
 
   const stop = await prisma.agendaStop.create({
