@@ -1188,6 +1188,11 @@ sugestões continuam funcionando quando há oportunidade. Atividade pendente sem
 carteira passa a receber 403 ao registrar. Cliente arquivado sem tenant (só arquivados restam sem tenant) fica fora do
 escopo: 403 onde antes era aceito.
 
+Efeito aceito (levantamento em produção de 28/10/2026): 36 oportunidades encerradas (14 ganho, 22 perdido) estão em
+clientes arquivados sem tenant. Com a conferência do tenant, os itens (`/opportunities/:id/items*`) e o comentário
+(`POST /events`) dessas oportunidades passam a responder 404. Decisão: aceitar, sem mudança de código. Resolve-se junto
+com a decisão sobre os 1.902 clientes arquivados sem tenant (“TD-CLIENT-TENANT-BACKFILL”).
+
 Sem efeito na fila offline da Rota (check-in, check-out e resultado da parada não mudaram). O rascunho de visita salva
 pelo `POST /activities`: num 403 a tela mostra a mensagem e mantém o rascunho.
 
