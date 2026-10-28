@@ -6817,7 +6817,9 @@ router.get("/products/:id", async (req, res) => {
 });
 
 router.get("/opportunities/:id/items", async (req, res) => {
-  const opportunity = await prisma.opportunity.findFirst({ where: { id: req.params.id, ...sellerWhere(req) } });
+  const tenantId = await resolveRequestTenantId(req, res);
+  if (!tenantId) return;
+  const opportunity = await prisma.opportunity.findFirst({ where: opportunityInScopeWhere(req, tenantId, req.params.id) });
   if (!opportunity) return res.status(404).json({ message: "Oportunidade não encontrada" });
 
   const items = await prisma.opportunityItem.findMany({
@@ -6842,7 +6844,9 @@ router.get("/opportunities/:id/items", async (req, res) => {
 });
 
 router.post("/opportunities/:id/items", async (req, res) => {
-  const opportunity = await prisma.opportunity.findFirst({ where: { id: req.params.id, ...sellerWhere(req) } });
+  const tenantId = await resolveRequestTenantId(req, res);
+  if (!tenantId) return;
+  const opportunity = await prisma.opportunity.findFirst({ where: opportunityInScopeWhere(req, tenantId, req.params.id) });
   if (!opportunity) return res.status(404).json({ message: "Oportunidade não encontrada" });
 
   const parsed = opportunityItemPayloadSchema.safeParse(req.body);
@@ -6890,7 +6894,9 @@ router.post("/opportunities/:id/items", async (req, res) => {
 });
 
 router.put("/opportunities/:id/items/:itemId", async (req, res) => {
-  const opportunity = await prisma.opportunity.findFirst({ where: { id: req.params.id, ...sellerWhere(req) } });
+  const tenantId = await resolveRequestTenantId(req, res);
+  if (!tenantId) return;
+  const opportunity = await prisma.opportunity.findFirst({ where: opportunityInScopeWhere(req, tenantId, req.params.id) });
   if (!opportunity) return res.status(404).json({ message: "Oportunidade não encontrada" });
 
   const existing = await prisma.opportunityItem.findFirst({ where: { id: req.params.itemId, opportunityId: req.params.id } });
@@ -6946,7 +6952,9 @@ router.put("/opportunities/:id/items/:itemId", async (req, res) => {
 });
 
 router.delete("/opportunities/:id/items/:itemId", async (req, res) => {
-  const opportunity = await prisma.opportunity.findFirst({ where: { id: req.params.id, ...sellerWhere(req) } });
+  const tenantId = await resolveRequestTenantId(req, res);
+  if (!tenantId) return;
+  const opportunity = await prisma.opportunity.findFirst({ where: opportunityInScopeWhere(req, tenantId, req.params.id) });
   if (!opportunity) return res.status(404).json({ message: "Oportunidade não encontrada" });
 
   const existing = await prisma.opportunityItem.findFirst({ where: { id: req.params.itemId, opportunityId: req.params.id } });
@@ -8839,11 +8847,10 @@ router.get("/events", async (req, res) => {
   });
 });
 router.post("/events", validateBody(eventSchema), async (req, res) => {
+  const tenantId = await resolveRequestTenantId(req, res);
+  if (!tenantId) return;
   const opportunity = await prisma.opportunity.findFirst({
-    where: {
-      id: req.body.opportunityId,
-      ...sellerWhere(req)
-    },
+    where: opportunityInScopeWhere(req, tenantId, req.body.opportunityId),
     select: {
       clientId: true
     }

@@ -182,6 +182,8 @@ setModel("opportunity", {
   },
 });
 setModel("timelineEvent", { create: async ({ data }: any) => data });
+// Itens: a oportunidade é conferida antes; sem itens na simulação, "Item não encontrado" prova que a conferência passou.
+setModel("opportunityItem", { findMany: async () => [], findFirst: async () => null });
 setModel("opportunityChangeLog", { create: async ({ data }: any) => data });
 (prisma as any).$transaction = async (input: any) => (typeof input === "function" ? input(prisma) : Promise.all(input));
 setModel("client", {
@@ -528,6 +530,34 @@ try {
   assert.equal(agendaStops.length, stopsBefore, "nenhuma parada fora do escopo");
   assert.equal(await status("manager-a", "POST", "/api/agenda/events/evt-b/stops", { clientId: "client-a" }), 201);
 
+  // Itens da oportunidade e comentário (POST /events): oportunidade com sellerWhere + tenant; fora do escopo segue 404.
+  resetData();
+  const opportunityNotFound = async (userId: string, method: string, path: string, body?: Row) => {
+    const response = await call(userId, method, path, body);
+    assert.equal(response.status, 404, `${userId} ${method} ${path}`);
+    assert.equal(((await response.json()) as Row).message, "Oportunidade não encontrada");
+  };
+  const itemRoutes = (opportunityId: string): Array<[string, string, Row?]> => [
+    ["GET", `/api/opportunities/${opportunityId}/items`],
+    ["POST", `/api/opportunities/${opportunityId}/items`, { quantity: 1, unitPrice: 10 }],
+    ["PUT", `/api/opportunities/${opportunityId}/items/item-inexistente`, { quantity: 2 }],
+    ["DELETE", `/api/opportunities/${opportunityId}/items/item-inexistente`],
+  ];
+  const comment = (opportunityId: string) => ({ description: "Comentario ficticio", opportunityId });
+  for (const [method, path, body] of itemRoutes("opp-b")) await opportunityNotFound("seller-a", method, path, body);
+  await opportunityNotFound("seller-a", "POST", "/api/events", comment("opp-b"));
+  for (const userId of ["manager-a", "director-a"]) {
+    for (const [method, path, body] of itemRoutes("opp-other")) await opportunityNotFound(userId, method, path, body);
+    await opportunityNotFound(userId, "POST", "/api/events", comment("opp-other"));
+    assert.equal(await status(userId, "GET", "/api/opportunities/opp-b/items"), 200);
+    assert.equal(((await (await call(userId, "PUT", "/api/opportunities/opp-b/items/item-inexistente", { quantity: 2 })).json()) as Row).message, "Item não encontrado");
+    assert.equal(await status(userId, "POST", "/api/events", comment("opp-b")), 201);
+  }
+  assert.equal(await status("seller-a", "GET", "/api/opportunities/opp-a/items"), 200);
+  assert.equal(((await (await call("seller-a", "DELETE", "/api/opportunities/opp-a/items/item-inexistente")).json()) as Row).message, "Item não encontrado");
+  assert.equal(await status("seller-a", "POST", "/api/opportunities/opp-a/items", { quantity: 0 }), 400, "payload validado depois da oportunidade");
+  assert.equal(await status("seller-a", "POST", "/api/events", comment("opp-a")), 201);
+
   // Sem tenant ativo: 403 explícito, sem tocar nos dados.
   resetData();
   assert.equal(await status("seller-no-tenant", "POST", "/api/opportunities", newOpportunity("client-a")), 403);
@@ -540,6 +570,8 @@ try {
   const eventsBeforeNoTenant = agendaEvents.length;
   assert.equal(await status("seller-no-tenant", "POST", "/api/agenda/events", { title: "Ficticio", type: "ligacao", startDateTime: "2026-11-04T12:00:00.000Z", endDateTime: "2026-11-04T13:00:00.000Z" }), 403);
   assert.equal(agendaEvents.length, eventsBeforeNoTenant);
+  assert.equal(await status("seller-no-tenant", "GET", "/api/opportunities/opp-a/items"), 403);
+  assert.equal(await status("seller-no-tenant", "POST", "/api/events", { description: "Comentario ficticio", opportunityId: "opp-a" }), 403);
   assert.equal(await status("seller-no-tenant", "DELETE", "/api/opportunities/opp-a"), 403);
   assert.equal(await status("seller-no-tenant", "GET", "/api/ai/opportunity-message?opportunityId=opp-a"), 403);
   assert(exists(opportunities, "opp-a"));
