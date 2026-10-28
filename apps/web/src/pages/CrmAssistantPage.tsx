@@ -3,6 +3,7 @@ import { Bot, Filter, Loader2, MessageSquarePlus, Send, Sparkles } from "lucide-
 import api from "../lib/apiClient";
 import { AI_REQUEST_TIMEOUT_MS } from "../lib/aiRequest";
 import { useAuth } from "../context/AuthContext";
+import OpportunityDraftSection from "../components/opportunities/OpportunityDraftSection";
 
 type AssistantResult = { entityType: string; entityId: string; title: string; subtitle?: string; score?: number; reason?: string; action?: { label: string; path: string } };
 type AssistantResponse = { answer: string; intent: string; filtersApplied?: Array<{ field: string; operator: string; value: string | number | null; label: string }>; summary?: { totalResults?: number; totalValue?: number; ordering?: string }; results?: AssistantResult[]; warnings?: string[]; source: "ai" | "deterministic"; generatedAt: string };
@@ -38,6 +39,7 @@ export default function CrmAssistantPage() {
         <div className="flex items-center gap-3"><div className="rounded-2xl bg-brand-50 p-3 text-brand-700"><Bot /></div><div><h1 className="text-2xl font-bold text-slate-900">Assistente Comercial</h1><p className="text-sm text-slate-600">Pergunte sobre clientes, oportunidades e agenda com os dados reais do CRM.</p></div></div>
       </div>
       <div className="space-y-4 p-5">
+        {user && <OpportunityDraftSection user={user} />}
         <div className="rounded-2xl bg-slate-50 p-4"><p className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-700"><Sparkles size={16} /> Sugestões iniciais</p><div className="flex flex-wrap gap-2">{suggestions.map(s => <button key={s} onClick={() => ask(s)} className="rounded-full border border-brand-100 bg-white px-3 py-2 text-sm text-brand-800 hover:bg-brand-50">{s}</button>)}</div></div>
         {messages.length === 0 && <div className="rounded-2xl border border-dashed border-slate-200 p-8 text-center text-slate-500"><MessageSquarePlus className="mx-auto mb-2" /> Faça uma pergunta comercial para ver respostas, filtros e cards de resultado.</div>}
         {messages.map(({ id, question, response }) => <article key={id} className="rounded-2xl border border-slate-200 p-4">
