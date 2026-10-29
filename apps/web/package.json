@@ -14,7 +14,7 @@
     "test:client-code-erp-only": "npx tsx tests/clientCodeErpOnly.test.ts",
     "test:client-archive-status": "npx tsx tests/clientArchiveStatus.test.ts && npx tsx tests/territorySellerSelection.test.ts",
     "test:client-address-label": "npx tsx tests/clientAddressLabel.test.ts && npx tsx tests/clientFormTitle.test.ts",
-    "test:crm-assistant-evidence": "npx tsx tests/crmAssistantEvidence.test.ts && npx tsx tests/opportunityDraft.test.ts",
+    "test:crm-assistant-evidence": "npx tsx tests/crmAssistantEvidence.test.ts && npx tsx tests/opportunityDraft.test.ts && npx tsx tests/assistantMobileLayout.test.ts",
     "test:opportunity-draft": "npx tsx tests/opportunityDraft.test.ts",
     "test:client-list-filters": "npx tsx tests/clientListFilters.test.ts",
     "test:client-select-search": "npx tsx tests/clientSelectSearch.test.ts",
