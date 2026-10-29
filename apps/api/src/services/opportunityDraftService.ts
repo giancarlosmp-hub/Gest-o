@@ -29,7 +29,9 @@ export const DRAFT_STAGE_PROBABILITY: Record<DraftStage, number> = { prospeccao:
 const STAGE_LABELS: Record<string, string> = { prospeccao: "Prospecção", negociacao: "Negociação", proposta: "Proposta", ganho: "Ganho", perdido: "Perdido" };
 const PRICE_TABLE_LABELS: Record<DraftPriceTable, string> = { "1": "Tabela 1", "2": "Tabela 2" };
 const MAX_CANDIDATES = 5;
-const MAX_PRODUCT_ROWS = 500;
+const MAX_PRODUCT_ROWS = 1000;
+// Palavras de quase todo produto ("SEM ..." no catálogo, "semente de ..." no ditado): fora do filtro e da pontuação.
+const GENERIC_PRODUCT_WORDS = new Set(["semente", "sementes", "sem", "de", "da", "do"]);
 const AI_TEXT_LIMIT = 300;
 const WEEKDAY_LABELS = ["domingo", "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado"];
 
@@ -139,6 +141,7 @@ const productWordScore = (spoken: string, tokens: string[]) =>
     return Math.max(best, prefix === 3 || spineMatch || similar ? 1 : 0);
   }, 0);
 const tokensOf = (text: string | null | undefined): string[] => foldText(text ?? "").match(/[a-z0-9]+/g) ?? [];
+const productTokensOf = (text: string | null | undefined) => tokensOf(text).filter((token) => !GENERIC_PRODUCT_WORDS.has(token));
 
 // Busca por "contains" no banco: a palavra como foi dita (com acento) e sem acento.
 const searchTerms = (text: string, minLength: number) =>
@@ -411,8 +414,8 @@ export class OpportunityDraftService {
   }
 
   // Só produtos ativos, sincronizados e com preço válido na tabela escolhida (mesma regra da busca de produtos). Busca
-  // pelas 3 primeiras letras de cada palavra dita (o ditado erra o fim: "maru" para "marandu") e pontua em memória; sem
-  // nenhum, tenta só pelo kg dito.
+  // pelas 3 primeiras letras de cada palavra dita, menos as genéricas (o ditado erra o fim: "maru" para "marandu"), e
+  // pontua em memória; sem nenhum (ou só com palavras genéricas), tenta só pelo kg dito.
   private async findProducts(spokenItems: SpokenItem[], priceTable: DraftPriceTable): Promise<DraftItem[]> {
     if (!spokenItems.length) return [];
     const priceRules = await loadOpportunityPriceRules();
@@ -423,7 +426,7 @@ export class OpportunityDraftService {
     });
     return Promise.all(spokenItems.map(async (item) => {
       const base = { spokenName: item.spokenName, kg: item.kg, quantity: item.quantity, price: item.price };
-      const words = unique(item.words.map((word) => foldText(word)).filter((word) => word.length >= 3));
+      const words = unique(item.words.map((word) => foldText(word)).filter((word) => word.length >= 3 && !GENERIC_PRODUCT_WORDS.has(word)));
       const prefixes = unique(words.map((word) => word.slice(0, 3)));
       const byWords = prefixes.length
         ? await loadProducts(prefixes.flatMap((term) => [
@@ -467,7 +470,7 @@ export class OpportunityDraftService {
           priceTableMatched: picked.priceTableMatched
         });
         if (!selectable) return [];
-        const tokens = [...tokensOf(product.name), ...tokensOf(product.className), ...tokensOf(product.brand)];
+        const tokens = [...productTokensOf(product.name), ...productTokensOf(product.className), ...productTokensOf(product.brand)];
         const wordsScore = words.reduce((sum, word) => sum + productWordScore(word, tokens), 0);
         const weightKg = readWeightKg(product.rawErpPayload);
         const kgMatches = item.kg !== null && (weightKg === item.kg || tokensOf(product.className).includes(`${item.kg}kg`) || tokensOf(product.name).includes(`${item.kg}kg`));

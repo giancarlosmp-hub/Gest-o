@@ -290,6 +290,36 @@ try {
   const byKg = await parse("Cliente Bonvita. Produto xyzw 10 kg 5 sacas");
   assert.deepEqual(byKg.items[0].candidates.map((candidate: Row) => candidate.productId).sort(), ["p-aurora-10", "p-marandu-10", "p-mombaca-10"]);
   assert(byKg.items[0].candidates.every((candidate: Row) => candidate.weightKg === 10));
+  // Só palavras genéricas ("semente"): vai direto para o kg.
+  const onlyGeneric = await parse("Cliente Bonvita. Produto semente 10 kg 5 sacas");
+  assert.deepEqual(onlyGeneric.items[0].candidates.map((candidate: Row) => candidate.productId).sort(), ["p-aurora-10", "p-marandu-10", "p-mombaca-10"]);
+
+  // 11c. Catálogo com 600 produtos começando com "SEM ": "sem", "semente" e "de" ficam fora do filtro prévio e da
+  // pontuação; o filtro usa só as palavras que sobram e respeita o limite de linhas.
+  const bigCatalog: Row[] = Array.from({ length: 599 }, (_, index) => ({
+    ...baseProduct,
+    id: `p-ficticio-${index}`,
+    name: index % 3 === 0 ? `SEM BRACHIARIA BRIZANTHA FICTICIA ${index}` : `SEM PANICUM FICTICIO ${index}`,
+    className: index % 2 === 0 ? "PELETIZADA 10KG" : "INCRUSTADA 20KG",
+    brand: "SEMENTES EXEMPLO",
+    rawErpPayload: { PESO_PRODUTO: index % 2 === 0 ? 10 : 20 },
+    prices: [priceRow("1", 150)]
+  }));
+  bigCatalog.push({ ...baseProduct, id: "p-brizantha-marandu", name: "SEM BRACHIARIA BRIZANTHA MARANDU", className: "VITAL SEED 10KG", brand: "MARCA FICTICIA", rawErpPayload: { PESO_PRODUTO: 10 }, prices: [priceRow("1", 220)] });
+  const productQueries: Row[] = [];
+  setModel("product", {
+    findMany: async ({ where, take }: any) => {
+      productQueries.push(where);
+      return bigCatalog.filter((row) => matches(row, where)).slice(0, take).map((row) => ({ ...row, erpProductCode: row.id, erpProductClassCode: "1" }));
+    }
+  });
+  const semCatalog = await parse("Cliente Bonvita. Produto semente de braquiária Maru Vital Sides 10 quilos");
+  const filterTerms = [...new Set(productQueries.flatMap((where) => where.OR.map((part: Row) => (Object.values(part)[0] as Row).contains)))];
+  assert.deepEqual(filterTerms.sort(), ["bra", "mar", "sid", "vit"], "\"sem\", \"semente\" e \"de\" fora do filtro");
+  const semIds = semCatalog.items[0].candidates.map((candidate: Row) => candidate.productId);
+  assert(semIds.slice(0, 5).includes("p-brizantha-marandu"), `produto entre os 5 primeiros: ${semIds.join(", ")}`);
+  assert.equal(semIds[0], "p-brizantha-marandu");
+  setModel("product", { findMany: async ({ where }: any) => products.filter((row) => matches(row, where)).map((row) => ({ ...row, erpProductCode: row.id, erpProductClassCode: "1" })) });
   assert.match(unknownClient.warnings.find((warning: Row) => warning.code === "client_not_found").message, /Comece com 'Cliente <nome>, <cidade>'\./);
 
   // 12. Gerente: responsável sugerido é o vendedor dono do cliente; dono inativo deixa o responsável pendente.
