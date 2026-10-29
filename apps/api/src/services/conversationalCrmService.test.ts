@@ -52,6 +52,7 @@ test("privacidade, observabilidade, fallback e resposta estruturada", () => {
 test("frontend mobile usa cards e histórico curto, sem tabela", () => {
   assert.match(webSource, /slice\(0, 5\)/);
   assert.match(webSource, /rounded-2xl border border-slate-100 bg-slate-50/);
-  assert.match(webSource, /fixed inset-x-0 bottom-0/);
+  // Barra de pergunta fixa acima da barra de ações rápidas do celular (antes ficava por baixo dela).
+  assert.match(webSource, /fixed inset-x-0 bottom-\[calc\(var\(--mobile-action-bar-height\)\+env\(safe-area-inset-bottom\)\)\]/);
   assert.doesNotMatch(webSource, /<table|overflow-x/);
 });
