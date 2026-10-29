@@ -108,7 +108,7 @@ Exemplo:
 - Roteiro Oeste PR
   - visita Copagril
   - visita Lar
-  - visita Primato
+  - visita Agro Exemplo
 
 Cada visita é uma `Activity` autônoma (com SLA, responsável, resultado, check-in, etc.), e o roteiro apenas organiza sequência/logística.
 
