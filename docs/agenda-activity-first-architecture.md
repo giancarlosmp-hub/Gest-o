@@ -106,8 +106,8 @@ Tipos canônicos alvo:
 Exemplo:
 
 - Roteiro Oeste PR
-  - visita Copagril
-  - visita Lar
+  - visita Cooperativa Exemplo
+  - visita Agro Teste
   - visita Agro Exemplo
 
 Cada visita é uma `Activity` autônoma (com SLA, responsável, resultado, check-in, etc.), e o roteiro apenas organiza sequência/logística.
