@@ -151,9 +151,27 @@ assert.ok(draftPendingFields(setDraftProbability(card, "120")).some((item) => it
 assert.equal(setDraftField(card, "followUpDate", "2026-11-10").followUpSuggestedByAi, false);
 assert.ok(draftPendingFields(setDraftField(card, "followUpDate", "2026-10-01")).some((item) => item.field === "followUpDate"));
 
+// Título refeito com o produto e o cliente escolhidos (nunca com o texto cru), até o vendedor editar à mão.
+const neutral = buildDraftCard(response({ title: "Nova oportunidade – Fazenda Ficticia" }), "frase", { now });
+assert.equal(neutral.title, "Nova oportunidade – Fazenda Ficticia");
+const titledClient = selectClientCandidate(neutral, "cli-a");
+assert.equal(titledClient.title, "Nova oportunidade – Fazenda Ficticia A");
+const titledProduct = selectProductCandidate(titledClient, "item-1", "prod-a");
+assert.equal(titledProduct.title, "Semente Teste 20kg – Fazenda Ficticia A");
+assert.equal(selectProductCandidate(neutral, "item-1", "prod-b").title, "Semente Teste 25kg – Cliente a definir");
+assert.equal(selectProductCandidate(titledProduct, "item-1", "prod-b").title, "Semente Teste 25kg – Fazenda Ficticia A", "troca de produto refaz");
+assert.equal(selectSearchedProduct(titledClient, "item-2", { id: "prod-m", name: "Milho Teste", price: 50 }).title, "Milho Teste – Fazenda Ficticia A", "1º item com produto escolhido");
+const handTitled = setDraftField(titledProduct, "title", "Título do vendedor");
+assert.equal(handTitled.titleEdited, true);
+assert.equal(selectClientCandidate(handTitled, "cli-b").title, "Título do vendedor", "título editado não é refeito");
+assert.equal(removeDraftItem(titledProduct, "item-1").title, "Nova oportunidade – Fazenda Ficticia A");
+const oldStored = { ...neutral, titleEdited: undefined };
+assert.equal(selectClientCandidate(oldStored, "cli-a").title, "Nova oportunidade – Fazenda Ficticia A", "rascunho antigo conta como não editado");
+
 // Payloads de criação e de itens.
+assert.equal(card.title, "Semente Teste 20kg – Fazenda Ficticia B");
 assert.deepEqual(buildOpportunityPayload(card), {
-  title: "Semente Teste – Fazenda Ficticia",
+  title: "Semente Teste 20kg – Fazenda Ficticia B",
   value: 1122,
   stage: "prospeccao",
   probability: 20,

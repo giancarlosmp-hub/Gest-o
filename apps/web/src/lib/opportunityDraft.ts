@@ -84,6 +84,8 @@ export type OpportunityDraftCard = {
   // Vendedor: ele mesmo (sellerId vazio, o servidor usa o usuário). Gerente/diretor: vendedor ativo escolhido.
   owner: { mode: "self" } | { mode: "pick"; sellerId: string; sellerName: string; edited: boolean };
   title: string;
+  // Título refeito com o produto e o cliente escolhidos até o vendedor editar à mão (rascunho antigo: não editado).
+  titleEdited?: boolean;
   stage: DraftStage;
   probability: string;
   probabilityEdited: boolean;
@@ -186,6 +188,18 @@ export const isDraftCreated = (card: OpportunityDraftCard) => Boolean(card.creat
 // Depois de criada a oportunidade, só os itens ainda não gravados continuam editáveis.
 export const isItemLocked = (item: DraftCardItem) => Boolean(item.createdItemId);
 
+// "<produto do 1º item escolhido> – <cliente escolhido>"; sem nenhuma escolha, fica o título da interpretação.
+export const draftAutoTitle = (card: OpportunityDraftCard): string => {
+  const product = card.items.find((item) => item.product)?.product?.name.trim().slice(0, 120);
+  const client = card.client.selected?.name.trim().slice(0, 120);
+  if (product && client) return `${product} – ${client}`;
+  if (client) return `Nova oportunidade – ${client}`;
+  if (product) return `${product} – Cliente a definir`;
+  return card.title;
+};
+const withAutoTitle = (card: OpportunityDraftCard): OpportunityDraftCard =>
+  card.titleEdited || isDraftCreated(card) ? card : { ...card, title: draftAutoTitle(card) };
+
 export const selectClientCandidate = (card: OpportunityDraftCard, clientId: string): OpportunityDraftCard => {
   if (isDraftCreated(card)) return card;
   const candidate = card.client.candidates.find((item) => item.id === clientId);
@@ -195,13 +209,13 @@ export const selectClientCandidate = (card: OpportunityDraftCard, clientId: stri
   const owner = card.owner.mode === "pick" && !card.owner.edited
     ? { ...card.owner, sellerId: candidate.suggestedOwner?.id ?? "", sellerName: candidate.suggestedOwner?.name ?? "" }
     : card.owner;
-  return { ...card, client: { ...card.client, selected }, owner };
+  return withAutoTitle({ ...card, client: { ...card.client, selected }, owner });
 };
 
 export const selectSearchedClient = (card: OpportunityDraftCard, client: { id: string; name: string; city?: string | null; state?: string | null } | null): OpportunityDraftCard => {
   if (isDraftCreated(card)) return card;
   const selected: DraftClientChoice | null = client ? { id: client.id, name: client.name, city: client.city ?? null, state: client.state ?? null, source: "search" } : null;
-  return { ...card, client: { ...card.client, selected } };
+  return withAutoTitle({ ...card, client: { ...card.client, selected } });
 };
 
 export const setDraftOwner = (card: OpportunityDraftCard, seller: { id: string; name: string } | null): OpportunityDraftCard => {
@@ -223,8 +237,8 @@ export const setDraftProbability = (card: OpportunityDraftCard, probability: str
 type EditableFields = Pick<OpportunityDraftCard, "title" | "value" | "proposalDate" | "followUpDate" | "expectedCloseDate" | "notes">;
 export const setDraftField = <K extends keyof EditableFields>(card: OpportunityDraftCard, field: K, value: EditableFields[K]): OpportunityDraftCard => {
   if (isDraftCreated(card)) return card;
-  // O retorno escolhido à mão deixa de ser "sugerido pela IA".
-  return { ...card, [field]: value, ...(field === "followUpDate" ? { followUpSuggestedByAi: false } : {}) };
+  // O retorno escolhido à mão deixa de ser "sugerido pela IA"; o título editado à mão não é mais refeito.
+  return { ...card, [field]: value, ...(field === "followUpDate" ? { followUpSuggestedByAi: false } : {}), ...(field === "title" ? { titleEdited: true } : {}) };
 };
 
 const updateItem = (card: OpportunityDraftCard, key: string, change: (item: DraftCardItem) => DraftCardItem): OpportunityDraftCard => ({
@@ -233,11 +247,11 @@ const updateItem = (card: OpportunityDraftCard, key: string, change: (item: Draf
 });
 
 export const selectProductCandidate = (card: OpportunityDraftCard, key: string, productId: string) =>
-  updateItem(card, key, (item) => {
+  withAutoTitle(updateItem(card, key, (item) => {
     const candidate = item.candidates.find((option) => option.productId === productId);
     if (!candidate) return item;
     return { ...item, product: { productId: candidate.productId, name: candidate.name, unit: candidate.unit, tablePrice: candidate.tablePrice, source: "candidate" } };
-  });
+  }));
 
 // Resultado de GET /products/search na tabela do rascunho: o preço da tabela vem da própria busca.
 export type ProductSearchResult = { id: string; name: string; unit?: string | null; price?: number | null; className?: string | null; brand?: string | null };
@@ -247,10 +261,10 @@ export const readProductSearchResults = (data: unknown): ProductSearchResult[] =
   );
 
 export const selectSearchedProduct = (card: OpportunityDraftCard, key: string, product: ProductSearchResult) =>
-  updateItem(card, key, (item) => ({
+  withAutoTitle(updateItem(card, key, (item) => ({
     ...item,
     product: { productId: product.id, name: product.name, unit: product.unit ?? null, tablePrice: toTwoDecimals(Number(product.price)), source: "search" }
-  }));
+  })));
 
 export const productSearchUrl = (card: OpportunityDraftCard, query: string) => {
   const q = query.trim().slice(0, 120);
@@ -272,7 +286,7 @@ export const addDraftItem = (card: OpportunityDraftCard): OpportunityDraftCard =
 
 export const removeDraftItem = (card: OpportunityDraftCard, key: string): OpportunityDraftCard => {
   if (isDraftCreated(card)) return card;
-  return { ...card, items: card.items.filter((item) => item.key !== key) };
+  return withAutoTitle({ ...card, items: card.items.filter((item) => item.key !== key) });
 };
 
 export const itemUnitPrice = (item: DraftCardItem): number | null => {
