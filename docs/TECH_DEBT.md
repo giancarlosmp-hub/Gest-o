@@ -1287,7 +1287,9 @@ ditado do teclado. Decisões da diretoria em 29/10/2026:
   "Nome, Cidade" separa pela vírgula; sem vírgula, as últimas 1–3 palavras que forem um município do catálogo IBGE
   (`brazilMunicipalities.ts`, qualquer UF) viram a cidade, e essas palavras também contam como nome na busca ("Fazenda
   Santa Maria"). Só uma cidade: cliente pendente. O vendedor continua escolhendo sempre.
-- Produto aproximado: busca pelas 3 primeiras letras de cada palavra dita, até 500 produtos, só os válidos na tabela;
+- Produto aproximado: busca pelas 3 primeiras letras de cada palavra dita, até 1000 produtos, só os válidos na tabela;
+  palavras genéricas ("sem", "semente", "sementes", "de", "da", "do") ficam fora do filtro e da pontuação, dos dois
+  lados (o catálogo começa os nomes com "SEM ");
   pontuação em memória em `name`, `className` e `brand` (igual 3; prefixo comum de 4+ letras ou uma palavra começando a
   outra 2; prefixo de 3 letras 1; "espinha" de consoantes, como "sides"/"seed", 1; 1–2 letras trocadas 1) e kg igual
   +4; até 5 candidatos. Nenhum: tenta só pelo kg dito (`className`/`name` com "NKG" ou `PESO_PRODUTO`), na mesma tabela.
@@ -1333,9 +1335,12 @@ Pendente:
 - (f) Sem nenhuma palavra de etapa, fica prospecção. Tabela 2 usa o preço sem filial, como a busca de produtos.
 - (g) Os testes novos rodam dentro do passo `test:crm-assistant-today` do CI; um passo próprio
   (`test:opportunity-draft`) exige mudar `.github/workflows`.
-- (h) Busca aproximada de produto: o prefixo de 3 letras traz candidatos fracos ("maru" ~ "marca", no fim da lista), e
-  um prefixo muito comum no catálogo (ex.: "sem", de "semente") pode encher os 500 produtos do filtro sem ordem
-  definida. Não medido no catálogo real; se acontecer, tirar palavras genéricas do filtro ou ordenar a busca.
+- (h) Busca aproximada de produto: o prefixo de 3 letras traz candidatos fracos ("maru" ~ "marca", no fim da lista).
+  Prefixo comum no catálogo: medido em produção em 29/10/2026, 550 produtos ativos, 177 com nome começando por "SEM ".
+  Tratado no #1010: "sem", "semente", "sementes", "de", "da" e "do" saem do filtro prévio e da pontuação (só com
+  palavras genéricas, vai direto ao kg), e o limite do filtro subiu de 500 para 1000, acima do catálogo inteiro. Se o
+  catálogo passar de 1000 produtos ativos, o filtro volta a cortar sem ordem definida: ordenar a busca ou subir o
+  limite.
 - (i) Cidade deduzida pelo nome do município não usa a UF (Toledo existe no PR e em MG); só o nome pesa na pontuação.
 - (j) A barra de pergunta do Assistente e o botão da Agenda usam `--mobile-action-bar-height` (6rem), um pouco maior que
   a barra de ações real (cerca de 85 px + área segura): sobra uma faixa estreita entre as duas.
