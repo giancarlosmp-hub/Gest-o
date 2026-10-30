@@ -20,6 +20,9 @@ import OpportunityDraftCard from "./OpportunityDraftCard";
 type Props = { user: { id: string; name: string; role: string } };
 type SellerOption = { id: string; name: string };
 
+// Frase-modelo no campo: cada informação depois da sua palavra-chave.
+export const DRAFT_PHRASE_EXAMPLE = "Cliente Agro Exemplo, Toledo. Etapa proposta. Tabela revenda. Produto Marandu Vital Seed 10 quilos, 100 sacas, preço cadastrado. Observação: retornar sexta.";
+
 const formatInterpretedAt = (iso: string) => {
   const date = new Date(iso);
   return Number.isFinite(date.getTime())
@@ -31,6 +34,7 @@ const formatInterpretedAt = (iso: string) => {
 // Os rascunhos ficam no aparelho ("Para confirmar"); se o armazenamento estiver bloqueado, valem só nesta tela.
 export default function OpportunityDraftSection({ user }: Props) {
   const [drafts, setDrafts] = useState<DraftCard[]>(() => listOpportunityDrafts(user.id).map((item) => item.card));
+  const [open, setOpen] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [text, setText] = useState("");
   const [reinterpretId, setReinterpretId] = useState<string | null>(null);
@@ -115,14 +119,27 @@ export default function OpportunityDraftSection({ user }: Props) {
     } finally { setConfirming(false); }
   }
 
-  return <section className="space-y-4 rounded-2xl border border-slate-200 p-4">
-    <div>
-      <p className="flex items-center gap-2 font-semibold text-slate-900"><Wand2 size={18} /> Nova oportunidade por frase</p>
-      <p className="text-sm text-slate-600">Escreva como falaria: cliente, produto, sacas, preço e observação. Nada é criado antes da sua confirmação.</p>
+  const toggleLabel = `Nova oportunidade por frase${drafts.length ? ` (${drafts.length} para confirmar)` : ""}`;
+
+  // Começa recolhido: uma linha só, sem empurrar o chat.
+  if (!open) {
+    return <button type="button" onClick={() => setOpen(true)} className="flex min-h-12 w-full items-center gap-2 rounded-2xl border border-brand-100 bg-brand-50 px-4 text-left text-sm font-semibold text-brand-800">
+      <Wand2 size={18} className="shrink-0" /> <span className="min-w-0 break-words">{toggleLabel}</span>
+    </button>;
+  }
+
+  return <section className="space-y-3 md:space-y-4 md:rounded-2xl md:border md:border-slate-200 md:p-4">
+    <div className="flex items-start justify-between gap-2">
+      <div className="min-w-0">
+        <p className="flex items-center gap-2 font-semibold text-slate-900"><Wand2 size={18} className="shrink-0" /> Nova oportunidade por frase</p>
+        <p className="text-sm text-slate-600">Escreva como falaria. Nada é criado antes da sua confirmação.</p>
+      </div>
+      <button type="button" onClick={() => setOpen(false)} className="min-h-10 shrink-0 rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-700">Fechar</button>
     </div>
     <form onSubmit={(event) => { event.preventDefault(); interpret(); }} className="space-y-2">
       {reinterpretId && <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">Ao interpretar de novo, as escolhas feitas no cartão (cliente, produtos, datas e demais campos) serão refeitas a partir da nova frase.</p>}
-      <textarea value={text} onChange={(event) => setText(event.target.value)} maxLength={1000} rows={3} placeholder="Ex.: Fazenda Exemplo, 10 sacas do produto Semente Teste a 90 reais, retorno na sexta" className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-brand-500" />
+      <textarea value={text} onChange={(event) => setText(event.target.value)} maxLength={1000} rows={4} placeholder={DRAFT_PHRASE_EXAMPLE} className="w-full min-w-0 rounded-2xl border border-slate-200 px-3 py-3 text-sm outline-none focus:border-brand-500" />
+      <p className="text-xs text-slate-500">Pode usar o microfone do teclado.</p>
       <div className="flex gap-2">
         <button disabled={interpreting || text.trim().length < 3} className="inline-flex min-h-12 flex-1 items-center justify-center gap-2 rounded-2xl bg-brand-700 px-4 font-semibold text-white disabled:opacity-60 sm:flex-none">{interpreting && <Loader2 size={18} className="animate-spin" />} Interpretar</button>
         {reinterpretId && <button type="button" onClick={() => { setReinterpretId(null); setText(""); }} className="min-h-12 rounded-2xl border border-slate-200 px-4 font-semibold text-slate-700">Cancelar</button>}
@@ -157,7 +174,7 @@ export default function OpportunityDraftSection({ user }: Props) {
           <div className="flex shrink-0 gap-2">
             {expired
               ? <button type="button" onClick={() => startReinterpret(card)} className="min-h-10 rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-700">Refazer</button>
-              : card.id !== activeId && <button type="button" onClick={() => { setActiveId(card.id); setCreated(null); }} className="min-h-10 rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-700">Abrir</button>}
+              : card.id !== activeId && <button type="button" onClick={() => { setActiveId(card.id); setCreated(null); }} className="min-h-10 rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-700">Continuar</button>}
             <button type="button" onClick={() => discard(card)} className="min-h-10 rounded-xl border border-red-100 px-3 text-sm font-semibold text-red-700">Descartar</button>
           </div>
         </div>;

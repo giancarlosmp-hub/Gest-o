@@ -29,6 +29,9 @@ export const DRAFT_STAGE_PROBABILITY: Record<DraftStage, number> = { prospeccao:
 const STAGE_LABELS: Record<string, string> = { prospeccao: "Prospecção", negociacao: "Negociação", proposta: "Proposta", ganho: "Ganho", perdido: "Perdido" };
 const PRICE_TABLE_LABELS: Record<DraftPriceTable, string> = { "1": "Tabela 1", "2": "Tabela 2" };
 const MAX_CANDIDATES = 5;
+const MAX_PRODUCT_ROWS = 1000;
+// Palavras de quase todo produto ("SEM ..." no catálogo, "semente de ..." no ditado): fora do filtro e da pontuação.
+const GENERIC_PRODUCT_WORDS = new Set(["semente", "sementes", "sem", "de", "da", "do"]);
 const AI_TEXT_LIMIT = 300;
 const WEEKDAY_LABELS = ["domingo", "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado"];
 
@@ -116,7 +119,29 @@ const wordScore = (spoken: string, tokens: string[]) => {
   );
   return similar ? 1 : 0;
 };
+// Produto ditado ("maru vital sides" para "Marandu Vital Seed"): igual vale 3; prefixo comum de 4+ letras (ou uma
+// palavra começando a outra) vale 2, de 3 letras vale 1; "espinha" de consoantes igual ou prefixo (sides/seed) vale 1;
+// 1–2 letras trocadas (braquiaria/brachiaria) vale 1. Palavras com menos de 4 letras só valem se forem iguais.
+const commonPrefixLength = (left: string, right: string) => {
+  let length = 0;
+  while (length < left.length && length < right.length && left[length] === right[length]) length += 1;
+  return length;
+};
+const consonantSpine = (word: string) => word.replace(/[aeiouyh]/g, "").replace(/(.)\1+/g, "$1");
+const productWordScore = (spoken: string, tokens: string[]) =>
+  tokens.reduce((best, token) => {
+    if (token === spoken) return 3;
+    if (best >= 2 || spoken.length < 4 || token.length < 4 || /\d/.test(spoken) || /\d/.test(token)) return best;
+    const prefix = commonPrefixLength(spoken, token);
+    if (prefix >= 4 || token.startsWith(spoken) || spoken.startsWith(token)) return 2;
+    const spokenSpine = consonantSpine(spoken);
+    const tokenSpine = consonantSpine(token);
+    const spineMatch = Math.min(spokenSpine.length, tokenSpine.length) >= 2 && (spokenSpine.startsWith(tokenSpine) || tokenSpine.startsWith(spokenSpine));
+    const similar = Math.min(spoken.length, token.length) >= 5 && editDistance(spoken, token) <= (spoken.length >= 8 ? 2 : 1);
+    return Math.max(best, prefix === 3 || spineMatch || similar ? 1 : 0);
+  }, 0);
 const tokensOf = (text: string | null | undefined): string[] => foldText(text ?? "").match(/[a-z0-9]+/g) ?? [];
+const productTokensOf = (text: string | null | undefined) => tokensOf(text).filter((token) => !GENERIC_PRODUCT_WORDS.has(token));
 
 // Busca por "contains" no banco: a palavra como foi dita (com acento) e sem acento.
 const searchTerms = (text: string, minLength: number) =>
@@ -213,14 +238,15 @@ export class OpportunityDraftService {
     const finalTable: DraftPriceTable = priceTable ?? "1";
 
     const [clientCandidates, items] = await Promise.all([
-      timeAiStage("clients", () => this.findClients(clientName, clientCity, viewer, scope)),
+      timeAiStage("clients", () => this.findClients(clientName, clientCity, viewer, scope, parsed.clientCityInferred && clientCity === parsed.clientCity)),
       timeAiStage("products", () => this.findProducts(spokenItems, finalTable))
     ]);
 
     // Cliente e produto ficam pendentes até o vendedor escolher um candidato, mesmo com um só.
     const pendingFields: string[] = ["clientId"];
     if (!clientCandidates.length) {
-      warnings.push({ code: "client_not_found", field: "clientId", message: clientName ? "Cliente a definir: nenhum cliente da sua carteira bate com o nome falado." : "Cliente a definir: o nome do cliente não foi dito." });
+      const hint = "Comece com 'Cliente <nome>, <cidade>'.";
+      warnings.push({ code: "client_not_found", field: "clientId", message: clientName ? `Cliente a definir: nenhum cliente da sua carteira bate com o nome falado. ${hint}` : `Cliente a definir: o nome do cliente não foi dito. ${hint}` });
     }
     const owner: OpportunityDraft["owner"] = viewer.role === "vendedor" ? { mode: "self", sellerId: viewer.id } : { mode: "client_owner" };
     if (owner.mode === "client_owner") {
@@ -273,12 +299,11 @@ export class OpportunityDraftService {
       warnings.push({ code: "followup_past_ignored", field: "followUpDate", message: `A data citada na observação (${formatDayKey(observationDate.date)}) já passou; o retorno ficou em ${formatDayKey(followUp.date)}.` });
     }
 
-    const clientLabel = clientName ? titleCase(clientName) : "Cliente a definir";
-    const productLabel = spokenItems[0]?.spokenName ? titleCase(spokenItems[0].spokenName).slice(0, 60).trim() : null;
     const draft: OpportunityDraft = {
       client: { spokenName: clientName, spokenCity: clientCity, candidates: clientCandidates },
       owner,
-      title: productLabel ? `${productLabel} – ${clientLabel}` : `Oportunidade – ${clientLabel}`,
+      // Título neutro: a tela refaz com o produto e o cliente escolhidos (nunca com o texto cru do produto).
+      title: clientName ? `Nova oportunidade – ${titleCase(clientName).slice(0, 80).trim()}` : "Nova oportunidade",
       stage: { value: finalStage, label: STAGE_LABELS[finalStage] },
       probability: DRAFT_STAGE_PROBABILITY[finalStage],
       priceTable: { code: finalTable, label: PRICE_TABLE_LABELS[finalTable] },
@@ -337,9 +362,11 @@ export class OpportunityDraftService {
 
   // Carteira do usuário (mesmo escopo da criação de oportunidade) e do tenant, sem arquivados. Pontua por palavras do
   // nome/fantasia e pela cidade; nunca escolhe sozinho.
-  private async findClients(clientName: string | null, clientCity: string | null, viewer: OpportunityDraftViewer, scope: OpportunityDraftScope): Promise<DraftClientCandidate[]> {
+  // Cidade deduzida do fim do nome ("Bonvita Toledo", "Fazenda Santa Maria"): as palavras dela também contam como nome.
+  private async findClients(clientName: string | null, clientCity: string | null, viewer: OpportunityDraftViewer, scope: OpportunityDraftScope, cityInferred = false): Promise<DraftClientCandidate[]> {
     if (!clientName) return [];
-    const terms = searchTerms(clientName, 2);
+    const spokenName = cityInferred && clientCity ? `${clientName} ${clientCity}` : clientName;
+    const terms = searchTerms(spokenName, 2);
     if (!terms.length) return [];
     const rows = await prisma.client.findMany({
       where: {
@@ -352,7 +379,7 @@ export class OpportunityDraftService {
       select: clientSelect(scope.tenantId),
       take: 200
     });
-    const nameWords = meaningfulWords(clientName);
+    const nameWords = meaningfulWords(spokenName);
     const cityWords = clientCity ? meaningfulWords(clientCity) : [];
     const spokenCity = clientCity ? foldText(clientCity).trim() : null;
     return rows
@@ -386,63 +413,87 @@ export class OpportunityDraftService {
       .map(({ nameScore: _nameScore, ...candidate }) => candidate);
   }
 
-  // Só produtos ativos, sincronizados e com preço válido na tabela escolhida (mesma regra da busca de produtos).
+  // Só produtos ativos, sincronizados e com preço válido na tabela escolhida (mesma regra da busca de produtos). Busca
+  // pelas 3 primeiras letras de cada palavra dita, menos as genéricas (o ditado erra o fim: "maru" para "marandu"), e
+  // pontua em memória; sem nenhum (ou só com palavras genéricas), tenta só pelo kg dito.
   private async findProducts(spokenItems: SpokenItem[], priceTable: DraftPriceTable): Promise<DraftItem[]> {
     if (!spokenItems.length) return [];
     const priceRules = await loadOpportunityPriceRules();
+    const loadProducts = (or: Prisma.ProductWhereInput[]) => prisma.product.findMany({
+      where: { isActive: true, isSuspended: false, OR: or },
+      include: { prices: { orderBy: [{ validFrom: "desc" }] } },
+      take: MAX_PRODUCT_ROWS
+    });
     return Promise.all(spokenItems.map(async (item) => {
       const base = { spokenName: item.spokenName, kg: item.kg, quantity: item.quantity, price: item.price };
-      const terms = searchTerms(item.spokenName, 3);
-      if (!terms.length) return { ...base, candidates: [] };
-      const products = await prisma.product.findMany({
-        where: {
-          isActive: true,
-          isSuspended: false,
-          OR: terms.flatMap((term) => [
-            { name: { contains: term, mode: "insensitive" as const } },
-            { className: { contains: term, mode: "insensitive" as const } },
-            { brand: { contains: term, mode: "insensitive" as const } }
-          ])
-        },
-        include: { prices: { orderBy: [{ validFrom: "desc" }] } },
-        take: 200
-      });
-      const candidates = products
-        .flatMap((product) => {
-          const picked = calculateOpportunityPriceForTable({ product, priceTableCode: priceTable, priceVariations: priceRules.priceVariations, erpPrices: priceRules.erpPrices });
-          const selectable = isOpportunityProductSelectable({
-            isActive: product.isActive,
-            isSuspended: product.isSuspended,
-            isSynchronized: isSynchronizedProduct(product),
-            price: picked.price,
-            priceTableMatched: picked.priceTableMatched
-          });
-          if (!selectable) return [];
-          const tokens = [...tokensOf(product.name), ...tokensOf(product.className), ...tokensOf(product.brand)];
-          const wordsScore = item.words.reduce((sum, word) => sum + wordScore(word, tokens), 0);
-          if (wordsScore <= 0) return [];
-          const weightKg = readWeightKg(product.rawErpPayload);
-          const kgScore = item.kg !== null && (weightKg === item.kg || tokensOf(product.className).includes(`${item.kg}kg`)) ? 3 : 0;
-          const tablePrice = Number(picked.price.toFixed(2));
-          const unitPrice = item.price.mode === "informed" ? item.price.amount : tablePrice;
-          return [{
-            productId: product.id,
-            name: product.name,
-            className: product.className,
-            brand: product.brand,
-            unit: product.unit,
-            weightKg,
-            tablePrice,
-            unitPrice,
-            total: item.quantity !== null ? Number((item.quantity * unitPrice).toFixed(2)) : null,
-            priceDiffPercent: item.price.mode === "informed" ? Number((((unitPrice - tablePrice) / tablePrice) * 100).toFixed(1)) : null,
-            score: wordsScore + kgScore
-          }];
-        })
-        .sort((left, right) => right.score - left.score || left.name.localeCompare(right.name, "pt-BR"))
-        .slice(0, MAX_CANDIDATES);
+      const words = unique(item.words.map((word) => foldText(word)).filter((word) => word.length >= 3 && !GENERIC_PRODUCT_WORDS.has(word)));
+      const prefixes = unique(words.map((word) => word.slice(0, 3)));
+      const byWords = prefixes.length
+        ? await loadProducts(prefixes.flatMap((term) => [
+          { name: { contains: term, mode: "insensitive" as const } },
+          { className: { contains: term, mode: "insensitive" as const } },
+          { brand: { contains: term, mode: "insensitive" as const } }
+        ]))
+        : [];
+      let candidates = this.scoreProducts(byWords, item, words, priceTable, priceRules);
+      if (!candidates.length && item.kg !== null) {
+        const kg = String(item.kg);
+        const byKg = await loadProducts([
+          { className: { contains: `${kg}KG`, mode: "insensitive" as const } },
+          { name: { contains: `${kg}KG`, mode: "insensitive" as const } },
+          { name: { contains: `${kg} KG`, mode: "insensitive" as const } },
+          { rawErpPayload: { path: ["PESO_PRODUTO"], equals: item.kg } },
+          { rawErpPayload: { path: ["PESO_PRODUTO"], equals: kg } }
+        ]);
+        candidates = this.scoreProducts(byKg, item, [], priceTable, priceRules);
+      }
       return { ...base, candidates };
     }));
+  }
+
+  // Sem palavras (busca só pelo kg), entra apenas o produto com o kg dito.
+  private scoreProducts(
+    products: Array<Prisma.ProductGetPayload<{ include: { prices: true } }>>,
+    item: SpokenItem,
+    words: string[],
+    priceTable: DraftPriceTable,
+    priceRules: Awaited<ReturnType<typeof loadOpportunityPriceRules>>
+  ): DraftProductCandidate[] {
+    return products
+      .flatMap((product) => {
+        const picked = calculateOpportunityPriceForTable({ product, priceTableCode: priceTable, priceVariations: priceRules.priceVariations, erpPrices: priceRules.erpPrices });
+        const selectable = isOpportunityProductSelectable({
+          isActive: product.isActive,
+          isSuspended: product.isSuspended,
+          isSynchronized: isSynchronizedProduct(product),
+          price: picked.price,
+          priceTableMatched: picked.priceTableMatched
+        });
+        if (!selectable) return [];
+        const tokens = [...productTokensOf(product.name), ...productTokensOf(product.className), ...productTokensOf(product.brand)];
+        const wordsScore = words.reduce((sum, word) => sum + productWordScore(word, tokens), 0);
+        const weightKg = readWeightKg(product.rawErpPayload);
+        const kgMatches = item.kg !== null && (weightKg === item.kg || tokensOf(product.className).includes(`${item.kg}kg`) || tokensOf(product.name).includes(`${item.kg}kg`));
+        if (words.length ? wordsScore <= 0 : !kgMatches) return [];
+        const kgScore = kgMatches ? 4 : 0;
+        const tablePrice = Number(picked.price.toFixed(2));
+        const unitPrice = item.price.mode === "informed" ? item.price.amount : tablePrice;
+        return [{
+          productId: product.id,
+          name: product.name,
+          className: product.className,
+          brand: product.brand,
+          unit: product.unit,
+          weightKg,
+          tablePrice,
+          unitPrice,
+          total: item.quantity !== null ? Number((item.quantity * unitPrice).toFixed(2)) : null,
+          priceDiffPercent: item.price.mode === "informed" ? Number((((unitPrice - tablePrice) / tablePrice) * 100).toFixed(1)) : null,
+          score: wordsScore + kgScore
+        }];
+      })
+      .sort((left, right) => right.score - left.score || left.name.localeCompare(right.name, "pt-BR"))
+      .slice(0, MAX_CANDIDATES);
   }
 }
 

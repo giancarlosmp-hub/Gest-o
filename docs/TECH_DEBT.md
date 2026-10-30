@@ -1227,9 +1227,9 @@ Pendente:
 - (b) Até lá, `tsx prisma/seed.js` chamado direto (sem `npm run prisma:seed`) continua sem trava.
 - (c) `apps/api/prisma/seedTestFixture.ts` cria cliente sem tenant; rotas que exigem tenant recusam esses dados.
 
-### TD-OPPORTUNITY-VOICE-DRAFT — oportunidade por voz no Assistente Comercial (fase 1: interpretação)
+### TD-OPPORTUNITY-VOICE-DRAFT — oportunidade por voz no Assistente Comercial
 
-Resolvido no código em 28/10/2026, aguardando merge: `POST /ai/crm-assistant/opportunity-draft/parse` recebe
+Fase 1 (interpretação), mergeada no #1008 em 28/10/2026: `POST /ai/crm-assistant/opportunity-draft/parse` recebe
 `{ text }` e devolve o rascunho sem gravar nada (`opportunityDraftService.ts`, leitura da frase em
 `opportunityDraftParser.ts`). Regras decididas pela diretoria em 28/10/2026:
 
@@ -1253,7 +1253,7 @@ Resolvido no código em 28/10/2026, aguardando merge: `POST /ai/crm-assistant/op
 - Testes com dados fictícios: `opportunityDraftParser.test.ts` e `opportunityDraft.http.test.ts`, encadeados em
   `test:crm-assistant-today` (o CI já roda) e em `test:opportunity-draft`.
 
-Fase 2 (resolvido no código em 28/10/2026, aguardando merge): bloco "Nova oportunidade por frase" no Assistente
+Fase 2 (rascunho e confirmação), mergeada no #1009 em 28/10/2026: bloco "Nova oportunidade por frase" no Assistente
 Comercial (`OpportunityDraftSection.tsx`, `OpportunityDraftCard.tsx`; regras em `lib/opportunityDraft.ts`, guarda em
 `lib/opportunityDraftStore.ts`). Decisões da diretoria em 28/10/2026:
 
@@ -1273,9 +1273,54 @@ Comercial (`OpportunityDraftSection.tsx`, `OpportunityDraftCard.tsx`; regras em 
 - Testes com dados fictícios em `apps/web/tests/opportunityDraft.test.ts`, encadeado em `test:crm-assistant-evidence`
   (o CI já roda) e em `test:opportunity-draft`.
 
+Voz 2.1 (robustez do ditado; resolvido no código em 29/10/2026, aguardando merge), depois do teste real no celular com o
+ditado do teclado. Decisões da diretoria em 29/10/2026:
+
+- Números por extenso viram dígitos só junto de unidade (sacas, sacos, kg, quilo/quilos, reais) ou depois de
+  "preço"/"valor": dez, vinte, cinquenta, cem/cento, duzentas…, mil, com "e" ("cento e vinte"). "sem"/"cem" logo antes de
+  "sacas"/"sacos" = 100. Fora disso não converte, para não mexer em nomes ("Dois Irmãos"). Só o trecho antes da
+  observação é convertido.
+- Dentro do trecho do produto saem kg, "N sacas", preço e palavras de etapa; o resto é o nome falado.
+- Etapa em qualquer posição, sem a palavra "etapa": prospecção (prospect…), negociação (negociando, em negociação),
+  proposta (orçamento, cotação). Ganho/perdido só depois de "etapa" ("preço fechado" não é etapa).
+- Cliente sem a palavra "cliente": o nome dito no começo, antes da primeira palavra-chave (se não falar de dinheiro).
+  "Nome, Cidade" separa pela vírgula; sem vírgula, as últimas 1–3 palavras que forem um município do catálogo IBGE
+  (`brazilMunicipalities.ts`, qualquer UF) viram a cidade, e essas palavras também contam como nome na busca ("Fazenda
+  Santa Maria"). Só uma cidade: cliente pendente. O vendedor continua escolhendo sempre.
+- Produto aproximado: busca pelas 3 primeiras letras de cada palavra dita, até 1000 produtos, só os válidos na tabela;
+  palavras genéricas ("sem", "semente", "sementes", "de", "da", "do") ficam fora do filtro e da pontuação, dos dois
+  lados (o catálogo começa os nomes com "SEM ");
+  pontuação em memória em `name`, `className` e `brand` (igual 3; prefixo comum de 4+ letras ou uma palavra começando a
+  outra 2; prefixo de 3 letras 1; "espinha" de consoantes, como "sides"/"seed", 1; 1–2 letras trocadas 1) e kg igual
+  +4; até 5 candidatos. Nenhum: tenta só pelo kg dito (`className`/`name` com "NKG" ou `PESO_PRODUTO`), na mesma tabela.
+- Título: a API manda "Nova oportunidade – <cliente falado>" (ou "Nova oportunidade"); a tela refaz com "<produto do 1º
+  item escolhido> – <cliente escolhido>" a cada escolha, até o vendedor editar o título à mão.
+- Cliente não encontrado: o aviso termina com "Comece com 'Cliente <nome>, <cidade>'.".
+- Testes com a frase de teste (nome de cliente trocado por um fictício) e variações, sobre o banco simulado:
+  `opportunityDraftParser.test.ts` e `opportunityDraft.http.test.ts`.
+
+#### UX no celular (voz 2.1)
+
+- Campo da frase com a frase-modelo "Cliente Agro Exemplo, Toledo. Etapa proposta. Tabela revenda. Produto Marandu Vital
+  Seed 10 quilos, 100 sacas, preço cadastrado. Observação: retornar sexta." e a dica "Pode usar o microfone do teclado.".
+- O bloco começa recolhido: o botão "Nova oportunidade por frase (N para confirmar)" abre; não empurra o chat.
+- Cabeçalho do Assistente: ícone pequeno ao lado do título no celular, descrição com a largura toda.
+- Menos cartões aninhados e menos padding no celular: itens separados por linha, não por cartão; "Remover" e "Buscar"
+  não encolhem; a busca de produto usa grade com o botão sempre inteiro; quantidade e preço empilham; datas com a
+  largura toda (`appearance-none` no iPhone). Conferido em 320 e 375 px sem rolagem lateral.
+- Barra de pergunta do Assistente acima da barra de ações rápidas (antes ficava por baixo dela, coberta); o fim da página
+  mantém o espaço das duas. Agenda: o botão "+ Nova agenda" também sobe acima da barra de ações rápidas. As outras telas
+  usam o espaço que o `AppLayout` já reserva para a barra; não havia outro elemento fixo por cima dela.
+- "Para confirmar": "Continuar" no lugar de "Abrir"; vencido mantém "Refazer" e "Descartar".
+- Contrato pelo código-fonte em `apps/web/tests/assistantMobileLayout.test.ts`, encadeado em
+  `test:crm-assistant-evidence`.
+- Microfone adiado (29/10/2026): o Web Speech API (`SpeechRecognition`) é limitado no iPhone e ausente no Firefox, e o
+  ditado do teclado funciona em todos os aparelhos. O campo de texto com o microfone do teclado fica como caminho
+  único por enquanto.
+
 Pendente:
 
-- (a) Fase 3 (microfone pelo Web Speech API). A fase 2 está descrita abaixo.
+- (a) Microfone próprio pelo Web Speech API: adiado (ver "Microfone adiado" acima).
 - (b) Limite de desconto por perfil: não existe regra para item de oportunidade. `computeOpportunityItemTotals`
   (`crudRoutes.ts`) só confere desconto entre 0 e 100% e até o valor bruto, com o TODO "adicionar limites de desconto
   por perfil via Configurações". `Product.minPrice` não é usado como regra (a sincronização preenche com o próprio
@@ -1283,11 +1328,19 @@ Pendente:
   liberação").
 - (c) Busca de produto sem tenant: `/products/search` e o rascunho não filtram `Product.tenantId` (nulo em parte do
   catálogo). Não alterado.
-- (d) Números falados por extenso ("dez quilos", "cem sacas") não são lidos pelas regras; só dígitos (a IA cobre se a
-  frase ficar fora do padrão). Cada produto precisa da palavra "produto"; "valor" depois de um produto é o valor da
-  oportunidade (com produtos, é ignorado com aviso), não o preço.
+- (d) Número por extenso longe de unidade e de "preço"/"valor" não é lido (de propósito, por causa dos nomes). Cada
+  produto precisa da palavra "produto"; "valor" depois de um produto é o valor da oportunidade (com produtos, é ignorado
+  com aviso), não o preço.
 - (e) Data com mês e sem ano fica no ano corrente: "dia 5 de janeiro" dito em dezembro volta como data passada.
-- (f) Etapa só é lida depois da palavra "etapa" (sem ela, prospecção). Tabela 2 usa o preço sem filial, como a busca
-  de produtos.
+- (f) Sem nenhuma palavra de etapa, fica prospecção. Tabela 2 usa o preço sem filial, como a busca de produtos.
 - (g) Os testes novos rodam dentro do passo `test:crm-assistant-today` do CI; um passo próprio
   (`test:opportunity-draft`) exige mudar `.github/workflows`.
+- (h) Busca aproximada de produto: o prefixo de 3 letras traz candidatos fracos ("maru" ~ "marca", no fim da lista).
+  Prefixo comum no catálogo: medido em produção em 29/10/2026, 550 produtos ativos, 177 com nome começando por "SEM ".
+  Tratado no #1010: "sem", "semente", "sementes", "de", "da" e "do" saem do filtro prévio e da pontuação (só com
+  palavras genéricas, vai direto ao kg), e o limite do filtro subiu de 500 para 1000, acima do catálogo inteiro. Se o
+  catálogo passar de 1000 produtos ativos, o filtro volta a cortar sem ordem definida: ordenar a busca ou subir o
+  limite.
+- (i) Cidade deduzida pelo nome do município não usa a UF (Toledo existe no PR e em MG); só o nome pesa na pontuação.
+- (j) A barra de pergunta do Assistente e o botão da Agenda usam `--mobile-action-bar-height` (6rem), um pouco maior que
+  a barra de ações real (cerca de 85 px + área segura): sobra uma faixa estreita entre as duas.

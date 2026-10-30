@@ -31,6 +31,8 @@ const clients: Row[] = [
   { ...baseClient, id: "c-alfa-norte", name: "AGRO TESTE ALFA NORTE", city: "SERRA AZUL", ownerSellerId: "seller-b" },
   { ...baseClient, id: "c-delta", name: "AGRO TESTE DELTA", city: "SERRA AZUL", ownerSellerId: "seller-off" },
   { ...baseClient, id: "c-alfa-arquivada", name: "AGRO TESTE ALFA ARQUIVADA", city: "VILA SERENA", ownerSellerId: "seller-a", isArchived: true },
+  { ...baseClient, id: "c-bonvita", name: "BONVITA COMERCIAL", city: "TOLEDO", ownerSellerId: "seller-a" },
+  { ...baseClient, id: "c-bonvita-filial", name: "BONVITA FILIAL", city: "VILA SERENA", ownerSellerId: "seller-a" },
   { ...baseClient, id: "c-alfa-outro-tenant", name: "AGRO TESTE ALFA OUTRO", city: "VILA SERENA", ownerSellerId: "seller-a", tenantId: "tenant-b" }
 ];
 const priceRow = (table: string, price: number) => ({ erpPriceId: table, branchCode: null, price, source: "prices", availabilityState: "available", validFrom: past, sourceChangedAt: past });
@@ -41,6 +43,9 @@ const products: Row[] = [
   { ...baseProduct, id: "p-boreal", name: "SEM CAPIM BOREAL", className: "INCRUSTADA 20KG", brand: "MARCA TESTE", rawErpPayload: { PESO_PRODUTO: 20 }, prices: [priceRow("1", 100)] },
   { ...baseProduct, id: "p-aurora-inativo", name: "SEM BRACHIARIA AURORA ANTIGA", className: "PELETIZADA 10KG", brand: "SEMENTES EXEMPLO", rawErpPayload: { PESO_PRODUTO: 10 }, prices: [priceRow("1", 120)], isActive: false },
   { ...baseProduct, id: "p-aurora-sem-preco", name: "SEM BRACHIARIA AURORA ZERADA", className: "PELETIZADA 10KG", brand: "SEMENTES EXEMPLO", rawErpPayload: { PESO_PRODUTO: 10 }, prices: [{ ...priceRow("1", 0), availabilityState: "explicit_zero" }] },
+  { ...baseProduct, id: "p-marandu-10", name: "SEM MARANDU", className: "INCRUSTADA 10KG", brand: "VITAL SEED", rawErpPayload: { PESO_PRODUTO: 10 }, prices: [priceRow("1", 200)] },
+  { ...baseProduct, id: "p-marandu-20", name: "SEM MARANDU", className: "INCRUSTADA 20KG", brand: "VITAL SEED", rawErpPayload: { PESO_PRODUTO: 20 }, prices: [priceRow("1", 380)] },
+  { ...baseProduct, id: "p-mombaca-10", name: "SEM MOMBACA", className: "INCRUSTADA 10KG", brand: "VITAL SEED", rawErpPayload: { PESO_PRODUTO: 10 }, prices: [priceRow("1", 210)] },
   { ...baseProduct, id: "p-aurora-nao-sincronizado", name: "SEM BRACHIARIA AURORA LOCAL", className: "PELETIZADA 10KG", brand: "SEMENTES EXEMPLO", rawErpPayload: null, prices: [priceRow("1", 110)] }
 ];
 
@@ -140,7 +145,7 @@ try {
   assert.equal(model.client.candidates[0].suggestedOwner, null);
   assert.deepEqual(model.owner, { mode: "self", sellerId: "seller-a" });
   assert.deepEqual(clientQueries.at(-1)!.AND.slice(0, 2), [{ tenantId: "tenant-a", isArchived: false }, { ownerSellerId: "seller-a" }]);
-  assert.equal(model.title, "Braquiária Aurora Sementes Exemplo – Agro Teste Alfa");
+  assert.equal(model.title, "Nova oportunidade – Agro Teste Alfa", "título neutro: a tela refaz com o produto e o cliente escolhidos");
   assert.deepEqual(model.stage, { value: "proposta", label: "Proposta" });
   assert.equal(model.probability, 70);
   assert.deepEqual(model.priceTable, { code: "1", label: "Tabela 1" });
@@ -201,7 +206,8 @@ try {
   const twoProducts = await parse("Cliente Agro Teste Alfa. Produto braquiária Aurora, 10 quilos, 100 sacas, preço cadastrado. Produto capim Boreal, Marca Teste, 20 kg, 30 sacas, preço R$ 95,50");
   assert.equal(twoProducts.items.length, 2);
   assert.equal(twoProducts.items[0].candidates[0].productId, "p-aurora-10");
-  assert.deepEqual(twoProducts.items[1].candidates.map((candidate: Row) => candidate.productId), ["p-boreal"]);
+  // "marca" ~ "marandu" (3 letras iguais) entra como candidato fraco, depois do produto certo.
+  assert.equal(twoProducts.items[1].candidates[0].productId, "p-boreal");
   assert.equal(twoProducts.items[1].candidates[0].priceDiffPercent, -4.5);
   assert.deepEqual(twoProducts.value, { amount: 16865, source: "items" });
   assert.deepEqual(twoProducts.pendingFields, ["clientId", "items.0.productId", "items.1.productId"]);
@@ -209,7 +215,7 @@ try {
   // 7. Sem produto, com valor falado.
   const valueOnly = await parse("Nova oportunidade de R$ 50 mil, cliente Agro Teste Beta");
   assert.deepEqual(valueOnly.value, { amount: 50000, source: "spoken" });
-  assert.equal(valueOnly.title, "Oportunidade – Agro Teste Beta");
+  assert.equal(valueOnly.title, "Nova oportunidade – Agro Teste Beta");
   assert.equal(valueOnly.client.candidates[0].id, "c-beta");
   assert.deepEqual(valueOnly.items, []);
   const noValue = await parse("Cliente Agro Teste Beta. Etapa proposta");
@@ -242,7 +248,7 @@ try {
   assert(ambiguous.pendingFields.includes("clientId"));
   const unknownClient = await parse("Cliente Fazenda Inexistente. Valor R$ 10 mil");
   assert.deepEqual(unknownClient.client.candidates, []);
-  assert.equal(unknownClient.title, "Oportunidade – Fazenda Inexistente");
+  assert.equal(unknownClient.title, "Nova oportunidade – Fazenda Inexistente");
   assert(codes(unknownClient).includes("client_not_found"));
 
   // 11. Produto não encontrado.
@@ -254,6 +260,67 @@ try {
   const noQuantity = await parse("Cliente Agro Teste Alfa. Produto braquiária Aurora 10 kg");
   assert(codes(noQuantity).includes("quantity_missing"));
   assert.equal(noQuantity.items[0].candidates[0].total, null);
+
+  // 11b. Ditado do teclado (frase de teste no celular, com cliente fictício): sem "cliente", sem "etapa", "sem sacas" =
+  // 100 sacas, produto com o nome errado ("maru vital sides") casado por prefixo, consoantes e kg.
+  const dictated = await parse("Bonvita Toledo produto Maru Vital Sides 10 quilo sem sacas prospecção");
+  assert.equal(dictated.client.spokenName, "Bonvita");
+  assert.equal(dictated.client.spokenCity, "Toledo");
+  assert.deepEqual(dictated.client.candidates.map((candidate: Row) => candidate.id), ["c-bonvita", "c-bonvita-filial"], "cidade pesa; o vendedor ainda escolhe");
+  assert(dictated.pendingFields.includes("clientId"));
+  assert.deepEqual(dictated.stage, { value: "prospeccao", label: "Prospecção" });
+  assert.equal(dictated.items.length, 1);
+  assert.equal(dictated.items[0].spokenName, "Maru Vital Sides");
+  assert.equal(dictated.items[0].kg, 10);
+  assert.equal(dictated.items[0].quantity, 100);
+  assert.deepEqual(dictated.items[0].candidates.map((candidate: Row) => candidate.productId), ["p-marandu-10", "p-mombaca-10", "p-marandu-20", "p-boreal"], "kg igual pesa mais; \"maru\" ~ \"marca\" entra por último");
+  assert.deepEqual(dictated.items[0].candidates.map((candidate: Row) => candidate.score), [9, 8, 5, 1]);
+  assert.equal(dictated.items[0].candidates[0].total, 20000);
+  assert.equal(dictated.title, "Nova oportunidade – Bonvita");
+  assert.deepEqual(dictated.aiFields, [], "frase ditada lida só pelas regras");
+  const dictatedWords = await parse("Bonvita, Toledo. Produto marandu vital seed dez quilos duzentas sacas preço cento e noventa reais, cotação");
+  assert.equal(dictatedWords.client.candidates[0].id, "c-bonvita");
+  assert.deepEqual(dictatedWords.stage, { value: "proposta", label: "Proposta" });
+  assert.equal(dictatedWords.items[0].candidates[0].productId, "p-marandu-10");
+  assert.deepEqual(
+    (({ unitPrice, total, priceDiffPercent }) => ({ unitPrice, total, priceDiffPercent }))(dictatedWords.items[0].candidates[0]),
+    { unitPrice: 190, total: 38000, priceDiffPercent: -5 }
+  );
+  // Nenhuma palavra bate: só pelo kg dito, na mesma tabela.
+  const byKg = await parse("Cliente Bonvita. Produto xyzw 10 kg 5 sacas");
+  assert.deepEqual(byKg.items[0].candidates.map((candidate: Row) => candidate.productId).sort(), ["p-aurora-10", "p-marandu-10", "p-mombaca-10"]);
+  assert(byKg.items[0].candidates.every((candidate: Row) => candidate.weightKg === 10));
+  // Só palavras genéricas ("semente"): vai direto para o kg.
+  const onlyGeneric = await parse("Cliente Bonvita. Produto semente 10 kg 5 sacas");
+  assert.deepEqual(onlyGeneric.items[0].candidates.map((candidate: Row) => candidate.productId).sort(), ["p-aurora-10", "p-marandu-10", "p-mombaca-10"]);
+
+  // 11c. Catálogo com 600 produtos começando com "SEM ": "sem", "semente" e "de" ficam fora do filtro prévio e da
+  // pontuação; o filtro usa só as palavras que sobram e respeita o limite de linhas.
+  const bigCatalog: Row[] = Array.from({ length: 599 }, (_, index) => ({
+    ...baseProduct,
+    id: `p-ficticio-${index}`,
+    name: index % 3 === 0 ? `SEM BRACHIARIA BRIZANTHA FICTICIA ${index}` : `SEM PANICUM FICTICIO ${index}`,
+    className: index % 2 === 0 ? "PELETIZADA 10KG" : "INCRUSTADA 20KG",
+    brand: "SEMENTES EXEMPLO",
+    rawErpPayload: { PESO_PRODUTO: index % 2 === 0 ? 10 : 20 },
+    prices: [priceRow("1", 150)]
+  }));
+  bigCatalog.push({ ...baseProduct, id: "p-brizantha-marandu", name: "SEM BRACHIARIA BRIZANTHA MARANDU", className: "VITAL SEED 10KG", brand: "MARCA FICTICIA", rawErpPayload: { PESO_PRODUTO: 10 }, prices: [priceRow("1", 220)] });
+  const productQueries: Row[] = [];
+  setModel("product", {
+    findMany: async ({ where, take }: any) => {
+      productQueries.push(where);
+      return bigCatalog.filter((row) => matches(row, where)).slice(0, take).map((row) => ({ ...row, erpProductCode: row.id, erpProductClassCode: "1" }));
+    }
+  });
+  const semCatalog = await parse("Cliente Bonvita. Produto semente de braquiária Maru Vital Sides 10 quilos");
+  const filterTerms = [...new Set(productQueries.flatMap((where) => where.OR.map((part: Row) => (Object.values(part)[0] as Row).contains)))];
+  assert.deepEqual(filterTerms.sort(), ["bra", "mar", "sid", "vit"], "\"sem\", \"semente\" e \"de\" fora do filtro");
+  const semIds = semCatalog.items[0].candidates.map((candidate: Row) => candidate.productId);
+  assert(semIds.slice(0, 5).includes("p-brizantha-marandu"), `produto entre os 5 primeiros: ${semIds.join(", ")}`);
+  assert.equal(semIds[0], "p-brizantha-marandu");
+  setModel("product", { findMany: async ({ where }: any) => products.filter((row) => matches(row, where)).map((row) => ({ ...row, erpProductCode: row.id, erpProductClassCode: "1" })) });
+  assert.match(unknownClient.warnings.find((warning: Row) => warning.code === "client_not_found").message, /Comece com 'Cliente <nome>, <cidade>'\./);
 
   // 12. Gerente: responsável sugerido é o vendedor dono do cliente; dono inativo deixa o responsável pendente.
   const manager = await parse("Cliente Agro Teste. Valor R$ 10 mil", "manager-a");
@@ -276,7 +343,7 @@ try {
   assert.equal(aiCalls[0].content, freeText, "só a frase vai para a IA");
   assert.equal(aiCalls[0].userId, "seller-a", "cota de quem pediu");
   assert(!/c-alfa|p-aurora|VILA SERENA|SEMENTES EXEMPLO/.test(aiCalls[0].system + aiCalls[0].content), "nenhum dado do banco vai para a IA");
-  assert.deepEqual(fromAi.aiFields, ["clientName", "stage", "items"]);
+  assert.deepEqual(fromAi.aiFields, ["clientName", "items"], "etapa dita sem a palavra \"etapa\" já sai das regras");
   assert.equal(fromAi.source, "ai");
   assert.equal(fromAi.client.candidates[0].id, "c-beta");
   assert.deepEqual(fromAi.stage, { value: "negociacao", label: "Negociação" });

@@ -1435,7 +1435,7 @@ export default function AgendaPage() {
       ) : null}
 
       {isMobile ? (
-        <button type="button" onClick={() => openCreate("reuniao_online")} className="fixed bottom-5 right-4 z-40 rounded-full bg-brand-700 px-4 py-3 text-sm font-semibold text-white shadow-lg">
+        <button type="button" onClick={() => openCreate("reuniao_online")} className="fixed bottom-[calc(var(--mobile-action-bar-height)+env(safe-area-inset-bottom)+0.75rem)] right-4 z-40 rounded-full bg-brand-700 px-4 py-3 text-sm font-semibold text-white shadow-lg">
           + Nova agenda
         </button>
       ) : null}

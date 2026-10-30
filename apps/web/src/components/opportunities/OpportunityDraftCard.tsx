@@ -48,9 +48,11 @@ type Props = {
 };
 
 const inputClass = "min-h-11 w-full min-w-0 rounded-xl border border-slate-200 px-3 text-sm outline-none focus:border-brand-500 disabled:bg-slate-50 disabled:text-slate-500";
+// iPhone: o campo de data ignora a largura sem appearance-none e fica mais estreito ou passa da borda.
+const dateInputClass = `${inputClass} block appearance-none bg-white text-left`;
 const labelClass = "text-xs font-semibold text-slate-600";
 const chipClass = (selected: boolean) =>
-  `w-full rounded-xl border px-3 py-2 text-left text-sm ${selected ? "border-brand-600 bg-brand-50 text-brand-900" : "border-slate-200 bg-white text-slate-800 hover:bg-slate-50"}`;
+  `w-full min-w-0 break-words rounded-xl border px-3 py-2 text-left text-sm ${selected ? "border-brand-600 bg-brand-50 text-brand-900" : "border-slate-200 bg-white text-slate-800 hover:bg-slate-50"}`;
 const formatDiff = (diff: number) => `${diff > 0 ? "+" : ""}${diff.toLocaleString("pt-BR")}%`;
 
 function ItemEditor({ card, item, index, onChange }: { card: DraftCard; item: DraftCardItem; index: number; onChange: (card: DraftCard) => void }) {
@@ -76,13 +78,13 @@ function ItemEditor({ card, item, index, onChange }: { card: DraftCard; item: Dr
     } finally { setSearching(false); }
   }
 
-  return <div className={`space-y-3 rounded-2xl border p-3 ${item.error ? "border-red-200 bg-red-50/40" : "border-slate-200"}`}>
+  return <div className={`min-w-0 space-y-3 border-t pt-3 md:rounded-2xl md:border md:p-3 ${item.error ? "border-red-200 bg-red-50/40" : "border-slate-200"}`}>
     <div className="flex items-start justify-between gap-2">
-      <div>
-        <p className="text-sm font-semibold text-slate-900">Item {index + 1}{item.spokenName ? `: "${item.spokenName}"` : ""}</p>
+      <div className="min-w-0">
+        <p className="break-words text-sm font-semibold text-slate-900">Item {index + 1}{item.spokenName ? `: "${item.spokenName}"` : ""}</p>
         {locked && <p className="text-xs font-semibold text-emerald-700">Item salvo na oportunidade.</p>}
       </div>
-      {!isDraftCreated(card) && <button type="button" onClick={() => onChange(removeDraftItem(card, item.key))} className="inline-flex min-h-9 items-center gap-1 rounded-lg px-2 text-xs font-semibold text-red-700 hover:bg-red-50"><Trash2 size={14} /> Remover</button>}
+      {!isDraftCreated(card) && <button type="button" onClick={() => onChange(removeDraftItem(card, item.key))} className="inline-flex min-h-9 shrink-0 items-center gap-1 rounded-lg px-2 text-xs font-semibold text-red-700 hover:bg-red-50"><Trash2 size={14} /> Remover</button>}
     </div>
     {item.error && <p className="rounded-xl bg-red-50 p-2 text-sm text-red-700">{item.error}</p>}
     {warnings.map((warning) => <p key={warning.code + warning.field} className="flex gap-2 text-xs text-amber-800"><AlertTriangle size={14} className="shrink-0" /> {warning.message}</p>)}
@@ -93,9 +95,9 @@ function ItemEditor({ card, item, index, onChange }: { card: DraftCard; item: Dr
         <span className="block font-medium">{candidate.name}</span>
         <span className="block text-xs text-slate-500">{[candidate.brand, candidate.unit].filter(Boolean).join(" · ")} · {formatCurrencyBRL(candidate.tablePrice)} na {card.priceTable.label}</span>
       </button>)}</div>}
-      <div className="flex gap-2">
-        <input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); search(); } }} maxLength={120} placeholder={item.candidates.length ? "Nenhum serve? Buscar outro produto" : "Buscar produto"} className={inputClass} />
-        <button type="button" onClick={search} disabled={searching || !query.trim()} className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-700 disabled:opacity-60">{searching ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />} Buscar</button>
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+        <input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); search(); } }} maxLength={120} placeholder={item.candidates.length ? "Outro produto" : "Buscar produto"} aria-label="Buscar produto" className={inputClass} />
+        <button type="button" onClick={search} disabled={searching || !query.trim()} className="inline-flex min-h-11 shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-700 disabled:opacity-60">{searching ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />} Buscar</button>
       </div>
       {searchError && <p className="text-xs text-red-700">{searchError}</p>}
       {results && (results.length ? <div className="grid max-h-60 gap-2 overflow-auto">{results.map((result) => <button key={result.id} type="button" onClick={() => { onChange(selectSearchedProduct(card, item.key, result)); setResults(null); }} className={chipClass(item.product?.productId === result.id)}>
@@ -103,11 +105,11 @@ function ItemEditor({ card, item, index, onChange }: { card: DraftCard; item: Dr
         <span className="block text-xs text-slate-500">{[result.brand, result.unit].filter(Boolean).join(" · ")} · {formatCurrencyBRL(Number(result.price))} na {card.priceTable.label}</span>
       </button>)}</div> : <p className="text-xs text-slate-500">Nenhum produto com preço válido na {card.priceTable.label}.</p>)}
     </div>}
-    {item.product && <p className="text-sm text-slate-800">Escolhido: <span className="font-semibold">{item.product.name}</span> · tabela {formatCurrencyBRL(item.product.tablePrice)}</p>}
+    {item.product && <p className="break-words text-sm text-slate-800">Escolhido: <span className="font-semibold">{item.product.name}</span> · tabela {formatCurrencyBRL(item.product.tablePrice)}</p>}
 
-    <div className="grid grid-cols-2 gap-2">
-      <label className="space-y-1"><span className={labelClass}>Quantidade (sacas)</span><input inputMode="decimal" value={item.quantity} disabled={locked} onChange={(event) => onChange(setItemField(card, item.key, "quantity", event.target.value))} className={inputClass} /></label>
-      <label className="space-y-1"><span className={labelClass}>Preço</span><select value={item.priceMode} disabled={locked} onChange={(event) => onChange(setItemField(card, item.key, "priceMode", event.target.value as DraftCardItem["priceMode"]))} className={inputClass}><option value="registered">Cadastrado</option><option value="informed">Informado</option></select></label>
+    <div className="grid gap-2 sm:grid-cols-2">
+      <label className="min-w-0 space-y-1"><span className={labelClass}>Quantidade (sacas)</span><input inputMode="decimal" value={item.quantity} disabled={locked} onChange={(event) => onChange(setItemField(card, item.key, "quantity", event.target.value))} className={inputClass} /></label>
+      <label className="min-w-0 space-y-1"><span className={labelClass}>Preço</span><select value={item.priceMode} disabled={locked} onChange={(event) => onChange(setItemField(card, item.key, "priceMode", event.target.value as DraftCardItem["priceMode"]))} className={inputClass}><option value="registered">Cadastrado</option><option value="informed">Informado</option></select></label>
     </div>
     {item.priceMode === "informed" && <label className="block space-y-1"><span className={labelClass}>Preço informado por saca (R$)</span><input inputMode="decimal" value={item.informedPrice} disabled={locked} onChange={(event) => onChange(setItemField(card, item.key, "informedPrice", event.target.value))} className={inputClass} /></label>}
     <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
@@ -126,12 +128,12 @@ export default function OpportunityDraftCard({ card, sellers, confirming, onChan
   const canCreate = canCreateDraft(card) && !confirming;
   const selectedClientId = card.client.selected?.id ?? "";
 
-  return <article className="space-y-4 rounded-2xl border border-brand-100 bg-white p-4">
+  return <article className="min-w-0 space-y-3 rounded-2xl border border-brand-100 bg-white p-3 md:space-y-4 md:p-4">
     <div className="flex flex-wrap items-center justify-between gap-2">
       <p className="font-semibold text-slate-900">Rascunho da oportunidade</p>
       <span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-600">{card.priceTable.label}</span>
     </div>
-    <p className="rounded-xl bg-slate-50 p-3 text-sm text-slate-700">"{card.text}"</p>
+    <p className="break-words rounded-xl bg-slate-50 p-3 text-sm text-slate-700">"{card.text}"</p>
     {expired && <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">Rascunho vencido (mais de 7 dias). Descarte ou use "Interpretar de novo".</p>}
     {created && <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">Oportunidade já criada. Só os itens pendentes podem ser alterados e enviados de novo.</p>}
     {card.lastError && <p className="rounded-xl border border-red-100 bg-red-50 p-3 text-sm text-red-700">{card.lastError}</p>}
@@ -147,7 +149,7 @@ export default function OpportunityDraftCard({ card, sellers, confirming, onChan
         <p className="text-xs text-slate-500">{card.client.candidates.length ? "Não é nenhum desses? Busque na carteira:" : "Busque o cliente na carteira:"}</p>
         <ClientSelect value={card.client.selected?.source === "search" ? selectedClientId : undefined} onChange={(client) => { if (client || card.client.selected?.source === "search") onChange(selectSearchedClient(card, client)); }} />
       </div>}
-      {card.client.selected && <p className="text-sm text-slate-800">Escolhido: <span className="font-semibold">{card.client.selected.name}</span></p>}
+      {card.client.selected && <p className="break-words text-sm text-slate-800">Escolhido: <span className="font-semibold">{card.client.selected.name}</span></p>}
     </section>
 
     <label className="block space-y-1"><span className={labelClass}>Responsável</span>
@@ -166,16 +168,16 @@ export default function OpportunityDraftCard({ card, sellers, confirming, onChan
       {!created && <button type="button" onClick={() => onChange(addDraftItem(card))} className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-dashed border-slate-300 px-3 text-sm font-semibold text-slate-700"><Plus size={16} /> Adicionar item</button>}
     </section>
 
-    <div className="grid gap-3 sm:grid-cols-2">
+    <div className="grid min-w-0 gap-3 sm:grid-cols-2">
       <label className="space-y-1 sm:col-span-2"><span className={labelClass}>Título</span><input value={card.title} disabled={created} maxLength={200} onChange={(event) => onChange(setDraftField(card, "title", event.target.value))} className={inputClass} /></label>
-      <label className="space-y-1"><span className={labelClass}>Etapa</span><select value={card.stage} disabled={created} onChange={(event) => onChange(setDraftStage(card, event.target.value as DraftStage))} className={inputClass}>{DRAFT_STAGES.map((stage) => <option key={stage} value={stage}>{DRAFT_STAGE_LABELS[stage]}</option>)}</select></label>
-      <label className="space-y-1"><span className={labelClass}>Probabilidade (%)</span><input inputMode="numeric" value={card.probability} disabled={created} onChange={(event) => onChange(setDraftProbability(card, event.target.value))} className={inputClass} /></label>
+      <label className="block min-w-0 space-y-1"><span className={labelClass}>Etapa</span><select value={card.stage} disabled={created} onChange={(event) => onChange(setDraftStage(card, event.target.value as DraftStage))} className={inputClass}>{DRAFT_STAGES.map((stage) => <option key={stage} value={stage}>{DRAFT_STAGE_LABELS[stage]}</option>)}</select></label>
+      <label className="block min-w-0 space-y-1"><span className={labelClass}>Probabilidade (%)</span><input inputMode="numeric" value={card.probability} disabled={created} onChange={(event) => onChange(setDraftProbability(card, event.target.value))} className={inputClass} /></label>
       {card.items.length === 0
         ? <label className="space-y-1 sm:col-span-2"><span className={labelClass}>Valor (R$)</span><input inputMode="decimal" value={card.value} disabled={created} onChange={(event) => onChange(setDraftField(card, "value", event.target.value))} className={inputClass} /></label>
         : <p className="text-sm text-slate-700 sm:col-span-2">Valor pela soma dos itens: <span className="font-semibold">{value !== null ? formatCurrencyBRL(value) : "a definir"}</span></p>}
-      <label className="space-y-1"><span className={labelClass}>Entrada</span><input type="date" value={card.proposalDate} disabled={created} onChange={(event) => onChange(setDraftField(card, "proposalDate", event.target.value))} className={inputClass} /></label>
-      <label className="space-y-1"><span className={`${labelClass} flex flex-wrap items-center gap-2`}>Retorno {card.followUpSuggestedByAi && <span className="inline-flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-semibold text-violet-800"><Sparkles size={12} /> sugerida pela IA</span>}</span><input type="date" value={card.followUpDate} disabled={created} onChange={(event) => onChange(setDraftField(card, "followUpDate", event.target.value))} className={inputClass} /></label>
-      <label className="space-y-1"><span className={labelClass}>Fechamento previsto</span><input type="date" value={card.expectedCloseDate} disabled={created} onChange={(event) => onChange(setDraftField(card, "expectedCloseDate", event.target.value))} className={inputClass} /></label>
+      <label className="block min-w-0 space-y-1"><span className={labelClass}>Entrada</span><input type="date" value={card.proposalDate} disabled={created} onChange={(event) => onChange(setDraftField(card, "proposalDate", event.target.value))} className={dateInputClass} /></label>
+      <label className="block min-w-0 space-y-1"><span className={`${labelClass} flex flex-wrap items-center gap-2`}>Retorno {card.followUpSuggestedByAi && <span className="inline-flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-semibold text-violet-800"><Sparkles size={12} /> sugerida pela IA</span>}</span><input type="date" value={card.followUpDate} disabled={created} onChange={(event) => onChange(setDraftField(card, "followUpDate", event.target.value))} className={dateInputClass} /></label>
+      <label className="block min-w-0 space-y-1"><span className={labelClass}>Fechamento previsto</span><input type="date" value={card.expectedCloseDate} disabled={created} onChange={(event) => onChange(setDraftField(card, "expectedCloseDate", event.target.value))} className={dateInputClass} /></label>
       <label className="space-y-1 sm:col-span-2"><span className={labelClass}>Notas</span><textarea value={card.notes} disabled={created} maxLength={2000} rows={3} onChange={(event) => onChange(setDraftField(card, "notes", event.target.value))} className={`${inputClass} py-2`} /></label>
     </div>
 

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { defaultFollowUpDate, parseDraftText, parseObservationDate, parseSpokenNumber } from "./opportunityDraftParser.js";
+import { defaultFollowUpDate, parseDraftText, parseObservationDate, parseSpokenNumber, spokenNumbersToDigits } from "./opportunityDraftParser.js";
 
 // Leitura da frase do rascunho de oportunidade só com regras fixas. Frases e nomes fictícios; data fixa
 // (2026-10-28 é uma quarta-feira).
@@ -106,6 +106,56 @@ assert.equal(parseDraftText("Cliente Agro Teste Alfa. Obs: retorno na semana que
 assert.equal(defaultFollowUpDate("2026-10-27"), "2026-10-30");
 assert.equal(defaultFollowUpDate(WEDNESDAY), "2026-11-02", "cai no sábado");
 assert.equal(defaultFollowUpDate("2026-10-29"), "2026-11-02", "cai no domingo");
+
+// Ditado do teclado (frase de teste no celular, com nome de cliente fictício): sem "cliente", sem "etapa", número
+// por extenso mal reconhecido ("sem sacas" = "cem sacas") e "quilo" no singular.
+const dictated = parseDraftText("Bonvita Toledo produto Maru Vital Sides 10 quilo sem sacas prospecção", WEDNESDAY);
+assert.equal(dictated.clientName, "Bonvita");
+assert.equal(dictated.clientCity, "Toledo", "cidade do catálogo IBGE no fim do nome");
+assert.equal(dictated.clientCityInferred, true);
+assert.equal(dictated.stage, "prospeccao");
+assert.deepEqual(dictated.items, [{ spokenName: "Maru Vital Sides", words: ["maru", "vital", "sides"], kg: 10, quantity: 100, price: { mode: "registered" } }]);
+
+const dictatedWords = parseDraftText("Nova oportunidade. Bonvita, Toledo. Produto marandu vital seed dez quilos duzentas sacas preço noventa reais, em negociação", WEDNESDAY);
+assert.equal(dictatedWords.clientName, "Bonvita");
+assert.equal(dictatedWords.clientCity, "Toledo");
+assert.equal(dictatedWords.clientCityInferred, false, "cidade pela vírgula");
+assert.equal(dictatedWords.stage, "negociacao");
+assert.deepEqual(dictatedWords.items.map((item) => [item.spokenName, item.kg, item.quantity, item.price]), [["marandu vital seed", 10, 200, { mode: "informed", amount: 90 }]]);
+
+const quoted = parseDraftText("produto maru vital sides 10 kg cento e vinte sacas cotação cliente Bonvita", WEDNESDAY);
+assert.equal(quoted.stage, "proposta", "cotação = proposta");
+assert.equal(quoted.items[0].quantity, 120);
+assert.equal(quoted.items[0].spokenName, "maru vital sides", "etapa sai do nome do produto");
+assert.equal(quoted.clientName, "Bonvita");
+
+// Só a cidade antes de "produto": cliente pendente. Nome com município no fim ("Dois Irmãos"): número não convertido e a
+// cidade deduzida também conta como nome no serviço.
+const onlyCity = parseDraftText("Toledo produto aurora 10 kg 5 sacas", WEDNESDAY);
+assert.equal(onlyCity.clientName, null);
+assert.equal(onlyCity.clientCity, "Toledo");
+const cityInName = parseDraftText("Fazenda Dois Irmãos produto aurora 10 kg 5 sacas", WEDNESDAY);
+assert.equal(cityInName.clientName, "Fazenda");
+assert.equal(cityInName.clientCity, "Dois Irmãos");
+assert.equal(cityInName.clientCityInferred, true);
+assert.equal(parseDraftText("Bonvita Comercial produto aurora", WEDNESDAY).clientName, "Bonvita Comercial", "sem cidade reconhecida, tudo é nome");
+assert.equal(parseDraftText("Nova oportunidade de R$ 50 mil produto aurora", WEDNESDAY).clientName, null, "começo com dinheiro não é cliente");
+
+// Ganho/perdido só depois de "etapa"; "sem" fora de "sem sacas" fica no nome.
+const closedPrice = parseDraftText("Bonvita produto aurora 10 kg 5 sacas preço fechado", WEDNESDAY);
+assert.equal(closedPrice.refusedStage, null);
+assert.equal(closedPrice.stage, null);
+assert.equal(parseDraftText("Cliente Bonvita. Produto aurora sem tratamento 10 kg 5 sacas", WEDNESDAY).items[0].spokenName, "aurora sem tratamento");
+assert.equal(parseDraftText("Cliente Bonvita. Etapa qualquer. Produto aurora em negociação", WEDNESDAY).stage, "negociacao");
+
+// Números por extenso: só junto de unidade ou de preço/valor.
+assert.equal(spokenNumbersToDigits("cento e vinte sacas"), "120 sacas");
+assert.equal(spokenNumbersToDigits("mil e quinhentos reais"), "1500 reais");
+assert.equal(spokenNumbersToDigits("valor de cinquenta mil"), "valor de 50000");
+assert.equal(spokenNumbersToDigits("dez quilos, cem sacas, sem sacas"), "10 quilos, 100 sacas, 100 sacas");
+assert.equal(spokenNumbersToDigits("Fazenda Dois Irmãos, sem tratamento"), "Fazenda Dois Irmãos, sem tratamento");
+assert.equal(parseDraftText("Cliente Bonvita. Valor de vinte mil", WEDNESDAY).value, 20000);
+assert.equal(parseDraftText("Cliente Bonvita. Produto aurora, preço cento e trinta reais", WEDNESDAY).items[0].price.mode, "informed");
 
 // Números falados.
 assert.equal(parseSpokenNumber("130"), 130);

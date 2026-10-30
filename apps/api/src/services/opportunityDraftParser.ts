@@ -1,8 +1,11 @@
 import { shiftDayKey } from "../utils/dateRange.js";
+import { statesWithMunicipalityNamed } from "./brazilMunicipalities.js";
 
 // Leitura da frase ditada para o rascunho de oportunidade (Assistente Comercial), só com regras fixas e sem banco.
 // Ordem livre; palavras-chave: cliente, cidade, etapa, tabela, produto, preço, valor, observação. Quilos/kg e sacas
 // ficam dentro do trecho do produto. Tudo depois de "observação" é texto livre (notas da oportunidade).
+// Ditado do teclado: números por extenso junto de sacas/quilos/reais (e "sem sacas" = "cem sacas"), etapa sem a palavra
+// "etapa" e cliente sem a palavra "cliente" (o nome no começo da frase, com a cidade se for um município do IBGE).
 
 export type DraftStage = "prospeccao" | "negociacao" | "proposta";
 export type RefusedStage = "ganho" | "perdido";
@@ -14,6 +17,8 @@ export type ObservationDate = { kind: "date"; date: string } | { kind: "past"; d
 export type ParsedDraftText = {
   clientName: string | null;
   clientCity: string | null;
+  // Cidade tirada do fim do nome dito no começo da frase (sem "cliente"/"cidade"): pode ser parte do nome do cliente.
+  clientCityInferred: boolean;
   stage: DraftStage | null;
   refusedStage: RefusedStage | null;
   stageUnrecognized: boolean;
@@ -44,8 +49,16 @@ const STAGE_PATTERNS: Array<[RegExp, DraftStage | RefusedStage]> = [
   [/\b(perdid[oa]s?|perdemos)\b/, "perdido"],
   [/\b(prospec\w*|prospect\w*)\b/, "prospeccao"],
   [/\b(negocia\w*)\b/, "negociacao"],
-  [/\b(propostas?|orcamento)\b/, "proposta"]
+  [/\b(propostas?|orcamentos?|cotac\w*)\b/, "proposta"]
 ];
+
+// Etapa dita em qualquer posição (sem a palavra "etapa"). Ganho e perdido só depois de "etapa".
+const STAGE_ANYWHERE_PATTERNS: Array<[RegExp, DraftStage]> = [
+  [/\b(?:prospec\w*|prospect\w*)\b/, "prospeccao"],
+  [/\b(?:negocia\w*)\b/, "negociacao"],
+  [/\b(?:propostas?|orcamentos?|cotac\w*)\b/, "proposta"]
+];
+const STAGE_WORDS_PATTERN = /\b(?:(?:em|na|fase)\s+)?(?:prospec\w*|prospect\w*|negocia\w*|propostas?|orcamentos?|cotac\w*)\b/;
 
 const KG_PATTERN = /(\d+(?:[.,]\d+)?)\s*(?:kg|kgs|quilos?|kilos?|quilogramas?)\b/;
 const QUANTITY_PATTERN = /(\d+(?:[.,]\d+)?)\s*(?:sacas?|sacos?|sc)\b/;
@@ -70,8 +83,77 @@ const parseMoney = (folded: string) => {
   return Number((match[2] ? amount * 1000 : amount).toFixed(2));
 };
 
+// Números por extenso do ditado ("cem sacas", "dez quilos", "noventa reais", "cento e vinte"). Só viram dígitos junto
+// de uma unidade (depois) ou de "preço"/"valor" (antes), para não mexer em nomes como "Dois Irmãos". "sem" logo antes
+// de sacas/sacos é "cem" mal reconhecido.
+const NUMBER_WORDS: Record<string, number> = {
+  um: 1, uma: 1, dois: 2, duas: 2, tres: 3, quatro: 4, cinco: 5, seis: 6, sete: 7, oito: 8, nove: 9, dez: 10,
+  onze: 11, doze: 12, treze: 13, quatorze: 14, catorze: 14, quinze: 15, dezesseis: 16, dezessete: 17, dezoito: 18, dezenove: 19,
+  vinte: 20, trinta: 30, quarenta: 40, cinquenta: 50, sessenta: 60, setenta: 70, oitenta: 80, noventa: 90,
+  cem: 100, cento: 100, duzentos: 200, duzentas: 200, trezentos: 300, trezentas: 300, quatrocentos: 400, quatrocentas: 400,
+  quinhentos: 500, quinhentas: 500, seiscentos: 600, seiscentas: 600, setecentos: 700, setecentas: 700,
+  oitocentos: 800, oitocentas: 800, novecentos: 900, novecentas: 900, mil: 1000
+};
+const NUMBER_UNIT_WORDS = /^(?:sacas?|sacos?|sc|kg|kgs|quilos?|kilos?|quilogramas?|reais|real)$/;
+const NUMBER_LEAD_WORDS = /^(?:preco|valor)$/;
+const isNumberWord = (word: string) => Object.prototype.hasOwnProperty.call(NUMBER_WORDS, word);
+
+const numberRunValue = (words: string[]) => {
+  let total = 0;
+  let current = 0;
+  for (const word of words) {
+    if (word === "e") continue;
+    if (word === "mil") {
+      total += (current || 1) * 1000;
+      current = 0;
+    } else {
+      current += NUMBER_WORDS[word];
+    }
+  }
+  return total + current;
+};
+
+export const spokenNumbersToDigits = (text: string) => {
+  const tokens = [...text.matchAll(/[\p{L}\p{N}]+/gu)].map((match) => ({ start: match.index!, end: match.index! + match[0].length, word: foldText(match[0]) }));
+  const wordAt = (position: number) => tokens[position]?.word ?? "";
+  const replacements: Array<{ start: number; end: number; value: number }> = [];
+  let index = 0;
+  while (index < tokens.length) {
+    if (wordAt(index) === "sem" && /^sac[oa]s?$/.test(wordAt(index + 1))) {
+      replacements.push({ start: tokens[index].start, end: tokens[index].end, value: 100 });
+      index += 1;
+      continue;
+    }
+    if (!isNumberWord(wordAt(index))) {
+      index += 1;
+      continue;
+    }
+    let end = index;
+    while (isNumberWord(wordAt(end + 1)) || (wordAt(end + 1) === "e" && isNumberWord(wordAt(end + 2)))) end += 1;
+    const before = wordAt(index - 1) === "de" ? wordAt(index - 2) : wordAt(index - 1);
+    if (NUMBER_UNIT_WORDS.test(wordAt(end + 1)) || NUMBER_LEAD_WORDS.test(before)) {
+      replacements.push({ start: tokens[index].start, end: tokens[end].end, value: numberRunValue(tokens.slice(index, end + 1).map((token) => token.word)) });
+    }
+    index = end + 1;
+  }
+  return replacements.reduceRight((result, item) => result.slice(0, item.start) + String(item.value) + result.slice(item.end), text);
+};
+
+// Troca por espaços o que o padrão acha no texto dobrado (os índices valem no original, ver foldChar).
+const blankPattern = (original: string, pattern: RegExp) => {
+  let result = original;
+  for (const match of foldText(original).matchAll(new RegExp(pattern.source, "g"))) {
+    result = result.slice(0, match.index!) + " ".repeat(match[0].length) + result.slice(match.index! + match[0].length);
+  }
+  return result;
+};
+const withoutStageWords = (original: string) => blankPattern(original, STAGE_WORDS_PATTERN);
+
+const isMunicipalityName = (text: string) => statesWithMunicipalityNamed(text).length > 0;
+
 const cleanSegment = (text: string) => text.replace(/^[\s:,.;-]+/, "").replace(/[\s:,.;-]+$/, "").trim();
 const collapse = (text: string) => text.replace(/[\s,;.]+/g, " ").trim();
+const collapseSpaces = (text: string) => text.replace(/\s+/g, " ").trim();
 const firstSentence = (text: string) => cleanSegment(text.split(/[.;!?](?:\s|$)/)[0]);
 
 const parseStage = (folded: string): DraftStage | RefusedStage | null => {
@@ -110,7 +192,7 @@ const parseItem = (original: string): SpokenItem => {
     price = parsePrice(priceMatch[0]) ?? price;
     blank(priceMatch);
   }
-  const spokenName = collapse(remaining.replace(/^\s*sementes?\s+d[ae]\s+/i, ""));
+  const spokenName = collapse(withoutStageWords(remaining).replace(/^\s*sementes?\s+d[ae]\s+/i, ""));
   return {
     spokenName,
     words: meaningfulWords(spokenName),
@@ -179,13 +261,14 @@ export const defaultFollowUpDate = (today: string) => {
 
 export const parseDraftText = (text: string, today: string): ParsedDraftText => {
   const observation = OBSERVATION_PATTERN.exec(foldText(text));
-  const main = observation ? text.slice(0, observation.index) : text;
+  const main = spokenNumbersToDigits(observation ? text.slice(0, observation.index) : text);
   const notes = observation ? cleanSegment(text.slice(observation.index + observation[0].length)) || null : null;
   const folded = foldText(main);
 
   const result: ParsedDraftText = {
     clientName: null,
     clientCity: null,
+    clientCityInferred: false,
     stage: null,
     refusedStage: null,
     stageUnrecognized: false,
@@ -213,7 +296,7 @@ export const parseDraftText = (text: string, today: string): ParsedDraftText => 
       case "cliente": {
         // Nome e cidade terminam no fim da sentença. "Agro X, Cidade Y": o que vem depois da última vírgula é a cidade
         // (curta), se a cidade não foi dita à parte.
-        const sentence = firstSentence(original);
+        const sentence = collapseSpaces(firstSentence(withoutStageWords(original)));
         const comma = sentence.lastIndexOf(",");
         const tail = comma >= 0 ? cleanSegment(sentence.slice(comma + 1)) : "";
         if (tail && tail.split(/\s+/).length <= 4) {
@@ -262,5 +345,44 @@ export const parseDraftText = (text: string, today: string): ParsedDraftText => 
         break;
     }
   });
+
+  // Etapa sem a palavra "etapa": a primeira prospecção/negociação/proposta dita em qualquer posição.
+  if (!result.stage && !result.refusedStage) {
+    const found = STAGE_ANYWHERE_PATTERNS
+      .map(([pattern, stage]) => ({ stage, index: pattern.exec(folded)?.index ?? -1 }))
+      .filter((item) => item.index >= 0)
+      .sort((left, right) => left.index - right.index)[0];
+    if (found) {
+      result.stage = found.stage;
+      result.stageUnrecognized = false;
+    }
+  }
+
+  // Cliente sem a palavra "cliente": o nome dito no começo, antes da primeira palavra-chave (sem falar de dinheiro).
+  // "Nome, Cidade" separa pela vírgula; sem vírgula, as últimas 1–3 palavras que forem um município do IBGE são a cidade.
+  if (keywords.length && !keywords.some((match) => match[1] === "cliente") && !MONEY_HINT_PATTERN.test(leading)) {
+    const opening = withoutStageWords(main.slice(0, keywords[0].index)).replace(/^\s*nova\s+oportunidade\b[\s.,:;-]*/i, "");
+    const sentence = collapseSpaces(firstSentence(opening));
+    const comma = sentence.lastIndexOf(",");
+    const tail = comma >= 0 ? cleanSegment(sentence.slice(comma + 1)) : "";
+    if (tail && tail.split(/\s+/).length <= 4) {
+      result.clientName = cleanSegment(sentence.slice(0, comma)) || null;
+      result.clientCity ??= tail;
+    } else if (meaningfulWords(sentence).length) {
+      const words = sentence.split(" ");
+      if (isMunicipalityName(sentence)) {
+        // Só a cidade: o cliente fica pendente.
+        result.clientCity ??= sentence;
+      } else {
+        let size = Math.min(3, words.length - 1);
+        while (size >= 1 && !isMunicipalityName(words.slice(-size).join(" "))) size -= 1;
+        result.clientName = (size >= 1 ? words.slice(0, -size) : words).join(" ") || null;
+        if (size >= 1 && !result.clientCity) {
+          result.clientCity = words.slice(-size).join(" ");
+          result.clientCityInferred = true;
+        }
+      }
+    }
+  }
   return result;
 };
