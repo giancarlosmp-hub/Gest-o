@@ -118,6 +118,18 @@ setModel("erpOrderSync", {
 });
 setModel("opportunity", {
   findMany: async ({ where, select }: any) => opportunities.filter((row) => matches(row, where)).map((row) => pick(row, select)),
+  findFirst: async ({ where, select }: any) => {
+    const row = opportunities.find((candidate) => matches(candidate, where));
+    return row ? pick(row, select) : null;
+  },
+  // Exclusão: o evento de linha do tempo fica, com opportunityId nulo (FK opcional sem onDelete = SET NULL no Prisma).
+  delete: async ({ where }: any) => {
+    writes.push("opportunity:delete");
+    const index = opportunities.findIndex((row) => row.id === where.id);
+    const [removed] = opportunities.splice(index, 1);
+    for (const event of timelineEvents) if (event.opportunityId === removed.id) event.opportunityId = null;
+    return removed;
+  },
   create: async ({ data }: any) => {
     writes.push("opportunity");
     const row = { id: `opp-nova-${opportunities.length}`, createdAt: clock, ...data };
@@ -127,7 +139,10 @@ setModel("opportunity", {
 });
 setModel("activity", { create: async ({ data }: any) => { writes.push("activity"); activities.push(data); return data; } });
 setModel("agendaEvent", { create: async ({ data }: any) => { writes.push("agendaEvent"); agendaEvents.push(data); return data; } });
-setModel("timelineEvent", { create: async ({ data }: any) => { writes.push("timelineEvent"); timelineEvents.push(data); return data; } });
+setModel("timelineEvent", {
+  findMany: async ({ where, select }: any) => timelineEvents.filter((row) => matches(row, where)).map((row) => pick(row, select)),
+  create: async ({ data }: any) => { writes.push("timelineEvent"); const row = { createdAt: clock, ...data }; timelineEvents.push(row); return row; },
+});
 setModel("appConfig", {
   findUnique: async ({ where }: any) => (appConfig.has(where.key) ? { value: appConfig.get(where.key) } : null),
   upsert: async ({ where, update, create }: any) => {
@@ -294,6 +309,70 @@ try {
   assert.equal(historyResponse.status, 200);
   assert.deepEqual(historyResponse.json.history.map((entry: Row) => entry.createdOpportunities), [0, 4, 0, 6, 0, 0]);
   assert.deepEqual(historyResponse.json.history.map((entry: Row) => entry.trigger), ["scheduler", "scheduler", "scheduler", "scheduler", "scheduler", "manual"]);
+
+  // Reativação recente = marca nas notas OU evento de linha do tempo da automação, últimos 90 dias.
+  // Cenário próprio, só com clientes fictícios de seller-a; "agora" = segunda 07/12/2026 09:00 em Brasília.
+  const t0 = new Date("2026-12-07T12:00:00.000Z");
+  const at = (days: number) => new Date(t0.getTime() + days * DAY_MS);
+  clients.length = 0;
+  crmOrders.length = 0;
+  opportunities = [];
+  agendaEvents = [];
+  timelineEvents = [];
+  const recentClient = (id: string) => client(id, "seller-a", new Date(t0.getTime() - 400 * DAY_MS), { tenantId: "tenant-a" });
+  clients.push(recentClient("r-fechada"), recentClient("r-notas"), recentClient("r-excluida"));
+  const automationOpp = (clientId: string) => opportunities.filter((row) => row.clientId === clientId && row.id.startsWith("opp-nova"));
+  saveConfig({ enabled: true });
+
+  // 1. Criadas hoje e abertas: contam só em "oportunidade aberta" (motivos exclusivos), não em reativação recente.
+  clock = t0;
+  const firstRun = await runCommercialAutomations("scheduler", t0);
+  assert.equal(firstRun.createdOpportunities, 3);
+  assert.equal(timelineEvents.filter((row) => row.description.includes(WORKFLOW_INACTIVE_CLIENT_ORIGIN)).length, 3);
+  const afterFirst = await simulateCommercialAutomations(t0);
+  assert.equal(afterFirst.wouldCreate, 0);
+  assert.equal(afterFirst.skipped.openOpportunity, 3);
+  assert.equal(afterFirst.skipped.recentAutomation, 0);
+
+  // 2. Encerrada (perdido): não recria; passa a contar em reativação recente.
+  automationOpp("r-fechada")[0].stage = "perdido";
+  // 3. Notas apagadas pelo vendedor e encerrada: o evento da linha do tempo segura.
+  Object.assign(automationOpp("r-notas")[0], { notes: "", stage: "perdido" });
+  // Oportunidade excluída por diretor: o evento fica (opportunityId nulo) e segura.
+  const deletedOpp = automationOpp("r-excluida")[0];
+  const deleted = await fetch(`${baseUrl}/opportunities/${deletedOpp.id}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${signAccessToken({ id: "director-a", email: "director-a@test.invalid", role: "diretor" })}` },
+  });
+  assert.equal(deleted.status, 204);
+  assert.equal(automationOpp("r-excluida").length, 0);
+  assert.equal(timelineEvents.find((row) => row.clientId === "r-excluida")!.opportunityId, null);
+  clock = at(1);
+  const nextDay = await runCommercialAutomations("scheduler", at(1));
+  assert.equal(nextDay.createdOpportunities, 0, "encerrada, notas apagadas e excluída não recriam antes de 90 dias");
+  assert.equal(nextDay.skippedByReason.recentAutomation, 3);
+  assert.equal(nextDay.skippedByReason.openOpportunity, 0);
+
+  // 5. Limite conhecido: sem evento de linha do tempo (createTimelineEvent desligado) e com as notas apagadas, recria.
+  clients.push(recentClient("r-sem-evento"));
+  saveConfig({ enabled: true, createTimelineEvent: false });
+  clock = at(2);
+  assert.equal((await runCommercialAutomations("scheduler", at(2))).createdOpportunities, 1);
+  assert.equal(timelineEvents.some((row) => row.clientId === "r-sem-evento"), false);
+  Object.assign(automationOpp("r-sem-evento")[0], { notes: "", stage: "perdido" });
+  saveConfig({ enabled: true });
+  clock = at(3);
+  const withoutEvent = await runCommercialAutomations("scheduler", at(3));
+  assert.equal(withoutEvent.createdOpportunities, 1, "sem marca nas notas nem evento, não há como saber (coluna de origem pendente)");
+  assert.equal(automationOpp("r-sem-evento").length, 2);
+
+  // 4. Depois de 90 dias da primeira, os três voltam; o r-sem-evento tem a segunda aberta.
+  clock = at(91);
+  const after90 = await runCommercialAutomations("scheduler", at(91));
+  assert.equal(after90.createdOpportunities, 3);
+  for (const clientId of ["r-fechada", "r-notas", "r-excluida"]) assert.equal(automationOpp(clientId).at(-1)!.createdAt.getTime(), at(91).getTime(), `${clientId} volta depois de 90 dias`);
+  assert.equal(after90.skippedByReason.openOpportunity, 1);
+  assert.equal(after90.skippedByReason.recentAutomation, 0);
 
   console.log("commercial automations tests passed");
 } finally {
