@@ -1,5 +1,5 @@
 import { classifyPortfolioStatus, isCoolingActive } from "@salesforce-pro/shared";
-import { WORKFLOW_INACTIVE_CLIENT_ORIGIN } from "./commercialAutomationsService.js";
+import { isInactiveRecentAutomationOpportunity } from "./commercialAutomationsService.js";
 
 export type CommercialPriorityLevel = "baixa" | "normal" | "alta" | "urgente";
 export type CommercialPriorityColor = "green" | "blue" | "orange" | "red";
@@ -38,6 +38,7 @@ type CommercialPriorityOpportunityInput = {
   createdAutomatically?: boolean | null;
   source?: string | null;
   notes?: string | null;
+  origin?: string | null;
 };
 
 type CommercialPriorityActivityInput = {
@@ -232,7 +233,7 @@ export class CommercialPriorityService {
 
     if (client && !client.ownerSellerId) addReason(COMMERCIAL_PRIORITY_WEIGHTS.noOwnerSeller, "Cliente sem vendedor responsável");
     if (workflow?.inactiveClient) addReason(COMMERCIAL_PRIORITY_WEIGHTS.workflowInactiveClient, "Workflow de cliente sem compra ativo");
-    if (workflow?.automaticallyCreatedOpportunity || opportunity?.automatic || opportunity?.createdAutomatically || opportunity?.source === "automatic" || opportunity?.notes?.includes(WORKFLOW_INACTIVE_CLIENT_ORIGIN)) addReason(COMMERCIAL_PRIORITY_WEIGHTS.workflowAutomaticOpportunity, "Oportunidade criada automaticamente");
+    if (workflow?.automaticallyCreatedOpportunity || opportunity?.automatic || opportunity?.createdAutomatically || opportunity?.source === "automatic" || isInactiveRecentAutomationOpportunity(opportunity)) addReason(COMMERCIAL_PRIORITY_WEIGHTS.workflowAutomaticOpportunity, "Oportunidade criada automaticamente");
     if (countItems(ai?.suggestions) > 0 || ai?.hasContext) addReason(COMMERCIAL_PRIORITY_WEIGHTS.aiSuggestion, "Sugestão inteligente disponível");
 
     const normalizedScore = Math.min(100, Math.max(0, score));

@@ -217,6 +217,7 @@ export class PlanningIntelligenceService {
           createdAt: true,
           clientId: true,
           notes: true,
+          origin: true,
           client: { select: { id: true, name: true, city: true, state: true, lastPurchaseDate: true, lastPurchaseValue: true, ownerSellerId: true, financialProfile: true, openTitlesTotal: true, overdueTitlesTotal: true } },
           activities: { select: { createdAt: true, date: true, dueDate: true, done: true, notes: true, description: true, result: true }, orderBy: { createdAt: "desc" }, take: 10 },
           timelineEvents: { select: { createdAt: true }, orderBy: { createdAt: "desc" }, take: 5 }

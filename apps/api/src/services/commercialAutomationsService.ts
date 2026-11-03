@@ -11,7 +11,18 @@ import { listPortfolioSegment } from "./clientPortfolioStatus.js";
 
 export const COMMERCIAL_AUTOMATIONS_CONFIG_KEY = "commercialAutomations.config";
 export const COMMERCIAL_AUTOMATIONS_HISTORY_KEY = "commercialAutomations.history";
+// Marca técnica antiga: ainda vai no evento de linha do tempo (DELETE /events/:id recusa apagar esse evento) e é lida
+// nas notas só como reserva das oportunidades criadas antes da coluna origin.
 export const WORKFLOW_INACTIVE_CLIENT_ORIGIN = "workflow_cliente_sem_compra";
+// Opportunity.origin gravada pela automação de inativos recentes; não é editável pela tela nem pela API.
+export const INACTIVE_RECENT_AUTOMATION_ORIGIN = "automation:inactive_recent";
+
+// Oportunidade criada pela automação de inativos recentes: pela coluna origin ou, nas antigas, pela marca nas notas.
+export const isInactiveRecentAutomationOpportunity = (opportunity: { origin?: string | null; notes?: string | null } | null | undefined) =>
+  opportunity?.origin === INACTIVE_RECENT_AUTOMATION_ORIGIN || Boolean(opportunity?.notes?.includes(WORKFLOW_INACTIVE_CLIENT_ORIGIN));
+const inactiveRecentAutomationOpportunityWhere = {
+  OR: [{ origin: INACTIVE_RECENT_AUTOMATION_ORIGIN }, { notes: { contains: WORKFLOW_INACTIVE_CLIENT_ORIGIN } }]
+} satisfies Prisma.OpportunityWhereInput;
 
 // daysWithoutPurchase, allowedOptions e customDaysEnabled ficam só por compatibilidade com a configuração salva:
 // a elegibilidade agora é a regra oficial da carteira (inativo recente).
@@ -158,10 +169,10 @@ type InactiveClientWorkflowPlan = {
 
 // Quem a automação atende hoje: inativo recente pela regra oficial da carteira (sem arquivados), fora de cobrança, com vendedor
 // responsável ativo, sem oportunidade aberta e sem reativação automática nos últimos 90 dias (mesmo encerrada).
-// Reativação recente = oportunidade com a marca nas notas OU evento de linha do tempo da automação para o cliente: as notas
-// são editáveis e a oportunidade pode ser excluída (o evento fica, com opportunityId nulo).
+// Reativação recente = oportunidade da automação (origin; nas antigas, a marca nas notas) OU evento de linha do tempo da
+// automação para o cliente: a oportunidade pode ser excluída (o evento fica, com opportunityId nulo).
 // Os motivos de pulo são exclusivos, na ordem: vendedor inativo, oportunidade aberta, reativação recente, teto diário.
-// O teto diário por vendedor conta o que a automação já criou no dia de Brasília; a fila segue a compra mais
+// O teto diário por vendedor conta o que a automação já criou no dia de Brasília (origin; nas antigas, a marca nas notas); a fila segue a compra mais
 // recente primeiro e o excedente fica para os próximos dias.
 const planInactiveClientWorkflow = async (dailyLimitPerSeller: number, now: Date): Promise<InactiveClientWorkflowPlan> => {
   const dayKey = brazilDayKeyOf(now);
@@ -178,14 +189,14 @@ const planInactiveClientWorkflow = async (dailyLimitPerSeller: number, now: Date
     prisma.client.findMany({ where: { id: { in: ids } }, select: { id: true, name: true, ownerSellerId: true, ownerSeller: { select: { isActive: true } } } }),
     prisma.opportunity.findMany({ where: { clientId: { in: ids }, stage: { in: [...OPEN_OPPORTUNITY_STAGES] } }, select: { clientId: true } }),
     prisma.opportunity.findMany({
-      where: { clientId: { in: ids }, notes: { contains: WORKFLOW_INACTIVE_CLIENT_ORIGIN }, createdAt: { gte: recentSince } },
+      where: { clientId: { in: ids }, ...inactiveRecentAutomationOpportunityWhere, createdAt: { gte: recentSince } },
       select: { clientId: true }
     }),
     prisma.timelineEvent.findMany({
       where: { clientId: { in: ids }, type: EventType.status, description: { contains: WORKFLOW_INACTIVE_CLIENT_ORIGIN }, createdAt: { gte: recentSince } },
       select: { clientId: true }
     }),
-    prisma.opportunity.findMany({ where: { notes: { contains: WORKFLOW_INACTIVE_CLIENT_ORIGIN }, createdAt: { gte: brazilDayStart(dayKey) } }, select: { ownerSellerId: true } })
+    prisma.opportunity.findMany({ where: { ...inactiveRecentAutomationOpportunityWhere, createdAt: { gte: brazilDayStart(dayKey) } }, select: { ownerSellerId: true } })
   ]);
   const clientById = new Map(clients.map((client) => [client.id, client]));
   const withOpenOpportunity = new Set(openOpportunities.map((row) => row.clientId));
@@ -300,14 +311,15 @@ export const runCommercialAutomations = async (trigger: "manual" | "scheduler" =
             clientId: client.id,
             ownerSellerId: client.ownerSellerId,
             probability: 30,
-            notes: `${WORKFLOW_INACTIVE_CLIENT_ORIGIN}\nInativo recente pela regra oficial da carteira. Última compra: ${brazilDayKeyOf(client.lastPurchase)}.`
+            origin: INACTIVE_RECENT_AUTOMATION_ORIGIN,
+            notes: `Inativo recente pela regra oficial da carteira. Última compra: ${brazilDayKeyOf(client.lastPurchase)}.`
           }
         });
         result.createdOpportunities += 1;
 
         // createActivity é a chave salva na configuração; agora cria o compromisso de Ligação (planejamento), não atividade.
         if (workflow.createActivity) {
-          await tx.agendaEvent.create({ data: { type: AgendaEventType.ligacao, title: `Ligação de reativação – ${client.name}`, notes: `Contato automático: ${WORKFLOW_INACTIVE_CLIENT_ORIGIN}. Contato de reativação com cliente inativo recente.`, startDateTime: callStart, endDateTime: callEnd, clientId: client.id, opportunityId: opportunity.id, sellerId: client.ownerSellerId } });
+          await tx.agendaEvent.create({ data: { type: AgendaEventType.ligacao, title: `Ligação de reativação – ${client.name}`, notes: "Contato automático: reativação de inativo recente.", startDateTime: callStart, endDateTime: callEnd, clientId: client.id, opportunityId: opportunity.id, sellerId: client.ownerSellerId } });
           result.createdAgendaEvents += 1;
         }
 
