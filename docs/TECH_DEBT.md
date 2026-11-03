@@ -1221,7 +1221,8 @@ em `ephemeral-push`): vincula os usuários do seed e preenche o tenant dos clien
 Pendente:
 
 - (a) Trava dentro do próprio `seed.js`, antes dos imports e do primeiro `deleteMany`, no próximo PR que já tiver
-  migration (ex.: o índice aditivo em `AgendaStop.clientId`, ver “TD-PLANNING-VISIT-SUGGESTIONS”): qualquer mudança
+  migration (ex.: o índice aditivo em `AgendaStop.clientId`, ver “TD-PLANNING-VISIT-SUGGESTIONS”, e a coluna de origem
+  da `Opportunity`, ver “TD-COMMERCIAL-AUTOMATIONS-RECENT-REACTIVATION”): qualquer mudança
   em `apps/api/prisma/` (exceto `seedPreview.ts` e o validador do preview) exige evidência de schema nova
   (`schema_prisma_trees_equivalent`).
 - (b) Até lá, `tsx prisma/seed.js` chamado direto (sem `npm run prisma:seed`) continua sem trava.
@@ -1398,3 +1399,34 @@ Pendente:
 - (b) Os dois entrypoints ainda divergem nos itens acima; decidir se o `bootstrap.ts` deve fazer (a), (b) e (d) em PR
   próprio, ou se o `server.ts` deve sair do caminho de produção de vez.
 - (c) Sem horário fixo: o tick é a cada 60 minutos contados do boot, e cada deploy ou reinício recomeça a contagem.
+
+### TD-COMMERCIAL-AUTOMATIONS-RECENT-REACTIVATION — automação recriava reativação com notas apagadas ou oportunidade excluída
+
+**Causa.** A automação de inativos recentes reconhecia a própria oportunidade só pela marca `workflow_cliente_sem_compra`
+no texto das notas (`planInactiveClientWorkflow`, `apps/api/src/services/commercialAutomationsService.ts`). As notas
+aparecem e são editáveis no formulário da oportunidade (`PUT /opportunities/:id` grava `notes` como vier), e
+gerente/diretor pode excluir a oportunidade (`DELETE /opportunities/:id`). Nos dois casos a marca sumia e, encerrada a
+oportunidade, o tick seguinte criava outra "Reativação" para o mesmo cliente antes de 90 dias.
+
+**Correção (resolvido no código em 03/11/2026, aguardando merge), sem migration.** "Reativação recente" = oportunidade
+com a marca nas notas OU `TimelineEvent` `status` da automação (descrição com `workflow_cliente_sem_compra`) do mesmo
+`clientId`, nos dois casos criados nos últimos 90 dias. Pelo código, excluir a oportunidade não apaga o evento: a relação
+`TimelineEvent.opportunity` é opcional e sem `onDelete` no `schema.prisma` (padrão do Prisma: `SET NULL`), a tabela vem
+de antes das migrations (nenhuma migration cria a FK; o comportamento real do banco não foi conferido) e a rota de
+exclusão só chama `opportunity.delete`. A simulação passou a dizer que os motivos são exclusivos (vendedor inativo,
+oportunidade aberta, reativação recente, teto diário): as criadas hoje e abertas contam em "Já com oportunidade aberta
+(inclui as criadas pela automação)". Testes com dados fictícios em `commercialAutomations.http.test.ts`.
+
+Pendente:
+
+- (a) Ainda dá para recriar antes de 90 dias quando não há evento de linha do tempo (`createTimelineEvent` desligado) e
+  as notas foram apagadas, ou quando o evento é apagado: `DELETE /events/:id` apaga `TimelineEvent` pelo id quando não é
+  compromisso, e o vendedor pode apagar os eventos em que é o `ownerSellerId` (o da automação é o vendedor do cliente).
+  A tela não chama a rota para eventos da linha do tempo, só a API aceita.
+- (b) O teto diário por vendedor ainda conta só as oportunidades com a marca nas notas: nota apagada no mesmo dia libera
+  uma vaga.
+- (c) Solução definitiva, no próximo PR que já tiver migration (junto com o índice em `AgendaStop.clientId` de
+  "TD-PLANNING-VISIT-SUGGESTIONS" e a trava no `seed.js` de "TD-SEED-GUARD"): coluna de origem na `Opportunity` (ex.:
+  `origin = "automation:inactive_recent"`), gravada pela automação e fora do formulário de edição; reativação recente e
+  teto diário passam a ler a coluna. Com a coluna, tirar o texto técnico `workflow_cliente_sem_compra` das notas (e do
+  evento e do compromisso de Ligação), mantendo a leitura antiga só para as oportunidades já criadas.
