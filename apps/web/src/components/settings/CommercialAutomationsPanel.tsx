@@ -135,11 +135,15 @@ export default function CommercialAutomationsPanel({ canEdit }: Props) {
                   <li>Inativos recentes na carteira: {simulation.inactiveRecentClients}</li>
                   <li>Elegíveis: {simulation.eligibleClients}</li>
                   <li>Ficam para os próximos dias (teto de {simulation.dailyLimitPerSeller} por vendedor): {simulation.skipped.dailyLimit}</li>
-                  <li>Já com oportunidade aberta: {simulation.skipped.openOpportunity}</li>
-                  <li>Com reativação automática nos últimos 90 dias: {simulation.skipped.recentAutomation}</li>
+                  <li>Já com oportunidade aberta (inclui as criadas pela automação): {simulation.skipped.openOpportunity}</li>
+                  <li>Reativação automática nos últimos 90 dias, já encerrada ou excluída: {simulation.skipped.recentAutomation}</li>
                   <li>Vendedor responsável inativo: {simulation.skipped.inactiveSeller}</li>
                   <li>Em cobrança (fora): {simulation.inCollection ?? 0}</li>
                 </ul>
+                <p className="text-xs text-slate-500">
+                  Cada cliente conta em um motivo só, o primeiro que se aplica: vendedor inativo, oportunidade aberta,
+                  reativação recente e teto diário.
+                </p>
                 {simulation.configIssues.length > 0 && (
                   <div className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
                     <p className="font-medium">A configuração salva precisa de ajuste; a automação não roda assim:</p>
