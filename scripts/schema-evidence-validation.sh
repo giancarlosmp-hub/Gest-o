@@ -8,6 +8,7 @@ SCHEMA_MIGRATION_ORDERS="apps/api/prisma/migrations/20260904120000_orders_operat
 SCHEMA_MIGRATION_PRODUCT_PRICE_AUTHORITY="apps/api/prisma/migrations/20260911190000_product_price_authority/migration.sql"
 SCHEMA_MIGRATION_PRODUCT_PRICE_SOURCE_OBSERVATION="apps/api/prisma/migrations/20260927160000_product_price_source_observation/migration.sql"
 SCHEMA_MIGRATION_AGENDA_ACTIVITY_SPLIT="apps/api/prisma/migrations/20261023120000_agenda_activity_planning_split/migration.sql"
+SCHEMA_MIGRATION_OPPORTUNITY_ORIGIN="apps/api/prisma/migrations/20261103120000_opportunity_origin_agenda_stop_client_index/migration.sql"
 TENANCY_EXPAND_ROOTS_ID="20260808120000_tenancy_expand_roots"
 TENANCY_EXPAND_ROOTS_MIGRATION="apps/api/prisma/migrations/$TENANCY_EXPAND_ROOTS_ID/migration.sql"
 SCHEMA_EQUIVALENCE_PREVIEW_SEED="apps/api/prisma/seedPreview.ts"
@@ -64,7 +65,7 @@ validate_schema_evidence(){
   [[ -n "$applied_at" && "$evidence_commit" =~ ^[0-9a-f]{40}$ ]] || return 1
   [[ "$evidence_commit" == "$directory_commit" ]] || return 1
   case "$evidence_migration" in
-    "$SCHEMA_MIGRATION_LEGACY"|"$SCHEMA_MIGRATION_ORDERS"|"$SCHEMA_MIGRATION_PRODUCT_PRICE_AUTHORITY"|"$SCHEMA_MIGRATION_PRODUCT_PRICE_SOURCE_OBSERVATION"|"$SCHEMA_MIGRATION_AGENDA_ACTIVITY_SPLIT")
+    "$SCHEMA_MIGRATION_LEGACY"|"$SCHEMA_MIGRATION_ORDERS"|"$SCHEMA_MIGRATION_PRODUCT_PRICE_AUTHORITY"|"$SCHEMA_MIGRATION_PRODUCT_PRICE_SOURCE_OBSERVATION"|"$SCHEMA_MIGRATION_AGENDA_ACTIVITY_SPLIT"|"$SCHEMA_MIGRATION_OPPORTUNITY_ORIGIN")
       schema_protected_file "$evidence_dir/post-apply-diff.sql" || return 1
       [[ ! -s "$evidence_dir/post-apply-diff.sql" ]] || return 1
       ;;

@@ -17,6 +17,7 @@ on:
           - 20260911190000_product_price_authority
           - 20260927160000_product_price_source_observation
           - 20261023120000_agenda_activity_planning_split
+          - 20261103120000_opportunity_origin_agenda_stop_client_index
       confirm:
         description: "Para apply, digite a confirmação exigida pelo runner selecionado"
         required: false
@@ -54,6 +55,8 @@ jobs:
               20260927160000_product_price_source_observation:apply:PRODUCTION_SCHEMA_APPLY) ;;
               20261023120000_agenda_activity_planning_split:preview:*) ;;
               20261023120000_agenda_activity_planning_split:apply:PRODUCTION_SCHEMA_APPLY) ;;
+              20261103120000_opportunity_origin_agenda_stop_client_index:preview:*) ;;
+              20261103120000_opportunity_origin_agenda_stop_client_index:apply:PRODUCTION_SCHEMA_APPLY) ;;
               *) echo 'PRODUCTION_SCHEMA_SELECTION=REJECTED'; exit 1 ;;
             esac
             cd /apps/gest-o
@@ -75,7 +78,7 @@ jobs:
               PRODUCTION_ENV_FILE="$resolved_env_file" \
                 PRODUCTION_DB_CONTAINER_EXPECTED=gest-o-db-clean-v2-20260717 \
                 bash scripts/production-orders-tenant-preview.sh
-            elif [ "$SCHEMA_MIGRATION" = 20260904120000_orders_operational_view ] || [ "$SCHEMA_MIGRATION" = 20260911190000_product_price_authority ] || [ "$SCHEMA_MIGRATION" = 20260927160000_product_price_source_observation ] || [ "$SCHEMA_MIGRATION" = 20261023120000_agenda_activity_planning_split ]; then
+            elif [ "$SCHEMA_MIGRATION" = 20260904120000_orders_operational_view ] || [ "$SCHEMA_MIGRATION" = 20260911190000_product_price_authority ] || [ "$SCHEMA_MIGRATION" = 20260927160000_product_price_source_observation ] || [ "$SCHEMA_MIGRATION" = 20261023120000_agenda_activity_planning_split ] || [ "$SCHEMA_MIGRATION" = 20261103120000_opportunity_origin_agenda_stop_client_index ]; then
               MODE="$SCHEMA_MODE" CONFIRM="$SCHEMA_CONFIRM" EXPECTED_SHA="$EXPECTED_SHA" \
                 PRODUCTION_ENV_FILE="$resolved_env_file" \
                 MIGRATION_ID_REQUESTED="$SCHEMA_MIGRATION" DATABASE_SCHEMA_MODE=external \
