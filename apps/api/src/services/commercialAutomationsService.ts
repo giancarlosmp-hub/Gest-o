@@ -157,7 +157,10 @@ type InactiveClientWorkflowPlan = {
 };
 
 // Quem a automação atende hoje: inativo recente pela regra oficial da carteira (sem arquivados), fora de cobrança, com vendedor
-// responsável ativo, sem oportunidade aberta e sem oportunidade da automação nos últimos 90 dias (mesmo encerrada).
+// responsável ativo, sem oportunidade aberta e sem reativação automática nos últimos 90 dias (mesmo encerrada).
+// Reativação recente = oportunidade com a marca nas notas OU evento de linha do tempo da automação para o cliente: as notas
+// são editáveis e a oportunidade pode ser excluída (o evento fica, com opportunityId nulo).
+// Os motivos de pulo são exclusivos, na ordem: vendedor inativo, oportunidade aberta, reativação recente, teto diário.
 // O teto diário por vendedor conta o que a automação já criou no dia de Brasília; a fila segue a compra mais
 // recente primeiro e o excedente fica para os próximos dias.
 const planInactiveClientWorkflow = async (dailyLimitPerSeller: number, now: Date): Promise<InactiveClientWorkflowPlan> => {
@@ -170,18 +173,23 @@ const planInactiveClientWorkflow = async (dailyLimitPerSeller: number, now: Date
   if (!segment.length) return plan;
 
   const ids = segment.map((entry) => entry.id);
-  const [clients, openOpportunities, recentAutomationOpportunities, createdToday] = await Promise.all([
+  const recentSince = new Date(now.getTime() - RECENT_AUTOMATION_DAYS * DAY_MS);
+  const [clients, openOpportunities, recentAutomationOpportunities, recentAutomationEvents, createdToday] = await Promise.all([
     prisma.client.findMany({ where: { id: { in: ids } }, select: { id: true, name: true, ownerSellerId: true, ownerSeller: { select: { isActive: true } } } }),
     prisma.opportunity.findMany({ where: { clientId: { in: ids }, stage: { in: [...OPEN_OPPORTUNITY_STAGES] } }, select: { clientId: true } }),
     prisma.opportunity.findMany({
-      where: { clientId: { in: ids }, notes: { contains: WORKFLOW_INACTIVE_CLIENT_ORIGIN }, createdAt: { gte: new Date(now.getTime() - RECENT_AUTOMATION_DAYS * DAY_MS) } },
+      where: { clientId: { in: ids }, notes: { contains: WORKFLOW_INACTIVE_CLIENT_ORIGIN }, createdAt: { gte: recentSince } },
+      select: { clientId: true }
+    }),
+    prisma.timelineEvent.findMany({
+      where: { clientId: { in: ids }, type: EventType.status, description: { contains: WORKFLOW_INACTIVE_CLIENT_ORIGIN }, createdAt: { gte: recentSince } },
       select: { clientId: true }
     }),
     prisma.opportunity.findMany({ where: { notes: { contains: WORKFLOW_INACTIVE_CLIENT_ORIGIN }, createdAt: { gte: brazilDayStart(dayKey) } }, select: { ownerSellerId: true } })
   ]);
   const clientById = new Map(clients.map((client) => [client.id, client]));
   const withOpenOpportunity = new Set(openOpportunities.map((row) => row.clientId));
-  const withRecentAutomation = new Set(recentAutomationOpportunities.map((row) => row.clientId));
+  const withRecentAutomation = new Set<string | null>([...recentAutomationOpportunities, ...recentAutomationEvents].map((row) => row.clientId));
   const usedBySeller = new Map<string, number>();
   for (const row of createdToday) usedBySeller.set(row.ownerSellerId, (usedBySeller.get(row.ownerSellerId) ?? 0) + 1);
 
