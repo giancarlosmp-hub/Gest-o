@@ -7,6 +7,7 @@ import {
   COMMERCIAL_AUTOMATIONS_CONFIG_KEY,
   COMMERCIAL_AUTOMATIONS_HISTORY_KEY,
   DEFAULT_COMMERCIAL_AUTOMATIONS_CONFIG,
+  INACTIVE_RECENT_AUTOMATION_ORIGIN,
   WORKFLOW_INACTIVE_CLIENT_ORIGIN,
   runCommercialAutomations,
   simulateCommercialAutomations
@@ -52,11 +53,13 @@ const clients: Row[] = [
   client("b-pedido", "seller-b", daysAgo(500)),
 ];
 const crmOrders: Row[] = [{ clientId: "b-pedido", status: "sent", sentAt: daysAgo(20), createdAt: daysAgo(20), orderStatus: null, operationalOrderStatus: "UNKNOWN" }];
+// Oportunidades antigas (antes da coluna origin): só a marca nas notas, sem origin. Seguem valendo como reserva.
 const automationNotes = `${WORKFLOW_INACTIVE_CLIENT_ORIGIN}\nFicticio.`;
 let opportunities: Row[] = [];
 let activities: Row[] = [];
 let agendaEvents: Row[] = [];
 let timelineEvents: Row[] = [];
+const opportunityUpdates: Row[] = [];
 const resetOpportunities = () => {
   opportunities = [
     { id: "opp-aberta", clientId: "b-aberta", ownerSellerId: "seller-b", stage: "negociacao", notes: null, createdAt: daysAgo(10) },
@@ -89,6 +92,7 @@ const matchValue = (value: any, condition: any): boolean => {
 const clientOf = (row: Row) => clients.find((candidate) => candidate.id === row.clientId) ?? null;
 const matches = (row: Row, where: Row = {}): boolean =>
   Object.entries(where).every(([key, condition]) => {
+    if (key === "OR") return (condition as Row[]).some((branch) => matches(row, branch));
     if (key === "client") { const related = clientOf(row); return related ? matches(related, condition) : false; }
     if (key === "opportunity") return matches(row, condition);
     return matchValue(row[key], condition);
@@ -130,6 +134,13 @@ setModel("opportunity", {
     for (const event of timelineEvents) if (event.opportunityId === removed.id) event.opportunityId = null;
     return removed;
   },
+  update: async ({ where, data }: any) => {
+    writes.push("opportunity:update");
+    opportunityUpdates.push(data);
+    const row = opportunities.find((candidate) => candidate.id === where.id)!;
+    Object.assign(row, data);
+    return { ...row };
+  },
   create: async ({ data }: any) => {
     writes.push("opportunity");
     const row = { id: `opp-nova-${opportunities.length}`, createdAt: clock, ...data };
@@ -138,10 +149,15 @@ setModel("opportunity", {
   },
 });
 setModel("activity", { create: async ({ data }: any) => { writes.push("activity"); activities.push(data); return data; } });
-setModel("agendaEvent", { create: async ({ data }: any) => { writes.push("agendaEvent"); agendaEvents.push(data); return data; } });
+setModel("agendaEvent", {
+  create: async ({ data }: any) => { writes.push("agendaEvent"); agendaEvents.push(data); return data; },
+  findUnique: async () => null,
+});
 setModel("timelineEvent", {
   findMany: async ({ where, select }: any) => timelineEvents.filter((row) => matches(row, where)).map((row) => pick(row, select)),
-  create: async ({ data }: any) => { writes.push("timelineEvent"); const row = { createdAt: clock, ...data }; timelineEvents.push(row); return row; },
+  create: async ({ data }: any) => { writes.push("timelineEvent"); const row = { id: `tl-${timelineEvents.length}`, createdAt: clock, ...data }; timelineEvents.push(row); return row; },
+  findUnique: async ({ where, select }: any) => { const row = timelineEvents.find((candidate) => candidate.id === where.id); return row ? pick(row, select) : null; },
+  delete: async ({ where }: any) => { writes.push("timelineEvent:delete"); const index = timelineEvents.findIndex((row) => row.id === where.id); return timelineEvents.splice(index, 1)[0]; },
 });
 setModel("appConfig", {
   findUnique: async ({ where }: any) => (appConfig.has(where.key) ? { value: appConfig.get(where.key) } : null),
@@ -267,7 +283,11 @@ try {
   assert.equal(first.value, 0, "valor 0 não infla o pipeline");
   assert.equal(first.stage, "prospeccao");
   assert.equal(first.ownerSellerId, "seller-a");
-  assert(first.notes.startsWith(`${WORKFLOW_INACTIVE_CLIENT_ORIGIN}\n`), "origem marcada como automação");
+  assert.equal(first.origin, INACTIVE_RECENT_AUTOMATION_ORIGIN, "origem gravada na coluna");
+  assert.equal(first.notes, "Inativo recente pela regra oficial da carteira. Última compra: 2025-09-14.", "notas só com o texto legível");
+  for (const row of created()) assert(!row.notes.includes(WORKFLOW_INACTIVE_CLIENT_ORIGIN), "notas novas sem a marca técnica");
+  assert.equal(firstCall.notes, "Contato automático: reativação de inativo recente.");
+  for (const row of agendaEvents) assert(!row.notes.includes(WORKFLOW_INACTIVE_CLIENT_ORIGIN), "compromisso sem a marca técnica");
   assert.equal(first.followUpDate.toISOString(), "2026-10-21T00:00:00.000Z", "segunda + 2 dias úteis = quarta");
   assert.equal(firstCall.type, "ligacao", "compromisso de Ligação na Agenda");
   assert.equal(firstCall.sellerId, "seller-a");
@@ -334,9 +354,34 @@ try {
   assert.equal(afterFirst.skipped.openOpportunity, 3);
   assert.equal(afterFirst.skipped.recentAutomation, 0);
 
+  // origin não é editável: o PUT ignora o campo (o schema da oportunidade não o tem), para qualquer perfil.
+  const editedOpp = automationOpp("r-fechada")[0];
+  const edited = await request("PUT", `/opportunities/${editedOpp.id}`, "director-a", { title: "Reativação ficticia editada", origin: "manual" });
+  assert.equal(edited.status, 200, JSON.stringify(edited.json));
+  assert.equal(opportunityUpdates.length, 1);
+  assert.equal("origin" in opportunityUpdates[0], false, "origin não chega ao update");
+  assert.equal(editedOpp.origin, INACTIVE_RECENT_AUTOMATION_ORIGIN);
+  assert.equal(editedOpp.title, "Reativação ficticia editada");
+
+  // O evento de linha do tempo da automação não é excluído por nenhum perfil; os demais eventos seguem como antes.
+  const automationEvent = timelineEvents.find((row) => row.clientId === "r-fechada")!;
+  for (const userId of ["seller-a", "manager-a", "director-a"]) {
+    const refused = await request("DELETE", `/events/${automationEvent.id}`, userId);
+    assert.equal(refused.status, 409, `${userId} não exclui o evento da automação`);
+    assert.equal(refused.json.message, "Evento registrado pela automação comercial não pode ser excluído.");
+  }
+  assert(timelineEvents.includes(automationEvent), "evento da automação continua");
+  timelineEvents.push({ id: "tl-manual", type: "status", description: "Observação ficticia", clientId: "r-fechada", ownerSellerId: "seller-a", createdAt: t0 });
+  const manualDeleted = await fetch(`${baseUrl}/events/tl-manual`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${signAccessToken({ id: "seller-a", email: "seller-a@test.invalid", role: "vendedor" })}` },
+  });
+  assert.equal(manualDeleted.status, 204, "evento comum do próprio vendedor continua excluível");
+  assert.equal(timelineEvents.some((row) => row.id === "tl-manual"), false);
+
   // 2. Encerrada (perdido): não recria; passa a contar em reativação recente.
   automationOpp("r-fechada")[0].stage = "perdido";
-  // 3. Notas apagadas pelo vendedor e encerrada: o evento da linha do tempo segura.
+  // 3. Notas apagadas pelo vendedor e encerrada: a coluna origin segura.
   Object.assign(automationOpp("r-notas")[0], { notes: "", stage: "perdido" });
   // Oportunidade excluída por diretor: o evento fica (opportunityId nulo) e segura.
   const deletedOpp = automationOpp("r-excluida")[0];
@@ -353,7 +398,7 @@ try {
   assert.equal(nextDay.skippedByReason.recentAutomation, 3);
   assert.equal(nextDay.skippedByReason.openOpportunity, 0);
 
-  // 5. Limite conhecido: sem evento de linha do tempo (createTimelineEvent desligado) e com as notas apagadas, recria.
+  // 5. Sem evento de linha do tempo (createTimelineEvent desligado) e com as notas apagadas: a coluna origin segura.
   clients.push(recentClient("r-sem-evento"));
   saveConfig({ enabled: true, createTimelineEvent: false });
   clock = at(2);
@@ -363,16 +408,38 @@ try {
   saveConfig({ enabled: true });
   clock = at(3);
   const withoutEvent = await runCommercialAutomations("scheduler", at(3));
-  assert.equal(withoutEvent.createdOpportunities, 1, "sem marca nas notas nem evento, não há como saber (coluna de origem pendente)");
-  assert.equal(automationOpp("r-sem-evento").length, 2);
+  assert.equal(withoutEvent.createdOpportunities, 0, "origin segura sem notas nem evento");
+  assert.equal(withoutEvent.skippedByReason.recentAutomation, 4);
+  assert.equal(automationOpp("r-sem-evento").length, 1);
 
-  // 4. Depois de 90 dias da primeira, os três voltam; o r-sem-evento tem a segunda aberta.
+  // 6. Reserva das antigas (sem origin): a marca nas notas ou o evento da automação seguram; sem nenhum dos dois, não há
+  // como saber e recria (limite conhecido, só para as criadas antes da coluna).
+  clients.push(recentClient("r-legado-notas"), recentClient("r-legado-evento"), recentClient("r-legado-nada"));
+  const legacyOpp = (clientId: string, notes: string) => ({ id: `opp-legado-${clientId}`, clientId, ownerSellerId: "seller-a", stage: "perdido", notes, createdAt: at(-10) });
+  opportunities.push(legacyOpp("r-legado-notas", automationNotes), legacyOpp("r-legado-evento", ""), legacyOpp("r-legado-nada", ""));
+  timelineEvents.push({ id: "tl-legado", type: "status", description: `Automação comercial criou oportunidade de reativação (${WORKFLOW_INACTIVE_CLIENT_ORIGIN}).`, clientId: "r-legado-evento", opportunityId: "opp-legado-r-legado-evento", ownerSellerId: "seller-a", createdAt: at(-10) });
+  // Teto diário pela coluna origin: uma criada hoje pela automação, com as notas apagadas, ocupa a vaga.
+  opportunities.push({ id: "opp-hoje-origin", clientId: "fora-da-lista", ownerSellerId: "seller-a", stage: "ganho", origin: INACTIVE_RECENT_AUTOMATION_ORIGIN, notes: "", createdAt: at(4) });
+  saveConfig({ enabled: true, dailyLimitPerSeller: 1 });
+  clock = at(4);
+  const capped = await runCommercialAutomations("scheduler", at(4));
+  assert.equal(capped.createdOpportunities, 0, "teto de 1 já ocupado pela criada hoje (origin)");
+  assert.equal(capped.skippedByReason.dailyLimit, 1);
+  assert.equal(capped.skippedByReason.recentAutomation, 4 + 2, "antigas seguras pelas notas e pelo evento");
+  saveConfig({ enabled: true });
+  const legacyRun = await runCommercialAutomations("scheduler", at(4));
+  assert.equal(legacyRun.createdOpportunities, 1);
+  assert.deepEqual(created().slice(-1).map((row) => row.clientId), ["r-legado-nada"]);
+
+  // 4. Depois de 90 dias, voltam as três da primeira execução e as duas antigas; r-sem-evento (89 dias) ainda não, e o
+  // r-legado-nada tem a nova aberta.
   clock = at(91);
   const after90 = await runCommercialAutomations("scheduler", at(91));
-  assert.equal(after90.createdOpportunities, 3);
+  assert.equal(after90.createdOpportunities, 5);
   for (const clientId of ["r-fechada", "r-notas", "r-excluida"]) assert.equal(automationOpp(clientId).at(-1)!.createdAt.getTime(), at(91).getTime(), `${clientId} volta depois de 90 dias`);
+  assert.deepEqual(created().slice(-2).map((row) => row.clientId).sort(), ["r-legado-evento", "r-legado-notas"]);
   assert.equal(after90.skippedByReason.openOpportunity, 1);
-  assert.equal(after90.skippedByReason.recentAutomation, 0);
+  assert.equal(after90.skippedByReason.recentAutomation, 1);
 
   console.log("commercial automations tests passed");
 } finally {
