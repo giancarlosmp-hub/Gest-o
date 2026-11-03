@@ -1135,9 +1135,10 @@ Testes (dados fictícios): `planningVisitSuggestions.test.ts`, `clientEstimatedV
 
 Pendente (fora deste PR):
 
-- `AgendaStop` não tem índice em `clientId`: a busca da última visita lê a tabela de paradas a cada geração do plano
-  (aceito com o cache de 30 min). Numa migration futura, índice aditivo
-  `CREATE INDEX "AgendaStop_clientId_checkOutAt_idx" ON "AgendaStop"("clientId", "checkOutAt")`.
+- ~~`AgendaStop` não tem índice em `clientId`~~ **Resolvido no código em 03/11/2026, aguardando merge e apply:**
+  migration `20261103120000_opportunity_origin_agenda_stop_client_index` cria
+  `AgendaStop_clientId_checkOutAt_idx` em `AgendaStop("clientId", "checkOutAt")` (`@@index([clientId, checkOutAt])`),
+  que serve o `groupBy` da última visita. Ordem de deploy em `DEPLOY_GUIDE.md`.
 - As chaves das faixas são únicas no `AppConfig` (empresa toda, não por tenant), como o raio.
 
 Territórios Comerciais (no mesmo PR): a tela abria no primeiro vendedor por nome, mesmo inativo; o aviso "transferência
@@ -1220,12 +1221,13 @@ em `ephemeral-push`): vincula os usuários do seed e preenche o tenant dos clien
 
 Pendente:
 
-- (a) Trava dentro do próprio `seed.js`, antes dos imports e do primeiro `deleteMany`, no próximo PR que já tiver
-  migration (ex.: o índice aditivo em `AgendaStop.clientId`, ver “TD-PLANNING-VISIT-SUGGESTIONS”, e a coluna de origem
-  da `Opportunity`, ver “TD-COMMERCIAL-AUTOMATIONS-RECENT-REACTIVATION”): qualquer mudança
-  em `apps/api/prisma/` (exceto `seedPreview.ts` e o validador do preview) exige evidência de schema nova
-  (`schema_prisma_trees_equivalent`).
-- (b) Até lá, `tsx prisma/seed.js` chamado direto (sem `npm run prisma:seed`) continua sem trava.
+- ~~(a) Trava dentro do próprio `seed.js`~~ **Resolvido no código em 03/11/2026, aguardando merge** (no PR da
+  migration `20261103120000_opportunity_origin_agenda_stop_client_index`, que já exige evidência de schema nova): o
+  `seed.js` começa recusando com erro quando `DATABASE_SCHEMA_MODE` não é `ephemeral-push`, antes de qualquer import,
+  do `PrismaClient` e do primeiro `deleteMany`; os imports viraram `await import(...)` depois da trava (imports
+  estáticos rodariam antes dela). A trava do `package.json` continua. O `production-deploy-safety` (CI) confere lendo o
+  arquivo, sem executar o seed.
+- ~~(b) `tsx prisma/seed.js` chamado direto continua sem trava~~ Resolvido junto com o (a).
 - (c) `apps/api/prisma/seedTestFixture.ts` cria cliente sem tenant; rotas que exigem tenant recusam esses dados.
 
 ### TD-OPPORTUNITY-VOICE-DRAFT — oportunidade por voz no Assistente Comercial
@@ -1408,7 +1410,7 @@ aparecem e são editáveis no formulário da oportunidade (`PUT /opportunities/:
 gerente/diretor pode excluir a oportunidade (`DELETE /opportunities/:id`). Nos dois casos a marca sumia e, encerrada a
 oportunidade, o tick seguinte criava outra "Reativação" para o mesmo cliente antes de 90 dias.
 
-**Correção (resolvido no código em 03/11/2026, aguardando merge), sem migration.** "Reativação recente" = oportunidade
+**Correção (mergeada no #1012 em 03/11/2026), sem migration.** "Reativação recente" = oportunidade
 com a marca nas notas OU `TimelineEvent` `status` da automação (descrição com `workflow_cliente_sem_compra`) do mesmo
 `clientId`, nos dois casos criados nos últimos 90 dias. Pelo código, excluir a oportunidade não apaga o evento: a relação
 `TimelineEvent.opportunity` é opcional e sem `onDelete` no `schema.prisma` (padrão do Prisma: `SET NULL`), a tabela vem
@@ -1425,8 +1427,33 @@ Pendente:
   A tela não chama a rota para eventos da linha do tempo, só a API aceita.
 - (b) O teto diário por vendedor ainda conta só as oportunidades com a marca nas notas: nota apagada no mesmo dia libera
   uma vaga.
-- (c) Solução definitiva, no próximo PR que já tiver migration (junto com o índice em `AgendaStop.clientId` de
-  "TD-PLANNING-VISIT-SUGGESTIONS" e a trava no `seed.js` de "TD-SEED-GUARD"): coluna de origem na `Opportunity` (ex.:
-  `origin = "automation:inactive_recent"`), gravada pela automação e fora do formulário de edição; reativação recente e
-  teto diário passam a ler a coluna. Com a coluna, tirar o texto técnico `workflow_cliente_sem_compra` das notas (e do
-  evento e do compromisso de Ligação), mantendo a leitura antiga só para as oportunidades já criadas.
+- ~~(c) Coluna de origem na `Opportunity`~~ **Resolvido no código em 03/11/2026, aguardando merge e apply**
+  (migration `20261103120000_opportunity_origin_agenda_stop_client_index`, junto com o índice de
+  "TD-PLANNING-VISIT-SUGGESTIONS" e a trava de "TD-SEED-GUARD"):
+  - A automação grava `Opportunity.origin = "automation:inactive_recent"` e notas só com o texto legível ("Inativo
+    recente pela regra oficial da carteira. Última compra: ..."). O compromisso de Ligação novo traz "Contato
+    automático: reativação de inativo recente." (nenhum código lia a marca nas notas do compromisso).
+  - Reativação recente (90 dias) e teto diário leem `origin` OU a marca nas notas (reserva das antigas); o evento de
+    linha do tempo continua como reserva da reativação recente e mantém a marca na descrição.
+  - `origin` não é editável: o `opportunitySchema` não tem o campo e o Zod descarta chaves desconhecidas, então
+    `POST`/`PUT /opportunities` ignoram `origin`; a tela não mostra o campo.
+  - Prioridades do dia, Central do Dia e score ("Oportunidade criada automaticamente") reconhecem a oportunidade por
+    `origin` ou pela marca nas notas (`isInactiveRecentAutomationOpportunity`); os selects das prioridades e do
+    planejamento leem `origin`. Sem isso, as novas, sem a marca, perderiam esse motivo.
+  - (a) resolvido em parte: `DELETE /events/:id` recusa com 409 ("Evento registrado pela automação comercial não pode
+    ser excluído.") o `TimelineEvent` `status` com a marca, para todos os perfis. Continua: oportunidade antiga (sem
+    `origin`), com as notas apagadas e sem evento, ainda pode ser recriada antes de 90 dias; não há como reconhecê-la.
+  - (b) resolvido: o teto diário conta por `origin` (nota apagada no mesmo dia não libera vaga), com as notas como
+    reserva das criadas antes do deploy.
+  - Script `opportunities:backfill-origin` (`apps/api/src/scripts/backfillOpportunityOrigin.ts`): preenche `origin`
+    das oportunidades com a marca nas notas e `origin` nula; não mexe nas notas. Simula por padrão (transação READ
+    ONLY); grava só com `--apply --expect=N` (transação serializável). Saída só com contagens. **Não rodado.** Ordem
+    depois do cutover: CSV de backup (`\copy` somente leitura dos IDs) → simulação → `--apply --expect=N` → simulação
+    de novo (0). Procedimento em `DEPLOY_GUIDE.md`.
+  - Testes com dados fictícios: `commercialAutomations.http.test.ts` e `backfillOpportunityOrigin.test.ts` (em
+    `test:commercial-automations`, que o CI roda), `commercialPriorityService.test.ts` e
+    `calculateTodayPriorities.test.ts`.
+
+Pendente: a marca continua na descrição do evento de linha do tempo da automação (é o que o `DELETE /events/:id` e a
+reserva das antigas reconhecem). Leitura das notas como reserva pode sair quando não houver oportunidade da automação
+sem `origin` criada há menos de 90 dias (script rodado e 90 dias depois do deploy).

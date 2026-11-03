@@ -1,3 +1,57 @@
+## Migration `20261103120000_opportunity_origin_agenda_stop_client_index` (03/11/2026)
+
+Só aditiva, sem `UPDATE`/`DELETE`: coluna `TEXT` opcional `Opportunity.origin` (sem default) e índice
+`AgendaStop_clientId_checkOutAt_idx` em `AgendaStop("clientId", "checkOutAt")`, os dois com `IF NOT EXISTS`.
+Nenhum dado é alterado pela migration. A API do mesmo PR lê e grava `origin` (automação de inativos recentes), então
+**a migration precisa estar aplicada antes do cutover**; a gate de evidência garante isso.
+
+Cadastro: manifesto `scripts/production-schema-migrations.mjs` (SHA-256
+`ac1dc481223a01f1b6137ddd72c121f62ce57f275616a85c0f0b5e4677d9db90`), apply, filtro pre-apply, evidência do
+cutover e opção no workflow **Production Schema PR827**. O `CREATE INDEX` não é `CONCURRENTLY` (o apply roda numa
+transação): enquanto o índice é criado, gravações em `AgendaStop` esperam.
+
+Ordem, tudo no **mesmo SHA do merge**, sem mesclar nada na `main` no meio:
+
+1. **Prepare Production Recovery Backup** na `main` do merge. Conferir run verde; a prova vale 24 h e é amarrada ao
+   SHA.
+2. **Deploy Production** `phase=build` no mesmo SHA. Conferir `gest-o-api:<sha>` construída. Nenhum container é
+   parado.
+3. **Production Schema PR827** `mode=preview`,
+   `migration=20261103120000_opportunity_origin_agenda_stop_client_index`, `confirm` vazio. Conferir
+   `RESUMO aditivas=2 destrutivas=0 bloqueadas=0`, o diff pre-apply com exatamente o `ADD COLUMN "origin" TEXT` e o
+   `CREATE INDEX "AgendaStop_clientId_checkOutAt_idx"`, e `preview validado em modo estritamente read-only`.
+4. **Production Schema PR827** `mode=apply`, mesma migration, `confirm=PRODUCTION_SCHEMA_APPLY`. Evidência em
+   `/var/log/gest-o/schema/<sha>/`: `post-validation.tsv` com `columns_nullable 1`, `agenda_stop_client_index 1`,
+   `rows_using_new_objects 0`; `post-apply-diff.sql` vazio; `applied.tsv` presente.
+5. **Deploy Production** `phase=cutover` no mesmo SHA. Conferir `evidência de schema validada para o SHA atual` e
+   `/health/version` com o SHA.
+
+**Falha no apply:** o DDL roda em `psql --single-transaction` com `ON_ERROR_STOP=1`; erro desfaz tudo e o cutover
+continua bloqueado. Depois do commit o estado é `1:1` (coluna:índice) e o reapply pula o DDL e só revalida; estado
+parcial (diferente de `0:0` e `1:1`) é recusado antes de qualquer DDL.
+
+**Voltar:** a API anterior continua compatível (não conhece a coluna nem usa o índice). Não há reversão por DDL sem
+nova migration aprovada.
+
+### Depois do cutover: script `opportunities:backfill-origin`
+
+Preenche `origin = "automation:inactive_recent"` nas oportunidades antigas da automação (marca
+`workflow_cliente_sem_compra` nas notas e `origin` nula). Não mexe nas notas. Saída só com contagens. Sem ele, as
+antigas continuam reconhecidas pela marca nas notas e pelo evento da linha do tempo; com ele, deixam de depender das
+notas. Ordem, no container da API do SHA do cutover:
+
+1. **CSV de backup** (somente leitura, rodado pelo operador): exportar os IDs que o script vai alterar para um arquivo
+   em pasta protegida do servidor (fora do repositório, modo 600), com `psql` no banco de produção:
+   `\copy (SELECT id FROM "Opportunity" WHERE origin IS NULL AND strpos(notes, 'workflow_cliente_sem_compra') > 0 ORDER BY id) TO '<pasta protegida>/opportunity-origin-<data>.csv' WITH CSV HEADER`.
+   Usar `strpos`, não `LIKE`: em `LIKE` o `_` é curinga. Conferir o número de linhas (sem o cabeçalho).
+2. **Simulação:** `node dist/scripts/backfillOpportunityOrigin.js` (transação READ ONLY). `seriamAtualizadas` deve
+   ser igual ao número de linhas do CSV.
+3. **Apply:** `node dist/scripts/backfillOpportunityOrigin.js --apply --expect=N`, com N = `seriamAtualizadas`.
+   Transação serializável; com contagem diferente nada é gravado.
+4. **Simulação de novo:** `seriamAtualizadas` deve ser 0.
+
+Voltar, só com aprovação: `origin` volta a nulo nos IDs do CSV.
+
 ## Agenda × Atividades — API (PR 2 de 4, 24/10/2026)
 
 Sem migration e sem mudança de schema: usa os valores de enum e as colunas da migration
