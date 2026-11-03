@@ -1344,3 +1344,57 @@ Pendente:
 - (i) Cidade deduzida pelo nome do município não usa a UF (Toledo existe no PR e em MG); só o nome pesa na pontuação.
 - (j) A barra de pergunta do Assistente e o botão da Agenda usam `--mobile-action-bar-height` (6rem), um pouco maior que
   a barra de ações real (cerca de 85 px + área segura): sobra uma faixa estreita entre as duas.
+
+### TD-COMMERCIAL-AUTOMATIONS-SCHEDULER-BOOTSTRAP — automação de inativos recentes nunca rodou sozinha em produção
+
+**Causa.** O agendador da automação de inativos recentes (`startCommercialAutomationsScheduler`, em
+`apps/api/src/jobs/commercialAutomationsScheduler.ts`) foi ligado só em `apps/api/src/server.ts`, desde o commit
+`0aa4a400` (03/07/2026). A imagem de produção não sobe pelo `server.ts`: o `apps/api/Dockerfile` roda
+`npm run docker:start`, que é `node dist/scripts/bootstrap.js`, e o `docker-compose.production.yml` não troca o
+comando. O `bootstrap.ts` iniciava só o agendador do ERP. Resultado: nenhuma linha
+`[commercial automations scheduler]` nos logs e nenhuma oportunidade criada com a automação ligada (constatado em
+03/11/2026, com a simulação mostrando 15). O `smoke:commercial-automations` conferia o `server.ts`, por isso não pegou.
+
+**Correção (resolvido no código em 03/11/2026, aguardando merge).** O `bootstrap.ts` chama
+`startCommercialAutomationsScheduler()` dentro do callback do `app.listen`, no padrão do ERP, com
+`.catch` que registra `[commercial automations scheduler] initialization-failed` (`entrypoint:
+"dist/scripts/bootstrap.js"`). O smoke passou a ler o `bootstrap.ts` e a exigir a chamada depois do `app.listen`.
+
+**Como conferir depois do deploy.** No boot, `[commercial automations scheduler] initialized` (`intervalMs:
+3600000`) e logo `tick`; depois um `tick` por hora, contado do boot. Com a automação ligada, cada tick que executa
+registra `[commercial automations] run finished` com `createdOpportunities`, e `GET /commercial-automations/history`
+mostra execuções com `trigger: "scheduler"`. O tick do boot executa na hora: com a automação ligada, o próprio
+deploy cria as oportunidades do dia (até o teto por vendedor).
+
+**Diferenças que continuam entre `server.ts` e `bootstrap.ts` (não alteradas).** Os middlewares e as rotas são os
+mesmos (os dois importam `app` de `apps/api/src/app.ts`), e só existem dois agendadores no código (ERP e comercial).
+O que o `server.ts` faz e o `bootstrap.ts` não:
+
+- (a) `validateErpRuntimeConfigOnStartup()` (`apps/api/src/services/erpRuntimeConfig.ts`): só registra no log se
+  `ULTRAFV3_BASE_URL` e `ERP_CREDENTIAL_ENCRYPTION_KEY` estão preenchidas (INFO "Configuração preventiva ERP
+  validada" ou ERROR "Variáveis obrigatórias ausentes; envios ERP bloqueados"); não bloqueia nada. Em produção não
+  acusaria falta: o `docker-compose.production.yml` exige as duas com `:?` e o compose nem sobe sem elas (só um valor
+  feito só de espaços passaria pelo compose e seria acusado). O bloqueio real do envio de pedidos continua em
+  `assertErpRuntimeConfigForOrderSubmission`, nos dois entrypoints.
+- (b) `validateDatabaseHealth()` bloqueante: no `server.ts` uma falha impede o `listen`; no `bootstrap.ts` só registra
+  "DATABASE HEALTH CHECK FAILED (non-blocking)" e sobe assim mesmo.
+- (c) `ensureAdminBootstrap()` sempre; no `bootstrap.ts` só com `DATABASE_SCHEMA_MODE=ephemeral-push` (produção é
+  `external`, de propósito).
+- (d) Handlers de `unhandledRejection` e `uncaughtException` com `logApiEvent` e `sanitizePayload`; o `bootstrap.ts`
+  usa `console.error` com o erro cru, sem a máscara do logger.
+- (e) Log estruturado "API iniciada" (`port`, `nodeEnv`); o `bootstrap.ts` registra `SERVER RUNNING ON PORT` e o
+  contexto de runtime com `console.log`.
+- (f) Espera do banco: `prisma.$connect` 20 × 2 s no `server.ts`; `SELECT 1` 60 × 3 s no `bootstrap.ts` (os dois esperam).
+- (g) Falha na subida: o `server.ts` só registra e não encerra o processo; o `bootstrap.ts` sai com código 1.
+
+O `bootstrap.ts` faz a mais: exige `DATABASE_SCHEMA_MODE`, `db push`/sequência de pedidos/seeds só em
+`ephemeral-push`, e `BOOTSTRAP_SMOKE_EXIT`.
+
+Pendente:
+
+- (a) Trava de execução em memória (`status.running` em `commercialAutomationsService.ts`): só evita execução dupla
+  dentro do mesmo processo. Vale enquanto houver um único container de API; com réplicas, cada uma roda o tick e só o
+  teto diário (que conta no banco) limita, com risco de corrida entre elas.
+- (b) Os dois entrypoints ainda divergem nos itens acima; decidir se o `bootstrap.ts` deve fazer (a), (b) e (d) em PR
+  próprio, ou se o `server.ts` deve sair do caminho de produção de vez.
+- (c) Sem horário fixo: o tick é a cada 60 minutos contados do boot, e cada deploy ou reinício recomeça a contagem.

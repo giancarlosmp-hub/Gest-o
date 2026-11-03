@@ -6,7 +6,8 @@ const repoRoot = resolve(new URL("../../..", import.meta.url).pathname);
 const service = readFileSync(resolve(repoRoot, "api/src/services/commercialAutomationsService.ts"), "utf8");
 const routes = readFileSync(resolve(repoRoot, "api/src/routes/crudRoutes.ts"), "utf8");
 const scheduler = readFileSync(resolve(repoRoot, "api/src/jobs/commercialAutomationsScheduler.ts"), "utf8");
-const server = readFileSync(resolve(repoRoot, "api/src/server.ts"), "utf8");
+// Produção sobe por dist/scripts/bootstrap.js (Dockerfile → npm run docker:start), não por server.ts.
+const bootstrap = readFileSync(resolve(repoRoot, "api/src/scripts/bootstrap.ts"), "utf8");
 
 assert.match(service, /WORKFLOW_INACTIVE_CLIENT_ORIGIN = "workflow_cliente_sem_compra"/, "Origem do workflow deve ser registrada");
 assert.match(service, /listPortfolioSegment\("semComprar"[\s\S]*entry\.status === "inativoRecente"/, "Elegibilidade deve ser inativo recente pela regra oficial da carteira");
@@ -23,6 +24,11 @@ assert.match(routes, /post\("\/commercial-automations\/run"[\s\S]*runCommercialA
 assert.match(routes, /get\("\/commercial-automations\/history"[\s\S]*loadCommercialAutomationsHistory/, "Rota de histórico persistente deve existir");
 assert.match(routes, /get\("\/commercial-automations\/simulation"[\s\S]*simulateCommercialAutomations/, "Rota de simulação deve existir");
 assert.match(scheduler, /commercial automations scheduler/, "Scheduler comercial separado deve existir");
-assert.match(server, /startCommercialAutomationsScheduler/, "Servidor deve iniciar scheduler comercial separado");
+assert.match(bootstrap, /startCommercialAutomationsScheduler\(\)/, "Bootstrap de produção deve iniciar scheduler comercial separado");
+assert.ok(
+  bootstrap.indexOf("app.listen") < bootstrap.lastIndexOf("startCommercialAutomationsScheduler()"),
+  "Scheduler comercial deve iniciar depois do app.listen no bootstrap de produção"
+);
+assert.match(bootstrap, /\[commercial automations scheduler\] initialization-failed/, "Falha ao iniciar o scheduler comercial deve ser registrada");
 
 console.log("Commercial automations smoke passed");
