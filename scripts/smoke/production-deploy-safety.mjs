@@ -375,6 +375,19 @@ const seedGuard = "node -e \"if (process.env.DATABASE_SCHEMA_MODE !== 'ephemeral
 assert.ok(seedScript.startsWith(seedGuard), "prisma:seed deve começar pela trava de DATABASE_SCHEMA_MODE");
 assert.equal(seedScript.slice(seedGuard.length), "tsx prisma/seed.js", "prisma:seed só chama o seed.js depois da trava");
 assert.equal(JSON.parse(read("package.json")).scripts["prisma:seed"], "npm run prisma:seed -w @salesforce-pro/api", "prisma:seed da raiz passa pela trava do workspace");
+// A trava também fica dentro do seed.js (para `tsx prisma/seed.js` chamado direto): antes de qualquer import, de
+// criar o PrismaClient e do primeiro deleteMany. Imports estáticos rodariam antes dela; só imports dinâmicos depois.
+const seedSource = read("apps/api/prisma/seed.js");
+const seedSourceGuard = 'if (process.env.DATABASE_SCHEMA_MODE !== "ephemeral-push") {\n  console.error("seed.js recusado: só roda em banco descartável (DATABASE_SCHEMA_MODE=ephemeral-push)");\n  process.exit(1);\n}\n';
+const seedGuardAt = seedSource.indexOf(seedSourceGuard);
+assert.ok(seedGuardAt >= 0, "seed.js deve ter a trava de DATABASE_SCHEMA_MODE");
+assert.match(seedSource.slice(0, seedGuardAt), /^(\/\/[^\n]*\n)*$/, "antes da trava do seed.js só comentários");
+assert.doesNotMatch(seedSource, /^\s*import\s/m, "seed.js não pode ter import estático (rodaria antes da trava)");
+assert.doesNotMatch(seedSource, /\brequire\(/, "seed.js não pode usar require");
+for (const marker of ["await import(", "new PrismaClient(", "deleteMany("]) {
+  const at = seedSource.indexOf(marker);
+  assert.ok(at > seedGuardAt, `${marker} do seed.js deve vir depois da trava`);
+}
 const seedTenant = read("apps/api/src/scripts/ensureSeedTenant.ts");
 const seedTenantBody = seedTenant.slice(seedTenant.indexOf("export async function ensureSeedTenant"));
 assert.match(seedTenantBody, /^export async function ensureSeedTenant\([^)]*\) \{\s*if \(schemaMode !== "ephemeral-push"\) \{[^}]*return;\s*\}/, "ensureSeedTenant deve começar recusando fora de ephemeral-push");
