@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, CheckCircle2, CircleDollarSign, Info, MapPinned, Settings2, Target, TrendingUp, X } from "lucide-react";
 import { Link } from "react-router-dom";
 import api from "../lib/apiClient";
@@ -8,14 +8,19 @@ import { getApiErrorMessage } from "../lib/apiError";
 import { brazilMonthKey } from "../lib/brazilDate";
 import {
   calculateBounds,
+  countTerritoryCitiesByStatus,
   createOutOfTerritoryCity,
   expandBounds,
+  filterTerritoryCities,
   getCityGeoMatch,
   getCityStateNameKey,
   getFeatureCityName,
   getFeatureState,
+  sortTerritoryCitiesForList,
+  territoryCityListMetrics,
   type TerritoryCity,
   type TerritoryCityStatus,
+  type TerritoryListFilter,
   type TerritoryMunicipalityFeature,
   type TerritoryMunicipalityGeoJson
 } from "../lib/territoryMap";
@@ -52,19 +57,6 @@ const TERRITORY_GEOJSON_STATES = [
   { uf: "MS", url: "https://cdn.jsdelivr.net/gh/tbrugz/geodata-br@master/geojson/geojs-50-mun.json" }
 ] as const;
 // GeoJSON por UF com fonte IBGE, CC0-1.0 (tbrugz/geodata-br).
-function getTooltipText(city: TerritoryCity, sellerName?: string) {
-  return [
-    `Cidade: ${city.city}`,
-    `UF: ${city.state}`,
-    `Código IBGE: ${city.ibgeCode ?? "-"}`,
-    `Status: ${city.statusLabel || statusStyles[city.status].label}`,
-    `Vendedor: ${sellerName ?? "-"}`,
-    `Pedidos ERP: ${city.orderCount}`,
-    `Valor vendido: ${formatCurrencyBRL(city.soldValue)}`,
-    `Oportunidades abertas: ${city.openOpportunityCount}`
-  ].join("\n");
-}
-
 function DetailRow({ label, value }: { label: string; value: string | number }) {
   return (
     <div className="rounded-xl bg-slate-50 p-3">
@@ -211,8 +203,18 @@ export default function TerritoriosPage() {
     getCityGeoMatch(feature, citiesByIbgeCode, citiesByStateAndName)
       ?? createOutOfTerritoryCity(getFeatureCityName(feature), getFeatureState(feature)),
   [citiesByIbgeCode, citiesByStateAndName]);
-  const sellerNameForTooltip = coverage?.seller.name;
-  const mapTooltipText = useCallback((city: TerritoryCity) => getTooltipText(city, sellerNameForTooltip), [sellerNameForTooltip]);
+  // Lista do celular: filtro por status só na tela (sem parâmetro novo na API) e ordem verde, amarelo, vermelho, nome.
+  const [listFilter, setListFilter] = useState<TerritoryListFilter>("all");
+  const [revealSelectedKey, setRevealSelectedKey] = useState(0);
+  const mapAreaRef = useRef<HTMLDivElement | null>(null);
+  const listCounts = useMemo(() => countTerritoryCitiesByStatus(coverage?.cities ?? []), [coverage]);
+  const mobileListCities = useMemo(() => filterTerritoryCities(sortTerritoryCitiesForList(coverage?.cities ?? []), listFilter), [coverage, listFilter]);
+  // Tocar na lista = mesma seleção do toque no mapa (resumo por cima do mapa) e a tela rola até o mapa.
+  const selectCityFromList = (city: TerritoryCity) => {
+    setSelectedCity(city);
+    setRevealSelectedKey((current) => current + 1);
+    mapAreaRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
   const selectedSeller = coverage?.seller ?? sellers.find((seller) => seller.id === selectedSellerId);
   const hasTerritoryCities = (coverage?.cities.length ?? 0) > 0;
   const hasNoTerritory = Boolean(coverage && !loading && !hasTerritoryCities);
@@ -267,6 +269,7 @@ export default function TerritoriosPage() {
 
   useEffect(() => {
     setSelectedCity(null);
+    setListFilter("all");
   }, [selectedSellerId, month]);
 
   useEffect(() => {
@@ -407,7 +410,7 @@ export default function TerritoriosPage() {
           </div>
 
           <div className="grid gap-4 p-3 sm:p-5 lg:grid-cols-[minmax(0,1fr)_360px] lg:p-6">
-            <div className="relative overflow-hidden rounded-3xl border border-slate-200 bg-gradient-to-br from-slate-50 via-white to-emerald-50/30 shadow-[0_24px_70px_rgba(15,23,42,0.12)] ring-1 ring-white">
+            <div ref={mapAreaRef} className="relative overflow-hidden rounded-3xl border border-slate-200 bg-gradient-to-br from-slate-50 via-white to-emerald-50/30 shadow-[0_24px_70px_rgba(15,23,42,0.12)] ring-1 ring-white">
               {loading ? (
                 <div className="flex min-h-[420px] items-center justify-center p-6 text-sm font-semibold text-slate-500 sm:min-h-[560px] lg:min-h-[700px]">Carregando território...</div>
               ) : geoJsonError ? (
@@ -425,7 +428,7 @@ export default function TerritoriosPage() {
                   canInspect={canInspectMunicipalities}
                   focusBounds={geoBounds}
                   viewKey={`${selectedSellerId}|${month}|${hasTerritoryCities ? "territory" : "empty"}`}
-                  tooltipText={mapTooltipText}
+                  revealSelectedKey={revealSelectedKey}
                   ariaLabel="Mapa de cobertura comercial dos municípios do Paraná, Santa Catarina e Mato Grosso do Sul"
                 />
                 </Suspense>
@@ -479,7 +482,9 @@ export default function TerritoriosPage() {
               <CityDetailPanel city={selectedCity} sellerName={coverage?.seller.name} compact />
             </aside>
 
-            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:hidden">
+            {/* Abaixo do mapa só no tablet (640–1023px). No celular o resumo sobre o mapa já mostra pedidos, vendido e
+                oportunidades, então o painel e o cartão vazio "Selecione uma cidade" ficam escondidos. */}
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm max-sm:hidden lg:hidden">
               <CityDetailPanel city={selectedCity} sellerName={coverage?.seller.name} />
             </div>
           </div>
@@ -521,7 +526,60 @@ export default function TerritoriosPage() {
             </table>
           </div>
 
-          <div className="grid gap-3 p-4 md:hidden">
+          {/* Celular (abaixo de 640px): lista compacta, uma linha por cidade, com filtro por status. */}
+          <div className="p-3 sm:hidden">
+            <div className="flex flex-wrap gap-2" role="group" aria-label="Filtrar cidades por status">
+              {([
+                ["all", "Todas"],
+                ["positive", "Verde"],
+                ["opportunity", "Amarelo"],
+                ["no_sale", "Vermelho"]
+              ] as Array<[TerritoryListFilter, string]>).map(([filter, label]) => (
+                <button
+                  key={filter}
+                  type="button"
+                  aria-pressed={listFilter === filter}
+                  onClick={() => setListFilter(filter)}
+                  className={`min-h-9 rounded-full px-3 text-xs font-semibold ring-1 transition ${listFilter === filter ? "bg-slate-900 text-white ring-slate-900" : "bg-white text-slate-700 ring-slate-200"}`}
+                >
+                  {label} ({listCounts[filter]})
+                </button>
+              ))}
+            </div>
+            {loading ? (
+              <p className="mt-3 rounded-xl bg-slate-50 p-4 text-sm text-slate-500">Carregando cidades...</p>
+            ) : (coverage?.cities ?? []).length === 0 ? (
+              <p className="mt-3 rounded-xl bg-slate-50 p-4 text-sm text-slate-500">Nenhuma cidade vinculada ao território deste vendedor.</p>
+            ) : mobileListCities.length === 0 ? (
+              <p className="mt-3 rounded-xl bg-slate-50 p-4 text-sm text-slate-500">Nenhuma cidade com esse status no mês.</p>
+            ) : (
+              <ul className="mt-3 divide-y divide-slate-100" aria-label="Cidades do território">
+                {mobileListCities.map((city) => {
+                  const metrics = territoryCityListMetrics(city, formatCurrencyBRL);
+                  const isSelected = selectedCity?.id !== undefined ? selectedCity.id === city.id : selectedCity?.city === city.city && selectedCity?.state === city.state;
+                  return (
+                    <li key={city.id ?? `${city.state}-${city.city}`}>
+                      <button
+                        type="button"
+                        onClick={() => selectCityFromList(city)}
+                        aria-current={isSelected ? "true" : undefined}
+                        className={`flex min-h-11 w-full items-center justify-between gap-3 px-1 py-2 text-left ${isSelected ? "bg-slate-100" : ""}`}
+                      >
+                        <span className="min-w-0">
+                          <span className="block truncate text-sm font-semibold text-slate-900">{city.city}/{city.state}</span>
+                          <span className={`mt-0.5 inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ${statusStyles[city.status].badge}`}>{city.statusLabel}</span>
+                        </span>
+                        {metrics ? <span className="max-w-[55%] shrink-0 text-right text-[11px] leading-tight text-slate-500">{metrics}</span> : null}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+
+          {/* 640–767px: cartões como antes. */}
+          <div className="hidden gap-3 p-4 sm:grid md:hidden">
             {loading ? (
               <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">Carregando cidades...</p>
             ) : (coverage?.cities ?? []).length === 0 ? (
