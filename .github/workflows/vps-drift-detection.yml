@@ -69,6 +69,38 @@ jobs:
               fi
             fi
 
+            # Disco: o run falha (e o GitHub manda o e-mail) quando /, /var/lib/docker ou
+            # /var/log/gest-o passa de 80%. Somente leitura; uso ilegível é mostrado e não reprova.
+            disk_limit=80
+            has_disk_full=false
+            disk_report=""
+            for disk_path in / /var/lib/docker /var/log/gest-o; do
+              disk_line="$(df -P "$disk_path" 2>/dev/null | awk 'NR==2{print $6" "$5}' || true)"
+              disk_pct="${disk_line##* }"
+              disk_pct="${disk_pct%\%}"
+              if [[ ! "$disk_pct" =~ ^[0-9]+$ ]]; then
+                disk_report+="${disk_path}: uso ilegível"$'\n'
+                continue
+              fi
+              disk_report+="${disk_path} (montado em ${disk_line% *}): ${disk_pct}%"$'\n'
+              if (( disk_pct > disk_limit )); then has_disk_full=true; fi
+            done
+            printf 'Disco:\n%s' "$disk_report"
+
+            if [[ "$has_disk_full" == true ]]; then
+              printf '[CRITICAL] Disco acima de %s%% na VPS!\n\n' "$disk_limit" >&2
+              printf '%s' "$disk_report" >&2
+              printf '\n%s\n' '--- 5 maiores itens de /var/log/gest-o (MB) ---' >&2
+              du -xsm /var/log/gest-o/* /var/log/gest-o/.[!.]* 2>/dev/null | sort -rn | head -n 5 >&2 || true
+              printf '\n%s\n' '--- docker system df ---' >&2
+              docker system df >&2 2>&1 || true
+              printf '\n%s\n' '--- 5 maiores imagens ---' >&2
+              docker image ls --format '{{.Size}}{{"\t"}}{{.ID}}{{"\t"}}{{.Repository}}:{{.Tag}}' 2>/dev/null | awk -F'\t' '!seen[$2]++' | sort -rh | head -n 5 >&2 || true
+              printf '\n%s\n' '--- 5 maiores volumes ---' >&2
+              docker system df -v 2>/dev/null | awk '/^Local Volumes space usage/{f=1; next} f && /^VOLUME NAME/{g=1; next} g && NF==0{exit} g{print $NF"\t"$1}' | sort -rh | head -n 5 >&2 || true
+              printf '\nLimpeza manual: DEPLOY_GUIDE "Limpeza manual de disco na VPS".\n\n' >&2
+            fi
+
             if [[ "$has_dirty_worktree" == true || "$has_health_failure" == true || "$has_deployed_drift" == true || "$has_unmerged_production" == true ]]; then
               printf '[CRITICAL] Drift detectado na VPS em /apps/gest-o!\n\n' >&2
               if [[ "$has_dirty_worktree" == true ]]; then
@@ -91,6 +123,7 @@ jobs:
               printf 'Investigue antes de descartar. Ver runbook: docs/OPERACAO.md\n' >&2
               exit 1
             fi
+            if [[ "$has_disk_full" == true ]]; then exit 1; fi
 
             # HEAD igual à produção: main à frente (merges ainda sem deploy) não é drift.
             if [[ "$local_sha" != "$remote_sha" ]]; then
