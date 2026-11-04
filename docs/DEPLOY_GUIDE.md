@@ -1,7 +1,9 @@
 ## Limpeza manual de disco na VPS: previews legadas e `oci-backups` (04/11/2026)
 
 Dois scripts manuais, fora do deploy. Os dois simulam por padrão e só removem com `--apply` e a
-contagem esperada. Rode-os com `sudo`, no checkout do repositório na VPS, já com este PR mergeado.
+contagem esperada. Rode-os com `sudo`, no checkout do repositório na VPS. Os scripts só existem lá
+depois de um Deploy Production que inclua este PR: o checkout da VPS é atualizado pelo próprio deploy
+(`git pull --ff-only` antes do entrypoint), não pelo merge.
 Ambos gravam log com nomes e contagens: `/var/log/gest-o/legacy-preview-cleanup/` e
 `/var/log/gest-o/oci-backups-retention/`. Qualquer `RESULT=STOPPED` significa que nada foi
 removido naquele ponto (`mutations=` mostra quantos objetos já tinham saído). Não contorne a
@@ -88,8 +90,11 @@ sudo bash scripts/oci-backups-retention.sh                       # simulação: 
 sudo bash scripts/oci-backups-retention.sh --apply --expect=<N>   # N = candidates= da simulação
 ```
 
-Se parar com `report_stale` (há release mais nova que o relatório) ou `report_missing`, aguarde o
-próximo `phase=build`, que grava um relatório novo. Pastas de rebaseline (`gest-o-api.tar`,
+O script 2 precisa de um relatório de retenção **mais novo que a última release** (o `released_at`
+do `.release.tsv` mais recente). O script não gera esse relatório: ele é gravado pelo próprio
+deploy, no fim de cada `phase=build` (e do `phase=cutover`, depois de salvar a release nova). Se
+parar com `report_stale` (há release mais nova que o relatório) ou `report_missing`, é isso que
+falta: um novo `phase=build`, aprovado como qualquer deploy, grava um relatório atualizado. Pastas de rebaseline (`gest-o-api.tar`,
 `gest-o-web.tar`) aparecem como `keep reason=...no_release_record` e não são removidas por este
 script. Depois do apply, faça a mesma conferência de produção do item 1d, confira que as pastas do
 commit atual e do rollback continuam em `/var/log/gest-o/oci-backups/` e rode `df -h /`.

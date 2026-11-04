@@ -207,8 +207,12 @@ corrigida neste registro.
 
 ### TD-DEPLOY-RETENTION-DELETE — retenção real de releases
 
-**Aberto.** A retenção só emite relatório (`RELEASE_RETENTION=report`, itens `would_delete`); imagens
-de release e tars em `/var/log/gest-o/oci-backups/` crescem sem remoção. A remoção exige PR próprio,
+**Parcialmente resolvido (04/11/2026).** O script manual `scripts/oci-backups-retention.sh` (fora do
+deploy; simulação por padrão, `--apply --expect=N`) remove as pastas `/var/log/gest-o/oci-backups/<commit>/`
+superadas, com as proteções recalculadas; procedimento em [`DEPLOY_GUIDE.md`](DEPLOY_GUIDE.md)
+("Limpeza manual de disco na VPS"). **Continua pendente:** as tags `gest-o-*-release` do Docker (e as
+imagens que só elas seguram) não são removidas. A retenção do deploy segue só emitindo relatório
+(`RELEASE_RETENTION=report`, itens `would_delete`). A remoção das tags exige PR próprio,
 com proteção explícita de imagens em uso, do rollback atual e do `build.tsv` pendente: `docker rmi`
 sem `-f` só recusa a última tag de uma imagem em uso e não pode ser a proteção.
 
