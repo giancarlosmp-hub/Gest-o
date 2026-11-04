@@ -1409,10 +1409,30 @@ tela troca a tabela por cartões no celular.
     próximo ciclo. Confira a simulação abaixo." / "Desligada, nada é criado. ..."). Ele muda ao marcar, antes de salvar.
   - Item (j) acima.
   - Contrato em `apps/web/tests/ordersErpMobileLayout.test.ts`, encadeado em `test:orders` (passo que o CI já roda).
-- PR 3, mapa de Territórios (pendente): fundo OpenStreetMap com Leaflet 1.9.4 puro (sem react-leaflet), atribuição
-  "© OpenStreetMap contributors". Cores, regra, legenda, números do topo e detalhe da cidade iguais, com teste de
-  contrato da regra (`GET /territories/coverage`). Subtítulo do mapa passa a dizer o que o painel mostra (pedidos, valor
-  vendido e oportunidades; hoje promete clientes, oportunidades e pedidos, mas mostra só contagens).
+- PR 3, mapa de Territórios (feito):
+  - O SVG próprio saiu. O mapa é `components/territories/TerritoryLeafletMap.tsx`, com Leaflet 1.9.4 puro (sem
+    react-leaflet), tiles `tile.openstreetmap.org` e atribuição "© OpenStreetMap contributors" visível. Pinça, arrasto
+    com um dedo, duplo toque e os botões Aproximar/Afastar/Recentralizar. Sem zoom pela roda do mouse (a página continua
+    rolando por cima do mapa, como antes). As divisas e os nomes de estados e cidades agora vêm do fundo do OSM.
+  - O Leaflet é carregado sob demanda (`lazy`): só quem abre Territórios baixa os cerca de 45 KB gzip de JS e 6 KB de
+    CSS; o pacote principal ficou um pouco menor que antes.
+  - Regra, cores, legenda, números do topo, seletor de vendedor e mês e detalhe da cidade iguais. As cores e a
+    correspondência polígono → cidade da API foram para `lib/territoryMap.ts`; sobre o fundo, só a opacidade do
+    preenchimento mudou (0,6 no território, 0,35 fora dele). Teclado: cada cidade continua focável, com Enter/Espaço.
+  - Celular: ao tocar numa cidade, um resumo (cidade, status, pedidos, vendido e oportunidades) aparece sobre o mapa,
+    acima da atribuição; o painel completo continua abaixo. Os 6 números do topo ficam em 2 colunas compactas (valor de
+    15 px sem quebra, até "R$ 123.456.789,90" em 360 px) e o espaço dobrado entre blocos saiu, como em Pedidos.
+  - Subtítulo: "Toque em uma cidade para ver pedidos, valor vendido e oportunidades."
+  - Contrato em `apps/web/tests/territoryMapRules.test.ts`, encadeado em `test:responsive` (passo que o CI já roda):
+    hash do bloco de `GET /territories/coverage` (com quebras de linha normalizadas), a lista de etapas abertas, as
+    cores por status e os textos/fontes de legenda, topo, seletor e detalhe. Se a rota mudar, o teste falha de propósito.
+  - Pendências do mapa:
+    - Política de tiles do OSM: uso leve e sem SLA. Se o uso crescer (muitos vendedores, muitas horas por dia), passar
+      para um provedor de tiles contratado ou servidor próprio.
+    - O GeoJSON dos municípios continua vindo do jsDelivr em tempo de execução, apontando para `@master` (3,1 MB por
+      abertura, sem versão fixa). Fixar um commit ou servir o arquivo pelo próprio app.
+    - Não há CSP no repositório; se o nginx de produção (fora do repo) tiver uma, ela precisa liberar imagens de
+      `tile.openstreetmap.org`.
 
 Pendente (fora da série):
 
