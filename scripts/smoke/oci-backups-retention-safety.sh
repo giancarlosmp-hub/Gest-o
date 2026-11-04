@@ -12,16 +12,22 @@ fail(){ printf 'FALHA: %s\n' "$*" >&2; exit 1; }
 cat >"$BIN/docker" <<'FAKE'
 #!/usr/bin/env bash
 # $FAKE_CONTAINERS: one "container_id<TAB>image_id" per line.
+# $FAKE_IMAGES: one "repository:tag<TAB>image_id" per line.
 printf '%s\n' "$*" >>"$FAKE_CALLS"
-case "$1" in
-  ps) cut -f1 "$FAKE_CONTAINERS"; exit 0 ;;
-  inspect) awk -F'\t' -v c="${*: -1}" '$1==c{print $2; f=1} END{exit !f}' "$FAKE_CONTAINERS"; exit $? ;;
-  image) [[ "$2" == ls ]] && exit 0 ;;
+case "$1 ${2:-}" in
+  ps\ *) cut -f1 "$FAKE_CONTAINERS"; exit 0 ;;
+  inspect\ *) awk -F'\t' -v c="${*: -1}" '$1==c{print $2; f=1} END{exit !f}' "$FAKE_CONTAINERS"; exit $? ;;
+  'image ls') cat "$FAKE_IMAGES"; exit 0 ;;
+  'image inspect') awk -F'\t' -v t="${*: -1}" '$1==t{print $2; f=1} END{exit !f}' "$FAKE_IMAGES"; exit $? ;;
+  'image rm')
+    if [[ $# -eq 3 && "$3" == gest-o-* ]] && awk -F'\t' -v t="$3" '$1==t{f=1} END{exit !f}' "$FAKE_IMAGES"; then
+      awk -F'\t' -v t="$3" '$1!=t' "$FAKE_IMAGES" >"$FAKE_IMAGES.tmp"; mv "$FAKE_IMAGES.tmp" "$FAKE_IMAGES"; exit 0
+    fi ;;
 esac
 printf 'UNEXPECTED %s\n' "$*" >>"$FAKE_CALLS"; exit 99
 FAKE
 chmod +x "$BIN/docker"
-export PATH="$BIN:$PATH" FAKE_CALLS="$TMP/calls" FAKE_CONTAINERS="$TMP/containers.tsv"
+export PATH="$BIN:$PATH" FAKE_CALLS="$TMP/calls" FAKE_CONTAINERS="$TMP/containers.tsv" FAKE_IMAGES="$TMP/images.tsv"
 RELEASE_ARTIFACT_EXPECTED_OWNER="$(id -un):$(id -gn)"
 export RELEASE_ARTIFACT_EXPECTED_OWNER RELEASE_ARTIFACT_ROOT="$TMP/oci-backups" DEPLOY_EVIDENCE_DIR="$TMP/deploy"
 export BUILD_EVIDENCE_DIR="$TMP/deploy-builds" REBASELINE_EVIDENCE_DIR="$TMP/rebaseline" RELEASE_RETENTION_REPORT_DIR="$TMP/release-retention"
@@ -64,10 +70,31 @@ reset(){
   C[6]=$(commit f); release 6 api; sed -i 's/^released_at\t.*/released_at\t2020-01-01T00:00:00Z/' "$RELEASE_ARTIFACT_ROOT/${C[6]}"/*.release.tsv; chmod 644 "$RELEASE_ARTIFACT_ROOT/${C[6]}"/*.release.tsv
   cutover 5 4
   printf 'c5api\t%s\nc5web\t%s\n' "$(id_of api 5)" "$(id_of web 5)" >"$FAKE_CONTAINERS"
+  tags
   report
 }
+ORPHAN="sha256:$(hexid 9 c)" REBASED="sha256:$(hexid 8 d)"
+tags(){ # fictitious tags; the first four are the only tag candidates
+  { printf 'gest-o-api:%s\t%s\n' "${C[1]}" "$(id_of api 1)"
+    printf 'gest-o-api-release:sha256-%s\t%s\n' "$(hexid 1 a)" "$(id_of api 1)"
+    printf 'gest-o-web-rollback:%s\t%s\n' "${C[2]}" "$(id_of web 2)"
+    printf 'gest-o-api:%s\t%s\n' "$(commit 9)" "$ORPHAN"
+    printf 'gest-o-api:%s\t%s\n' "${C[5]}" "$(id_of api 5)"
+    printf 'gest-o-web-release:sha256-%s\t%s\n' "$(hexid 4 b)" "$(id_of web 4)"
+    printf 'gest-o-api-rollback:%s\t%s\n' "${C[4]}" "$(id_of api 4)"
+    printf 'gest-o-api:%s\t%s\n' "$(commit e)" "sha256:$(hexid 7 e)"
+    printf 'gest-o-api:%s\t%s\n' "${C[6]}" "$(id_of api 6)"
+    printf 'gest-o-api-rebaseline:%s\t%s\n' "$(commit 8)" "$REBASED"
+    printf 'gest-o-web:%s\t%s\n' "$(commit 8)" "$REBASED"
+    printf 'gest-o-api:<none>\t%s\n' "sha256:$(hexid 6 f)"
+    printf 'outra-imagem:latest\t%s\n' "sha256:$(hexid 5 f)"
+  } >"$FAKE_IMAGES"
+}
+TAG_CANDIDATES="gest-o-api-release:sha256-$(hexid 1 a),gest-o-api:${C[1]},gest-o-api:$(commit 9),gest-o-web-rollback:${C[2]}"
 run(){ set +e; OUT=$(bash "$SCRIPT" "$@" 2>"$TMP/stderr"); RC=$?; set -e; }
-snapshot(){ find "$RELEASE_ARTIFACT_ROOT" -printf '%p %s\n' | LC_ALL=C sort; }
+snapshot(){ find "$RELEASE_ARTIFACT_ROOT" -printf '%p %s\n' | LC_ALL=C sort; LC_ALL=C sort "$FAKE_IMAGES"; }
+tag_plan(){ grep "OCI_RETENTION_TAG tag=$1 " <<<"$OUT" || fail "tag ausente do plano: $1"; }
+tag_candidates(){ grep -o 'OCI_RETENTION_TAG tag=[^ ]* id=[^ ]* decision=candidate' <<<"$OUT" | cut -d' ' -f2 | cut -d= -f2 | LC_ALL=C sort | paste -sd, -; }
 plan_of(){ grep "OCI_RETENTION_PLAN dir=$1 " <<<"$OUT" || fail "pasta ausente do plano: $1"; }
 expect_stop(){ local reason=$1 before; shift; before=$(snapshot); run "$@"
   [[ "$RC" -eq 1 ]] && grep -q "OCI_RETENTION_RESULT=STOPPED reason=$reason mutations=0" <<<"$OUT" || fail "esperado $reason: $OUT"
@@ -82,7 +109,15 @@ plan_of "${C[5]}" | grep -q 'reason=.*recent_1.*in_use.*current' || fail 'pasta 
 plan_of "${C[4]}" | grep -q 'current_rollback' || fail 'pasta de rollback'
 plan_of "$(commit e)" | grep -q 'no_release_record' || fail 'pasta de rebaseline'
 plan_of "${C[6]}" | grep -q 'unverifiable_record' || fail 'registro inverificável'
-grep -q 'OCI_RETENTION_RESULT=SIMULATED candidates=3 mutations=0' <<<"$OUT" || fail 'resultado da simulação'
+grep -q 'OCI_RETENTION_RESULT=SIMULATED candidates=3 mutations=0 tag_candidates=4$' <<<"$OUT" || fail 'resultado da simulação'
+[[ "$(tag_candidates)" == "$TAG_CANDIDATES" ]] || fail "tags candidatas: $(tag_candidates)"
+tag_plan "gest-o-api:${C[5]}" | grep -q 'decision=keep reason=in_use,current,kept_release' || fail 'tag em uso'
+tag_plan "gest-o-api-rollback:${C[4]}" | grep -q 'decision=keep reason=current_rollback,kept_release' || fail 'tag de rollback'
+tag_plan "gest-o-web-release:sha256-$(hexid 4 b)" | grep -q 'decision=keep reason=current_rollback,kept_release' || fail 'tag release do rollback'
+tag_plan "gest-o-api:$(commit e)" | grep -q 'decision=keep reason=kept_release' || fail 'tag da pasta de rebaseline/legado'
+tag_plan "gest-o-api:${C[6]}" | grep -q 'decision=keep reason=kept_release' || fail 'tag de registro inverificável'
+tag_plan "gest-o-web:$(commit 8)" | grep -q 'decision=keep reason=rebaseline' || fail 'tag com imagem de rebaseline'
+if grep -Eq 'OCI_RETENTION_TAG tag=(gest-o-api-rebaseline|outra-imagem|gest-o-api:<none>)' <<<"$OUT"; then fail 'tag fora do escopo no plano'; fi
 [[ "$(snapshot)" == "$before" ]] || fail 'simulação alterou arquivos'
 compgen -G "$OCI_RETENTION_LOG_DIR/*.log" >/dev/null || fail 'log ausente'
 
@@ -92,8 +127,27 @@ reset; run --apply --expect=3
 for n in 1 2 3; do [[ ! -e "$RELEASE_ARTIFACT_ROOT/${C[$n]}" ]] || fail "C$n não removida"; done
 for n in 4 5 6; do [[ -n "$(ls -A "$RELEASE_ARTIFACT_ROOT/${C[$n]}")" ]] || fail "C$n tocada"; done
 [[ -f "$RELEASE_ARTIFACT_ROOT/$(commit e)/gest-o-api.tar" ]] || fail 'rebaseline tocado'
-grep -q 'OCI_RETENTION_RESULT=APPLIED removed_dirs=3 mutations=15' <<<"$OUT" || fail "resultado do apply: $OUT"
+grep -q 'OCI_RETENTION_RESULT=APPLIED removed_dirs=3 mutations=15 removed_tags=0 ' <<<"$OUT" || fail "resultado do apply: $OUT"
+grep -q 'OCI_RETENTION_TAGS=NOT_APPLIED reason=expect_tags_absent candidates=4' <<<"$OUT" || fail 'tags aplicadas sem --expect-tags'
+[[ "$(wc -l <"$FAKE_IMAGES")" -eq 13 ]] || fail 'tags removidas sem --expect-tags'
 if grep -q UNEXPECTED "$FAKE_CALLS"; then fail "docker inesperado: $(cat "$FAKE_CALLS")"; fi
+
+# --- Apply with tags: folders first, then exactly the 4 tags, by name. ---
+reset; run --apply --expect=3 --expect-tags=4
+[[ "$RC" -eq 0 ]] || fail "apply com tags: $OUT"
+grep -q 'OCI_RETENTION_RESULT=APPLIED removed_dirs=3 mutations=19 removed_tags=4 ' <<<"$OUT" || fail "resultado do apply com tags: $OUT"
+for t in ${TAG_CANDIDATES//,/ }; do
+  if cut -f1 "$FAKE_IMAGES" | grep -Fxq "$t"; then fail "tag não removida: $t"; fi
+done
+[[ "$(wc -l <"$FAKE_IMAGES")" -eq 9 ]] || fail 'tags protegidas removidas'
+[[ "$(grep -c '^image rm ' "$FAKE_CALLS")" -eq 4 ]] || fail 'image rm além das candidatas'
+if grep -Eq '^image rm .*(-f|--force|sha256:)' "$FAKE_CALLS"; then fail 'image rm forçado ou por ID'; fi
+if grep -q UNEXPECTED "$FAKE_CALLS"; then fail "docker inesperado: $(cat "$FAKE_CALLS")"; fi
+# Only tags (no folder candidate left): --expect=0 is accepted with --expect-tags.
+reset; for n in 1 2 3; do printf 'c%sold\t%s\n' "$n" "$(id_of api "$n")" >>"$FAKE_CONTAINERS"; done
+run; grep -q 'SIMULATED candidates=0 mutations=0 tag_candidates=2$' <<<"$OUT" || fail "só tags: $OUT"
+run --apply --expect=0 --expect-tags=2
+grep -q 'APPLIED removed_dirs=0 mutations=2 removed_tags=2 ' <<<"$OUT" || fail "apply só de tags: $OUT"
 
 # --- Stops. ---
 reset; expect_stop expect_mismatch --apply --expect=2
@@ -101,6 +155,17 @@ reset; expect_stop expect_mismatch --apply --expect=4
 reset; mv "$REPORT" "$RELEASE_RETENTION_REPORT_DIR/20190101T000000Z.tsv"; expect_stop report_stale --apply --expect=3
 reset; rm "$REPORT"; expect_stop report_missing --apply --expect=3
 reset; rm "$DEPLOY_EVIDENCE_DIR/${C[5]}/previous-runtime.tsv"; expect_stop rollback_set_unreadable --apply --expect=3
+reset; expect_stop expect_tags_mismatch --apply --expect=3 --expect-tags=3
+reset; expect_stop expect_tags_mismatch --apply --expect=3 --expect-tags=5
+reset; expect_stop expect_mismatch --apply --expect=0 --expect-tags=4
+
+# --- Tag protections: stopped container, pending build, rebaseline evidence. ---
+reset; printf 'stopped\t%s\n' "$ORPHAN" >>"$FAKE_CONTAINERS"
+run; tag_plan "gest-o-api:$(commit 9)" | grep -q 'decision=keep reason=in_use' || fail "tag usada por container parado: $OUT"
+reset; mkdir -p "$BUILD_EVIDENCE_DIR/$(commit 9)"; printf 'recorded_at\t2020-02-01T00:00:00Z\napi_image_id\t%s\n' "$ORPHAN" >"$BUILD_EVIDENCE_DIR/$(commit 9)/build.tsv"
+run; tag_plan "gest-o-api:$(commit 9)" | grep -q 'decision=keep reason=build_pending' || fail "tag do build pendente: $OUT"
+reset; mkdir -p "$REBASELINE_EVIDENCE_DIR/x"; printf 'REBASELINE_VERIFIED_API_ID=%s\n' "$ORPHAN" >"$REBASELINE_EVIDENCE_DIR/x/result.env"
+run; tag_plan "gest-o-api:$(commit 9)" | grep -q 'decision=keep reason=rebaseline' || fail "tag citada no rebaseline: $OUT"
 
 # --- Current rollback moved to C2 after the report: still protected. ---
 reset; rm -r "${DEPLOY_EVIDENCE_DIR:?}/${C[5]}"; cutover 5 2
@@ -124,12 +189,16 @@ run; plan_of "${C[3]}" | grep -q 'unpaired_file' || fail "par incompleto: $OUT"
 
 # --- Usage errors. ---
 reset; before=$(snapshot)
-for args in "--apply" "--apply --expect=0" "--expect=3 --force" "-rf"; do
+for args in "--apply" "--apply --expect=0" "--expect=3 --force" "-rf" "--apply --expect=0 --expect-tags=0" "--apply --expect=3 --expect-tags=x" "--apply --expect-tags=2"; do
   # shellcheck disable=SC2086
   run $args; [[ "$RC" -eq 2 ]] || fail "uso inválido aceito: $args"
 done
 [[ "$(snapshot)" == "$before" ]] || fail 'uso inválido alterou arquivos'
 
 # --- Static: no recursive or forced removal, no Docker mutation. ---
-if grep -nE 'rm -r|rm -f|rm -rf|--force|docker (rmi|tag|image rm|system|volume|container rm)|prune' "$SCRIPT"; then fail 'comando proibido'; fi
+# The one Docker mutation is `docker image rm "$tag"` (by name, no flags).
+code=$(grep -v '^[[:space:]]*#' "$SCRIPT")
+if grep -nE 'rm -r|rm -f|rm -rf|--force|docker (rmi|tag|system|volume|container rm|builder)|prune' <<<"$code"; then fail 'comando proibido'; fi
+[[ "$(grep -c 'docker image rm' <<<"$code")" -eq 1 ]] || fail 'docker image rm fora do ponto único'
+grep -qF '    docker image rm "$tag" </dev/null >>"$log" 2>&1 || stop tag_rm_failed' <<<"$code" || fail 'docker image rm com argumentos inesperados'
 printf 'OCI_BACKUPS_RETENTION_SAFETY=PASS\n'
