@@ -193,3 +193,42 @@ export function isFeatureSelected(feature: TerritoryMunicipalityFeature, selecte
   return normalizeIbgeCode(selectedCity.ibgeCode) === normalizeIbgeCode(featureIbgeCode)
     || (normalizeCityKey(selectedCity.city) === normalizeCityKey(getFeatureCityName(feature)) && selectedCity.state === getFeatureState(feature));
 }
+
+// Dica ao passar o mouse (só computador): uma linha, só para cidades do território. Fora do território: nenhuma dica.
+export function territoryCityTooltip(city: TerritoryCity): string | null {
+  if (city.status === "out_of_territory") return null;
+  return `${city.city}/${city.state} · ${city.statusLabel}`;
+}
+
+// Lista de cidades do celular: verde, amarelo, vermelho; dentro de cada status, por nome.
+export type TerritoryListFilter = "all" | "positive" | "opportunity" | "no_sale";
+const LIST_STATUS_ORDER: Record<TerritoryCityStatus, number> = { positive: 0, opportunity: 1, no_sale: 2, out_of_territory: 3 };
+
+export function sortTerritoryCitiesForList(cities: TerritoryCity[]) {
+  return [...cities].sort((a, b) =>
+    LIST_STATUS_ORDER[a.status] - LIST_STATUS_ORDER[b.status] || a.city.localeCompare(b.city, "pt-BR", { sensitivity: "base" })
+  );
+}
+
+export function countTerritoryCitiesByStatus(cities: TerritoryCity[]): Record<TerritoryListFilter, number> {
+  return {
+    all: cities.length,
+    positive: cities.filter((city) => city.status === "positive").length,
+    opportunity: cities.filter((city) => city.status === "opportunity").length,
+    no_sale: cities.filter((city) => city.status === "no_sale").length
+  };
+}
+
+export function filterTerritoryCities(cities: TerritoryCity[], filter: TerritoryListFilter) {
+  return filter === "all" ? cities : cities.filter((city) => city.status === filter);
+}
+
+// Texto pequeno à direita da linha: pedidos · vendido · oportunidades, só quando algum for maior que zero.
+export function territoryCityListMetrics(city: TerritoryCity, formatCurrency: (value: number) => string): string | null {
+  if (city.orderCount <= 0 && city.soldValue <= 0 && city.openOpportunityCount <= 0) return null;
+  return [
+    `${city.orderCount} ${city.orderCount === 1 ? "pedido" : "pedidos"}`,
+    formatCurrency(city.soldValue),
+    `${city.openOpportunityCount} oport.`
+  ].join(" · ");
+}
