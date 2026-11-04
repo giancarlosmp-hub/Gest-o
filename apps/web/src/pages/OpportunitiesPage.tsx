@@ -15,6 +15,8 @@ import CreateOpportunityModal from "../components/opportunities/CreateOpportunit
 import OpportunityImportModal from "../components/opportunities/OpportunityImportModal";
 import DeleteOpportunityConfirmModal from "../components/opportunities/DeleteOpportunityConfirmModal";
 import ActionMenuPopover from "../components/opportunities/ActionMenuPopover";
+import MobileFiltersToggle from "../components/mobile/MobileFiltersToggle";
+import { countActiveOpportunityFilters } from "../lib/opportunityFilters";
 import { getApiErrorMessage } from "../lib/apiError";
 import ClientSearchSelect from "../components/clients/ClientSearchSelect";
 import ClientCreditAlertBanner, { ClientCreditAlert } from "../components/clients/ClientCreditAlertBanner";
@@ -471,6 +473,9 @@ export default function OpportunitiesPage() {
   const canFilterByOwner = user?.role === "diretor" || user?.role === "gerente";
   const canDeleteOpportunity = user?.role === "diretor" || user?.role === "gerente";
   const isAnyActionMenuOpen = openCloseMenuId !== null || isDrawerCloseMenuOpen;
+  // Celular: filtros recolhidos no botão "Filtros (N)"; a busca fica sempre visível.
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
+  const activeFiltersCount = countActiveOpportunityFilters(filters, { countOwner: canFilterByOwner });
 
   const closeActionMenus = () => {
     setOpenCloseMenuId(null);
@@ -1789,7 +1794,7 @@ export default function OpportunitiesPage() {
 
       {viewMode === "list" ? (
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <h3 className="mb-3 text-base font-semibold text-slate-900">Filtros</h3>
+          <h3 className="mb-3 hidden text-base font-semibold text-slate-900 sm:block">Filtros</h3>
           <div className="grid gap-3 lg:grid-cols-10">
             <div className="relative lg:col-span-2">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -1800,6 +1805,9 @@ export default function OpportunitiesPage() {
                 onChange={(e) => setSearch(e.target.value)}
               />
             </div>
+            <MobileFiltersToggle activeCount={activeFiltersCount} open={mobileFiltersOpen} onToggle={() => setMobileFiltersOpen((current) => !current)} panelId="opportunity-list-filters" />
+            {/* No desktop o invólucro some (sm:contents) e os campos continuam na mesma grade de antes. */}
+            <div id="opportunity-list-filters" className={`${mobileFiltersOpen ? "grid" : "hidden"} gap-3 sm:contents`}>
             <select className="h-10 rounded-lg border border-slate-200 px-3 text-sm lg:col-span-2" value={filters.stage} onChange={(e) => setFilters((prev) => ({ ...prev, stage: e.target.value }))}>
               <option value="">Todos estágios</option>
               {stages.map((stage) => <option key={stage} value={stage}>{stageLabel[stage]}</option>)}
@@ -1847,6 +1855,7 @@ export default function OpportunitiesPage() {
               <button type="button" className="h-10 rounded-lg bg-slate-100 px-4 text-sm font-medium text-slate-700 hover:bg-slate-200" onClick={clearFilters}>
                 Limpar filtros
               </button>
+            </div>
             </div>
           </div>
         </div>
@@ -2119,8 +2128,8 @@ export default function OpportunitiesPage() {
       />
 
       {viewMode === "list" ? (
-
-        <div className="overflow-auto rounded-2xl border border-slate-200 bg-white shadow-sm" data-action-menu-boundary>
+        <>
+        <div className="opportunity-desktop-only overflow-auto rounded-2xl border border-slate-200 bg-white shadow-sm" data-action-menu-boundary>
           <table className="min-w-[1500px] w-full whitespace-nowrap text-sm">
             <thead>
               <tr className="bg-slate-50 text-left text-slate-600">
@@ -2185,35 +2194,6 @@ export default function OpportunitiesPage() {
                       ) : null}
                       {canDeleteOpportunity ? <button type="button" className="text-red-600" onClick={() => requestDeleteOpportunity(item)}>Excluir</button> : null}
                       </div>
-                      <div className="opportunity-mobile-only flex justify-center" data-opportunity-action-menu>
-                        <button
-                          ref={openCloseMenuId === `mobile:${item.id}` ? itemActionMenuAnchorRef : undefined}
-                          type="button"
-                          className="touch-icon-button inline-flex items-center justify-center rounded-md border border-slate-300 p-1 text-slate-600 hover:bg-slate-100"
-                          aria-label="Abrir ações da oportunidade"
-                          aria-expanded={openCloseMenuId === `mobile:${item.id}`}
-                          onClick={() => toggleItemActionMenu(`mobile:${item.id}`)}
-                        >
-                          <MoreHorizontal size={16} />
-                        </button>
-                        {openCloseMenuId === `mobile:${item.id}` ? (
-                          <ActionMenuPopover anchorRef={itemActionMenuAnchorRef} className="min-w-52">
-                            <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-brand-700 hover:bg-slate-50" onClick={() => { closeActionMenus(); onEdit(item); }}>Editar</button>
-                            {item.ownerSeller?.isActive === false && !["ganho", "perdido"].includes(item.stage) ? <button type="button" className="block w-full px-3 py-1.5 text-left text-sm font-semibold text-amber-700 hover:bg-amber-50" onClick={() => { closeActionMenus(); onEdit(item); }}>Transferir responsável</button> : null}
-                            <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-50" onClick={() => { closeActionMenus(); navigate(`/oportunidades/${item.id}`); }}>Detalhes</button>
-                            {item.stage === "ganho" ? (
-                              <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:text-slate-400 disabled:hover:bg-transparent" disabled={isClientWithoutErpCode(item)} title={isClientWithoutErpCode(item) ? CLIENT_WITHOUT_ERP_CODE_ORDER_MESSAGE : undefined} onClick={() => openWonOpportunityErpOrderFlow(item.id)}>Gerar/Reenviar pedido ERP</button>
-                            ) : null}
-                            {!["ganho", "perdido"].includes(item.stage) ? (
-                              <>
-                                <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-emerald-700 hover:bg-emerald-50" onClick={() => openCloseModal(item.id, "ganho")}>Marcar como Ganho</button>
-                                <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-rose-700 hover:bg-rose-50" onClick={() => openCloseModal(item.id, "perdido")}>Marcar como Perdido</button>
-                              </>
-                            ) : null}
-                            {canDeleteOpportunity ? <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-red-600 hover:bg-red-50" onClick={() => requestDeleteOpportunity(item)}>Excluir</button> : null}
-                          </ActionMenuPopover>
-                        ) : null}
-                      </div>
                     </td>
                   </tr>
                 );
@@ -2225,10 +2205,79 @@ export default function OpportunitiesPage() {
             </tbody>
           </table>
         </div>
+
+        {/* Celular: cartões com o essencial (cliente, valor, etapa, retorno) e "Detalhes"; o resto no menu ⋯. */}
+        <div className="opportunity-mobile-only space-y-3" data-action-menu-boundary>
+          {loading ? Array.from({ length: 4 }).map((_, index) => (
+            <div key={`card-skeleton-${index}`} className="h-36 animate-pulse rounded-2xl bg-slate-100" />
+          )) : sortedItems.length ? sortedItems.map((item) => {
+            const risk = normalizeRisk(item.risk);
+            return (
+              <article key={item.id} className={`min-w-0 rounded-2xl border bg-white p-4 shadow-sm ${risk === "alto" ? "border-red-300" : risk === "medio" ? "border-amber-300" : "border-emerald-200"}`}>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="font-semibold leading-tight text-slate-900 break-words">{getClientName(item)}</p>
+                    <CollectionWarning item={item} />
+                    <p className="mt-1 text-xs text-slate-500 break-words">{item.title}</p>
+                    {canFilterByOwner ? <p className="text-xs text-slate-500 break-words">{getSellerName(item)}</p> : null}
+                  </div>
+                  <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">{stageLabel[item.stage]}</span>
+                </div>
+                {item.effectiveWin?.reason ? <div className="mt-2 rounded bg-red-50 px-2 py-1 text-xs font-semibold text-red-800">{item.effectiveWin.reason}</div> : null}
+                <div className="mt-3 flex flex-wrap items-end justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-lg font-bold text-slate-900">{formatCurrencyBRL(item.value)}</p>
+                    <p className="text-xs text-slate-500">Retorno previsto: {formatDateBR(item.expectedCloseDate)}</p>
+                  </div>
+                  <div className="flex flex-wrap items-center justify-end gap-1">
+                    <span className={`inline-flex whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-semibold ${riskBadgeClassName[risk]}`}>Risco {riskLabel[risk]}</span>
+                    <ReturnStatusBadge status={getReturnStatus(item)} />
+                  </div>
+                </div>
+                <div className="mt-3 flex items-center gap-2" data-opportunity-action-menu>
+                  <button type="button" className="min-h-11 flex-1 rounded-lg border border-slate-300 px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50" onClick={() => navigate(`/oportunidades/${item.id}`)}>
+                    Detalhes
+                  </button>
+                  <button
+                    ref={openCloseMenuId === `mobile:${item.id}` ? itemActionMenuAnchorRef : undefined}
+                    type="button"
+                    className="touch-icon-button inline-flex min-h-11 items-center justify-center rounded-lg border border-slate-300 px-3 text-slate-600 hover:bg-slate-100"
+                    aria-label="Abrir ações da oportunidade"
+                    aria-expanded={openCloseMenuId === `mobile:${item.id}`}
+                    onClick={() => toggleItemActionMenu(`mobile:${item.id}`)}
+                  >
+                    <MoreHorizontal size={18} />
+                  </button>
+                  {openCloseMenuId === `mobile:${item.id}` ? (
+                    <ActionMenuPopover anchorRef={itemActionMenuAnchorRef} className="min-w-52">
+                      <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-brand-700 hover:bg-slate-50" onClick={() => { closeActionMenus(); onEdit(item); }}>Editar</button>
+                      {item.ownerSeller?.isActive === false && !["ganho", "perdido"].includes(item.stage) ? <button type="button" className="block w-full px-3 py-1.5 text-left text-sm font-semibold text-amber-700 hover:bg-amber-50" onClick={() => { closeActionMenus(); onEdit(item); }}>Transferir responsável</button> : null}
+                      {item.stage === "ganho" ? (
+                        <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:text-slate-400 disabled:hover:bg-transparent" disabled={isClientWithoutErpCode(item)} title={isClientWithoutErpCode(item) ? CLIENT_WITHOUT_ERP_CODE_ORDER_MESSAGE : undefined} onClick={() => openWonOpportunityErpOrderFlow(item.id)}>Gerar/Reenviar pedido ERP</button>
+                      ) : null}
+                      {!["ganho", "perdido"].includes(item.stage) ? (
+                        <>
+                          <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-emerald-700 hover:bg-emerald-50" onClick={() => openCloseModal(item.id, "ganho")}>Marcar como Ganho</button>
+                          <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-rose-700 hover:bg-rose-50" onClick={() => openCloseModal(item.id, "perdido")}>Marcar como Perdido</button>
+                        </>
+                      ) : null}
+                      {canDeleteOpportunity ? <button type="button" className="block w-full border-t border-slate-100 px-3 py-1.5 text-left text-sm text-red-600 hover:bg-red-50" onClick={() => requestDeleteOpportunity(item)}>Excluir</button> : null}
+                    </ActionMenuPopover>
+                  ) : null}
+                </div>
+              </article>
+            );
+          }) : (
+            <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-500">Nenhuma oportunidade encontrada com os filtros aplicados. Tente ajustar os critérios para visualizar resultados.</p>
+          )}
+        </div>
+        </>
       ) : (
         <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="grid gap-2 border-b border-slate-100 pb-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
             <input className="rounded-lg border border-slate-200 p-2" placeholder="Buscar título ou cliente" value={search} onChange={(e) => setSearch(e.target.value)} />
+            <MobileFiltersToggle activeCount={activeFiltersCount} open={mobileFiltersOpen} onToggle={() => setMobileFiltersOpen((current) => !current)} panelId="opportunity-pipeline-filters" />
+            <div id="opportunity-pipeline-filters" className={`${mobileFiltersOpen ? "grid" : "hidden"} gap-2 sm:contents`}>
             <select className="rounded-lg border border-slate-200 p-2" value={filters.status} onChange={(e) => setFilters((prev) => ({ ...prev, status: e.target.value as OpportunityStatus }))}>
               {Object.entries(statusLabel).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </select>
@@ -2249,6 +2298,7 @@ export default function OpportunitiesPage() {
             <button type="button" className="rounded-lg bg-slate-100 px-3 font-medium text-slate-700 hover:bg-slate-200" onClick={clearFilters}>
               Limpar filtros
             </button>
+            </div>
           </div>
 
           <div>
