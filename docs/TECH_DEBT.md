@@ -1383,6 +1383,10 @@ tela troca a tabela por cartões no celular.
     `sm`). N conta os filtros diferentes do padrão de "Limpar filtros" (`countActiveOpportunityFilters`); o responsável
     só conta para diretor/gerente. No desktop o invólucro é `sm:contents` e os campos ficam na mesma grade. No celular o
     bloco de filtros da Lista caiu de 718 px para 134 px de altura (360 px).
+  - KPIs do topo (Pipeline total, Valor ponderado, Atrasadas, Taxa de conversão): no celular, 2 colunas compactas
+    (padding, título e valor menores) em vez de um por linha ocupando a primeira tela. O valor em reais não quebra
+    (o `Intl` usa espaço não separável entre "R$" e o número); em Atrasadas só pode quebrar no " • ". A partir de
+    641 px a grade e o tamanho são os de antes.
   - Contrato em `apps/web/tests/opportunitiesMobileLayout.test.ts`, encadeado em `test:opportunity-quick-action` (passo
     que o CI já roda; um passo próprio exige mudar `.github/workflows`).
 - PR 2, Pedidos + Títulos em Aberto + Integração ERP (pendente): Pedidos já são cartões (só padding dobrado, 8 KPIs,
@@ -1403,7 +1407,10 @@ Pendente (fora da série):
   prospecção, `proposalDate` no dia da criação) contam como "oportunidade aberta" no mapa de Territórios: a cidade fica
   amarela e entra em "Oportunidade aberta". A rota não filtra por `origin` nem por valor. Não alterado; a decisão de
   excluir ou não fica para depois.
-- Oportunidades no celular: os 4 KPIs do topo continuam um por linha (não pedido nesta série).
+- Próxima série de UX: na Visão da Oportunidade (`OpportunityDetailsPage.tsx`), o botão "Gerar pedido ERP" aparece no
+  topo grande e em destaque (`mobile-primary-button`, gradiente) mesmo desabilitado, quando a oportunidade ainda não está
+  Ganha; o motivo já aparece logo abaixo no aviso "Gerar pedido ERP indisponível". Deveria ficar discreto ou só
+  aparecer quando puder ser usado.
 
 ### TD-COMMERCIAL-AUTOMATIONS-SCHEDULER-BOOTSTRAP — automação de inativos recentes nunca rodou sozinha em produção
 
