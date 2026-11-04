@@ -98,6 +98,35 @@ grep -qx "DEPLOY_RELEASE_ARTIFACT=PASS role=web id=$NEW_WEB" "$out"
 [[ "$(head -1 "$ev/previous-runtime.tsv" | awk -F'\t' '{print NF}')" -eq 12 ]] || fail 'previous-runtime.tsv mudou de colunas'
 grep -q "^RELEASE_RETENTION_REPORT kind=release path=$RELEASE_ARTIFACT_ROOT/$OLD_SHA/api.${OLD_API#sha256:}.tar.gz .* decision=keep reason=recent_[12],current_rollback$" "$out"
 if grep -Eq '^docker (rmi|rm|image rm|image prune|system prune)' "$COMMAND_LOG"; then fail 'cutover removeu imagens'; fi
+# Post-cutover maintenance: nothing superseded yet, cache prune with the exact command.
+grep -q '^DEPLOY_RETENTION=OK removed_dirs=0 removed_tags=0 ' "$out" || fail "retenção pós-cutover: $(grep DEPLOY_RETENTION "$out")"
+grep -qx 'DEPLOY_BUILD_CACHE=OK older_than=168h reclaimed=0B' "$out" || fail 'cache de build pós-cutover'
+[[ "$(grep -c '^docker builder ' "$COMMAND_LOG")" -eq 1 ]] && grep -qx 'docker builder prune --force --filter until=168h' "$COMMAND_LOG" || fail 'comando de cache diferente do aprovado'
+compgen -G "$OCI_RETENTION_LOG_DIR/*-post-cutover.log" >/dev/null || fail 'log da manutenção pós-cutover ausente'
+
+# E2. A tag of an image nothing keeps (fictitious old commit) is removed by name after the cutover.
+fresh_build
+ORPHAN_SHA=$(printf '7%.0s' {1..40})
+"${ENGINE[@]}" image "gest-o-api:$ORPHAN_SHA" "$ORPHAN_SHA" 0.1.0 2026-08-01T00:00:00Z api >/dev/null
+: >"$COMMAND_LOG"
+expect_deploy_ok cutover cutover_orphan_tag
+grep -q '^DEPLOY_RETENTION=OK removed_dirs=0 removed_tags=1 ' "$TMP/cutover_orphan_tag.out" || fail "tag órfã: $(grep DEPLOY_RETENTION "$TMP/cutover_orphan_tag.out")"
+grep -qx "docker image rm gest-o-api:$ORPHAN_SHA" "$COMMAND_LOG" || fail 'tag órfã não removida por nome'
+[[ "$(grep -c '^docker image rm ' "$COMMAND_LOG")" -eq 1 ]] || fail 'image rm além da tag órfã'
+if docker image inspect "gest-o-api:$ORPHAN_SHA" >/dev/null 2>&1; then fail 'tag órfã continua'; fi
+[[ "$(docker image inspect -f '{{.Id}}' "gest-o-api:$OLD_SHA")" == "$OLD_API" ]] || fail 'tag do rollback removida'
+[[ "$(container_image gest-o-production-api-1)" == "$NEW_API" ]]
+
+# E3. Retention and cache failures are logged, never fatal, never a rollback.
+fresh_build
+saved_log_dir=$OCI_RETENTION_LOG_DIR; export OCI_RETENTION_LOG_DIR="$TMP/not-a-dir"; : >"$OCI_RETENTION_LOG_DIR"
+"${ENGINE[@]}" fault builder-prune-fail
+expect_deploy_ok cutover maintenance_fail
+grep -qx 'DEPLOY_RETENTION=FAILED step=simulation reason=LOG_DIR_UNAVAILABLE log=/dev/null' "$TMP/maintenance_fail.out" || fail "falha da retenção: $(grep DEPLOY_RETENTION "$TMP/maintenance_fail.out")"
+grep -qx 'DEPLOY_BUILD_CACHE=FAILED reason=exit_1' "$TMP/maintenance_fail.out" || fail 'falha do cache'
+if grep -q 'Falha: executando rollback' "$TMP/maintenance_fail.out"; then fail 'falha de manutenção reverteu o runtime'; fi
+[[ "$(container_image gest-o-production-api-1)" == "$NEW_API" ]]
+"${ENGINE[@]}" clear builder-prune-fail; export OCI_RETENTION_LOG_DIR="$saved_log_dir"
 
 # F. Cutover without build evidence fails before anything else.
 runtime_reset "$OLD_SHA"
@@ -125,6 +154,7 @@ fresh_build
 expect_deploy_fail cutover wrong_image
 grep -q "api não executa a imagem da evidência de build ($NEW_API)" "$TMP/wrong_image.err"
 rolled_back wrong_image
+if grep -q 'DEPLOY_RETENTION=' "$TMP/wrong_image.out" || grep -q '^docker builder ' "$COMMAND_LOG"; then fail 'manutenção rodou em cutover revertido'; fi
 # I2. Unhealthy service is rolled back too (previously `die` skipped the ERR trap).
 fresh_build
 "${ENGINE[@]}" fault up-unhealthy-web
@@ -141,6 +171,8 @@ grep -qx 'DEPLOY_FAILURE_EXIT_CODE=3' "$TMP/artifact_fail.err"
 grep -q 'NÃO execute rollback' "$TMP/artifact_fail.out"
 if grep -q 'Falha: executando rollback' "$TMP/artifact_fail.out"; then fail 'runtime saudável foi revertido'; fi
 [[ "$(container_image gest-o-production-api-1)" == "$NEW_API" ]]
+grep -qx 'DEPLOY_RETENTION=SKIPPED reason=release_artifact_incomplete' "$TMP/artifact_fail.out" || fail 'retenção rodou com artefato incompleto'
+if grep -q '^docker builder ' "$COMMAND_LOG"; then fail 'cache limpo com artefato incompleto'; fi
 "${ENGINE[@]}" clear save-fail
 
 # K. Engine lost the running image after phase=build: restored from the release artifact.

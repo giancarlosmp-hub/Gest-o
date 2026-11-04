@@ -258,6 +258,21 @@ assert.match(deploy, /build_evidence_load "\$BUILD_EVIDENCE_ROOT" "\$APP_COMMIT"
 assert.match(deploy, /API_IMAGE=\$BUILD_EVIDENCE_API_IMAGE_ID/); assert.match(deploy, /APP_BUILT_AT=\$BUILD_EVIDENCE_BUILT_AT/);
 assert.match(cutoverPath, /"\$\{COMPOSE\[@\]\}" up -d --no-build --no-deps --pull never api web/);
 assert.match(cutoverPath, /não executa a imagem da evidência de build/);
+// Manutenção de disco: só depois da janela do cutover (sem trap ERR), com o artefato da release salvo,
+// dentro de `if` (nunca fatal).  O prune do cache existe só no script pós-cutover, com o comando aprovado.
+const maintenanceCall = 'if bash scripts/production-post-cutover-maintenance.sh "--commit=$APP_COMMIT"; then :; else printf';
+assert.equal(deploy.split("production-post-cutover-maintenance.sh").length, 2, "deploy chama a manutenção num único ponto");
+assert.ok(deploy.includes(maintenanceCall), "manutenção pós-cutover precisa rodar como condição de if");
+const maintenanceAt = deploy.indexOf(maintenanceCall);
+assert.ok(deploy.lastIndexOf("trap - ERR\nCUTOVER_WINDOW=no\n") < maintenanceAt && deploy.lastIndexOf("if release_retention_report; then :; fi") < maintenanceAt, "manutenção só depois do cutover saudável e do relatório");
+assert.ok(/if \[\[ "\$release_failed" == no \]\]; then\n  if bash scripts\/production-post-cutover-maintenance\.sh/.test(deploy), "manutenção só com o artefato da release salvo");
+const maintenance = read("scripts/production-post-cutover-maintenance.sh");
+assert.match(maintenance, /^\s*out=\$\(timeout 15m docker builder prune --force --filter until=168h 2>&1\); rc=\$\?$/m);
+assert.match(maintenance, /\nexit 0\n$/); assert.doesNotMatch(maintenance, /set -e|\bexit [1-9]/);
+const pruneOffenders = [...listFiles("scripts/"), ...listFiles(".github/workflows/")]
+  .filter(path => /\.(?:sh|bash|mjs|cjs|js|ts|ya?ml)$/.test(path) && !path.startsWith("scripts/smoke/"))
+  .filter(path => read(path).split("\n").some(line => !/^\s*#/.test(line) && /builder\s+prune/.test(line)));
+assert.deepEqual(pruneOffenders, ["scripts/production-post-cutover-maintenance.sh"], "docker builder prune só no script pós-cutover");
 assert.match(cutoverPath, /builtAt local .* divergente da evidência de build/);
 // `exit` não dispara o trap ERR: dentro da janela stop/start, die precisa executar o rollback.
 assert.match(deploy, /die\(\)\{ log "ERRO: \$\*" >&2; \[\[ "\$CUTOVER_WINDOW" != yes \]\] \|\| rollback; exit 1; \}/);
