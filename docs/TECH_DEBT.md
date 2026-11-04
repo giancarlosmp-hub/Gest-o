@@ -1363,6 +1363,48 @@ Pendente:
 - (j) A barra de pergunta do Assistente e o botão da Agenda usam `--mobile-action-bar-height` (6rem), um pouco maior que
   a barra de ações real (cerca de 85 px + área segura): sobra uma faixa estreita entre as duas.
 
+#### UX no celular: Oportunidades, Pedidos, Títulos, Integração ERP e Territórios (série de 3 PRs)
+
+Mesmo padrão do Assistente (nada passa da borda, sem rolagem lateral, toque de 44 px). No celular, listas viram
+cartões e os filtros ficam no botão "Filtros (N)"; o desktop continua como estava. Sem mudança de regra nem de API.
+
+Causa das tabelas espremidas: `.crm-page-shell :where(p, h1, h2, h3, h4, dd, td, th) { overflow-wrap: anywhere }`
+(`apps/web/src/index.css`) deixa as células encolherem até uma letra por linha (medido em 360 px: histórico da
+Integração ERP com 2.413 px de altura para 8 linhas). A regra global não foi mexida (vale para todas as tabelas); cada
+tela troca a tabela por cartões no celular.
+
+- PR 1, Oportunidades (feito):
+  - Lista: abaixo de 641 px (classes `opportunity-mobile-only`/`opportunity-desktop-only` já existentes), cartões com
+    cliente, título, etapa, valor, retorno previsto, risco, status de retorno e "Cliente em cobrança"; o vendedor
+    aparece só para diretor/gerente. Ação principal "Detalhes"; Editar, Transferir responsável, Gerar/Reenviar pedido
+    ERP, Ganho, Perdido e Excluir no menu ⋯. Excluir só no menu e sempre pelo modal de confirmação. A tabela de 1500 px
+    (antes com rolagem lateral no celular) fica só no desktop; o ⋯ de celular dentro da linha da tabela saiu.
+  - Filtros (Lista e Pipeline): a busca fica visível; o resto vai para "Filtros (N)" (`MobileFiltersToggle`, abaixo de
+    `sm`). N conta os filtros diferentes do padrão de "Limpar filtros" (`countActiveOpportunityFilters`); o responsável
+    só conta para diretor/gerente. No desktop o invólucro é `sm:contents` e os campos ficam na mesma grade. No celular o
+    bloco de filtros da Lista caiu de 718 px para 134 px de altura (360 px).
+  - Contrato em `apps/web/tests/opportunitiesMobileLayout.test.ts`, encadeado em `test:opportunity-quick-action` (passo
+    que o CI já roda; um passo próprio exige mudar `.github/workflows`).
+- PR 2, Pedidos + Títulos em Aberto + Integração ERP (pendente): Pedidos já são cartões (só padding dobrado, 8 KPIs,
+  valor quebrando e filtros sempre abertos); Títulos em Aberto (`ClientDetailsPage.tsx`) e as duas tabelas da Integração
+  ERP viram cartões. Junto: o texto fixo "Desligada, nada é criado" do painel de Automações Comerciais passa a depender
+  do estado, e o item (j) acima (`--mobile-action-bar-height` para a altura real, cerca de 85 px).
+- PR 3, mapa de Territórios (pendente): fundo OpenStreetMap com Leaflet 1.9.4 puro (sem react-leaflet), atribuição
+  "© OpenStreetMap contributors". Cores, regra, legenda, números do topo e detalhe da cidade iguais, com teste de
+  contrato da regra (`GET /territories/coverage`). Subtítulo do mapa passa a dizer o que o painel mostra (pedidos, valor
+  vendido e oportunidades; hoje promete clientes, oportunidades e pedidos, mas mostra só contagens).
+
+Pendente (fora da série):
+
+- Próximo PR: `apps/web/src/components/settings/ErpIntegrationPanel.tsx` tem fixos no código o nome real de um vendedor e
+  códigos de vendedor/operador do ERP, no bloco "Diagnóstico ERP do vendedor" (marcado como tela temporária) e nos
+  parâmetros da consulta de diagnóstico. Fere a regra de não ter dados reais no código; sair num PR próprio.
+- Oportunidades de reativação da automação (`origin = "automation:inactive_recent"`, valor 0, etapa inicial
+  prospecção, `proposalDate` no dia da criação) contam como "oportunidade aberta" no mapa de Territórios: a cidade fica
+  amarela e entra em "Oportunidade aberta". A rota não filtra por `origin` nem por valor. Não alterado; a decisão de
+  excluir ou não fica para depois.
+- Oportunidades no celular: os 4 KPIs do topo continuam um por linha (não pedido nesta série).
+
 ### TD-COMMERCIAL-AUTOMATIONS-SCHEDULER-BOOTSTRAP — automação de inativos recentes nunca rodou sozinha em produção
 
 **Causa.** O agendador da automação de inativos recentes (`startCommercialAutomationsScheduler`, em
