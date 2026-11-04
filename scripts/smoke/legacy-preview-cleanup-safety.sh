@@ -43,6 +43,7 @@ case "$1 ${2:-}" in
     [[ "$(cat "$d/status")" != running ]] || exit 1
     rm -r "$d"; mut "container rm $3"; exit 0 ;;
   'network ls') for f in "$S"/networks/*; do [[ -e "$f" ]] && basename "$f"; done; exit 0 ;;
+  'volume ls') for f in "$S"/volumes/*; do [[ -e "$f" ]] && basename "$f"; done; exit 0 ;;
   'network rm') [[ "$#" -eq 3 && -e "$S/networks/$3" ]] || { mut "REFUSED $*"; exit 99; }; rm "$S/networks/$3"; mut "network rm $3"; exit 0 ;;
   'volume rm') [[ "$#" -eq 3 && -e "$S/volumes/$3" ]] || { mut "REFUSED $*"; exit 99; }; rm "$S/volumes/$3"; mut "volume rm $3"; exit 0 ;;
   'image inspect')
@@ -233,6 +234,52 @@ expect_stop nginx_site_unexpected "${APPLY[@]}"
 reset; rm -r "${FAKE_STATE:?}/containers/gesto-pr-42-db-1" "${FAKE_STATE:?}/containers/gesto-pr-42-api-1" "${FAKE_STATE:?}/containers/gesto-pr-42-web-1"
 expect_stop no_containers "${APPLY[@]}"
 
+# --- Old volume name gest-o_pgdata_pr_N: accepted only with the exact --pr number. ---
+reset; rm "$FAKE_STATE/volumes/gesto_pgdata_pr_42"; touch "$FAKE_STATE/volumes/gest-o_pgdata_pr_42"
+printf 'volume|gest-o_pgdata_pr_42\n' >"$FAKE_STATE/containers/gesto-pr-42-db-1/mounts"
+run "${APPLY[@]}"
+[[ "$RC" -eq 0 ]] || fail "volume com nome antigo: $OUT"
+grep -Fxq 'volume rm gest-o_pgdata_pr_42' "$FAKE_STATE/mutations" || fail 'volume antigo não removido'
+[[ -e "$FAKE_STATE/volumes/gest-o_pgdata" ]] || fail 'volume de produção removido'
+for other in gest-o_pgdata_pr_420 gest-o_pgdata_pr_4 gest-o_pgdata_pr_42_old; do
+  reset; touch "$FAKE_STATE/volumes/$other"; printf 'volume|%s\n' "$other" >"$FAKE_STATE/containers/gesto-pr-42-db-1/mounts"
+  expect_stop production_volume "${APPLY[@]}"
+done
+reset; touch "$FAKE_STATE/volumes/gest-o_pgdata_pr_42"; printf 'volume|gest-o_pgdata_pr_42\n' >"$FAKE_STATE/containers/gesto-pr-42-api-1/mounts"
+expect_stop volume_names_ambiguous "${APPLY[@]}"
+
+# --- Orphan volume mode: simulation by default, --apply removes only that volume. ---
+orphan_reset(){ reset; touch "$FAKE_STATE/volumes/gesto_pgdata_pr_43" "$FAKE_STATE/volumes/gest-o_pgdata_pr_44" "$FAKE_STATE/volumes/gesto_pgdata_pr_420"; printf '42\tCLOSED\n43\tMERGED\n44\tCLOSED\n420\tOPEN\n' >"$TMP/closed.tsv"; }
+orphan_stop(){ # reason pr args...
+  local reason=$1 pr=$2; shift 2; run "$@"
+  [[ "$RC" -eq 1 ]] && grep -q "LEGACY_PREVIEW_RESULT=STOPPED pr=$pr reason=$reason mutations=0" <<<"$OUT" || fail "órfão: esperado $reason: $OUT"
+  [[ ! -s "$FAKE_STATE/mutations" ]] || fail "órfão $reason alterou estado: $(cat "$FAKE_STATE/mutations")"
+}
+orphan_reset; run --orphan-volume=gesto_pgdata_pr_43 "--closed-prs=$TMP/closed.tsv"
+[[ "$RC" -eq 0 ]] && grep -q 'LEGACY_PREVIEW_RESULT=SIMULATED pr=43 mode=orphan_volume mutations=0' <<<"$OUT" || fail "simulação órfão: $OUT"
+grep -q 'LEGACY_PREVIEW_PLAN object=orphan_volume name=gesto_pgdata_pr_43 containers=0' <<<"$OUT" || fail 'plano órfão'
+[[ ! -s "$FAKE_STATE/mutations" ]] || fail 'simulação órfão alterou estado'
+compgen -G "$LEGACY_CLEANUP_LOG_DIR/*-orphan-volume-pr-43.log" >/dev/null || fail 'log órfão ausente'
+run --orphan-volume=gesto_pgdata_pr_43 "--closed-prs=$TMP/closed.tsv" --apply
+[[ "$RC" -eq 0 ]] && grep -q 'LEGACY_PREVIEW_RESULT=APPLIED pr=43 mode=orphan_volume mutations=1' <<<"$OUT" || fail "apply órfão: $OUT"
+[[ "$(cat "$FAKE_STATE/mutations")" == 'volume rm gesto_pgdata_pr_43' ]] || fail "remoções órfão: $(cat "$FAKE_STATE/mutations")"
+orphan_reset; run --orphan-volume=gest-o_pgdata_pr_44 "--closed-prs=$TMP/closed.tsv" --apply
+[[ "$RC" -eq 0 && "$(cat "$FAKE_STATE/mutations")" == 'volume rm gest-o_pgdata_pr_44' ]] || fail "órfão com nome antigo: $OUT"
+orphan_reset; orphan_stop volume_in_use 42 --orphan-volume=gesto_pgdata_pr_42 "--closed-prs=$TMP/closed.tsv" --apply
+orphan_reset; orphan_stop pr_not_closed 420 --orphan-volume=gesto_pgdata_pr_420 "--closed-prs=$TMP/closed.tsv" --apply
+orphan_reset; orphan_stop volume_not_found 45 --orphan-volume=gesto_pgdata_pr_45 "--closed-prs=$TMP/closed.tsv" --apply
+orphan_reset; printf '43\tCLOSED\n' >"$TMP/closed.tsv"; export FAKE_GH=OPEN
+orphan_stop pr_state_sources_disagree 43 --orphan-volume=gesto_pgdata_pr_43 "--closed-prs=$TMP/closed.tsv" --apply; unset FAKE_GH
+orphan_reset
+for args in "--orphan-volume=gest-o_pgdata --closed-prs=$TMP/closed.tsv --apply" "--orphan-volume=gest-o_pgdata_clean_v2_fict --closed-prs=$TMP/closed.tsv" \
+  "--orphan-volume=gesto_pgdata_pr_0 --closed-prs=$TMP/closed.tsv" "--orphan-volume=outro_pgdata_pr_43 --closed-prs=$TMP/closed.tsv" \
+  "--orphan-volume=gesto_pgdata_pr_43x --closed-prs=$TMP/closed.tsv" "--orphan-volume=gesto_pgdata_pr_43" \
+  "--orphan-volume=gesto_pgdata_pr_43 --closed-prs=$TMP/closed.tsv --pr=43" "--orphan-volume=gesto_pgdata_pr_43 --closed-prs=$TMP/closed.tsv --apply --force"; do
+  # shellcheck disable=SC2086
+  run $args; [[ "$RC" -eq 2 ]] || fail "uso inválido aceito no modo órfão: $args"
+done
+[[ ! -s "$FAKE_STATE/calls" && ! -s "$FAKE_STATE/mutations" ]] || fail 'uso inválido no modo órfão chamou docker'
+
 # --- Usage errors: exit 2, nothing runs. ---
 reset
 for args in "--pr=42" "--pr=abc --closed-prs=$TMP/closed.tsv" "--pr=42 --closed-prs=$TMP/closed.tsv --apply" "--pr=42 --closed-prs=$TMP/closed.tsv --force"; do
@@ -251,4 +298,7 @@ grep -q 'PR_STATE=CLOSED source=file+gh' <<<"$OUT" || fail "gh concordante: $OUT
 body=$(awk '/^legacy_pr_main\(\) \{/{f=1} f{print} f&&/^\}/{exit}' "$SCRIPT")
 if grep -nE 'docker compose|compose down|prune|docker [a-z ]*rm[^|]* -f|rm -rf|rm -fr|--force|crm-preview"' <<<"$body"; then fail 'comando proibido no modo por PR'; fi
 grep -q 'rm -r --one-file-system -- "\$pdir"' <<<"$body" || fail 'remoção da pasta mudou'
+orphan_body=$(awk '/^legacy_orphan_volume_main\(\) \{/{f=1} f{print} f&&/^\}/{exit}' "$SCRIPT")
+if grep -nE 'docker compose|prune| -f\b|--force|\brm\b -|docker (container|image|network) rm' <<<"$orphan_body"; then fail 'comando proibido no modo órfão'; fi
+[[ "$(grep -c 'docker volume rm "\$volume"' <<<"$orphan_body")" -eq 1 ]] || fail 'modo órfão remove mais que o volume'
 printf 'LEGACY_PREVIEW_CLEANUP_SAFETY=PASS\n'
