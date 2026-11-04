@@ -174,6 +174,14 @@ const numberFromErp = (value: unknown) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
+// Mesma regra de antes para tabela (desktop) e cartões (celular): vencido = vencimento passado e saldo > 0.
+const describeOpenTitle = (title: Record<string, unknown>) => {
+  const saldo = numberFromErp(title.SALDO_CAPITAL) || 0;
+  const dueDate = title.DATA_VENCIMENTO ? new Date(String(title.DATA_VENCIMENTO)) : null;
+  const overdue = Boolean(dueDate && !Number.isNaN(dueDate.getTime()) && dueDate.getTime() < Date.now() && saldo > 0);
+  return { saldo, overdue };
+};
+
 export default function ClientDetailsPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -643,16 +651,36 @@ export default function ClientDetailsPage() {
             <h3 className="text-lg font-semibold">Títulos em Aberto</h3>
             <p className="text-sm font-semibold text-slate-700">Total em aberto: {formatCurrency(client.openTitlesTotal || 0)}</p>
           </div>
-          <div className="overflow-x-auto">
+          {/* Celular (abaixo de 640px): um cartão por título; a tabela de 7 colunas fica só a partir de sm. */}
+          <ul className="space-y-2 sm:hidden" aria-label="Títulos em aberto">
+            {titles.map((title, index) => {
+              const { saldo, overdue } = describeOpenTitle(title);
+              return (
+                <li key={`${title.DOCTO || "-"}-${title.PARCELA || "-"}-${index}`} className={`rounded-xl border p-3 text-sm ${overdue ? "border-red-200 bg-red-50/40" : "border-slate-200 bg-white"}`}>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <span className="block font-semibold text-slate-900">Documento {String(title.DOCTO || "-")}</span>
+                      <span className="block text-xs text-slate-500">Parcela {String(title.PARCELA || "-")} · {String(title.DSCFORMA || "-")}</span>
+                    </div>
+                    <span className={`shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold ${overdue ? "bg-red-100 text-red-700" : "bg-emerald-50 text-emerald-700"}`}>{overdue ? "vencido" : "em aberto"}</span>
+                  </div>
+                  <div className="mt-2 flex items-end justify-between gap-2">
+                    <span className="text-xs text-slate-600">Vencimento <span className="block text-sm font-semibold text-slate-800">{formatPtBrDate(String(title.DATA_VENCIMENTO || ""))}</span></span>
+                    <span className="text-right text-xs text-slate-600">Saldo <span className="block whitespace-nowrap text-base font-bold text-slate-900">{formatCurrency(saldo)}</span></span>
+                  </div>
+                  <span className="mt-1 block text-right text-xs text-slate-500">Valor do título <span className="whitespace-nowrap">{formatCurrency(numberFromErp(title.VALOR))}</span></span>
+                </li>
+              );
+            })}
+          </ul>
+          <div className="hidden overflow-x-auto sm:block">
             <table className="min-w-full text-left text-sm">
               <thead className="text-xs uppercase text-slate-500">
                 <tr><th className="px-2 py-2">Documento</th><th className="px-2 py-2">Parcela</th><th className="px-2 py-2">Vencimento</th><th className="px-2 py-2">Forma</th><th className="px-2 py-2">Valor</th><th className="px-2 py-2">Saldo</th><th className="px-2 py-2">Status</th></tr>
               </thead>
               <tbody>
                 {titles.map((title, index) => {
-                  const saldo = numberFromErp(title.SALDO_CAPITAL) || 0;
-                  const dueDate = title.DATA_VENCIMENTO ? new Date(String(title.DATA_VENCIMENTO)) : null;
-                  const overdue = Boolean(dueDate && !Number.isNaN(dueDate.getTime()) && dueDate.getTime() < Date.now() && saldo > 0);
+                  const { saldo, overdue } = describeOpenTitle(title);
                   return (
                     <tr key={`${title.DOCTO || "-"}-${title.PARCELA || "-"}-${index}`} className="border-t border-slate-100">
                       <td className="px-2 py-2">{String(title.DOCTO || "-")}</td>

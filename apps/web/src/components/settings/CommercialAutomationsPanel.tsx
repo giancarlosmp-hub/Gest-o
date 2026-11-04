@@ -110,7 +110,9 @@ export default function CommercialAutomationsPanel({ canEdit }: Props) {
             <span>
               <span className="block font-medium text-slate-800">Ativar automação de inativos recentes</span>
               <span className="mt-1 block text-xs text-slate-500">
-                Desligada, nada é criado. Confira a simulação abaixo antes de ligar.
+                {workflow.enabled
+                  ? "Ligada: cria as oportunidades de reativação no próximo ciclo. Confira a simulação abaixo."
+                  : "Desligada, nada é criado. Confira a simulação abaixo antes de ligar."}
               </span>
             </span>
           </label>

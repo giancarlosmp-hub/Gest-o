@@ -13,7 +13,7 @@
   --brand-soft: #eff8f1;
   --positive: #2f9e44;
   --warning: #f59e0b;
-  --mobile-action-bar-height: 6rem;
+  --mobile-action-bar-height: 5.3125rem; /* altura real da MobileActionBar: pt-2 + botão min-h-16 + pb 12px + borda 1px = 85px (a área segura soma à parte) */
 }
 
 *,

@@ -745,7 +745,24 @@ export default function ErpIntegrationPanel() {
       <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         <h4 className="text-sm font-semibold text-slate-900">Resumo de clientes por vendedor</h4>
         <p className="mt-1 text-xs text-slate-600">Última execução individual por vendedor e escopo (clientes, perfil financeiro e títulos).</p>
-        <div className="mt-3 overflow-x-auto">
+        {/* Celular (abaixo de 640px): um cartão por vendedor e escopo; a tabela de 7 colunas fica só a partir de sm. */}
+        <ul className="mt-3 space-y-2 sm:hidden" aria-label="Resumo de clientes por vendedor">
+          {sellerPartnerRuns.map((item) => (
+            <li key={item.key} className="rounded-lg border border-slate-200 p-3 text-xs">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <span className="block font-semibold text-slate-800">{item.sellerName}</span>
+                  <span className="block text-slate-600">{sellerRunScopeLabel[item.scope] ?? item.scope}</span>
+                </div>
+                <span className={`shrink-0 whitespace-nowrap rounded-full px-2 py-1 font-semibold ring-1 ${statusClasses[item.status] || statusClasses.idle}`}>{statusLabel[item.status] || item.status}</span>
+              </div>
+              <span className="mt-2 block text-slate-600">Recebidos <b className="text-slate-900">{item.syncedCount}</b> · Duração {item.durationMs ?? 0}ms · Chamada ERP {item.requestDurationMs ?? "—"}{item.requestDurationMs != null ? "ms" : ""}</span>
+              {item.error ? <span className="mt-1 block break-words text-red-700">{item.error}</span> : null}
+            </li>
+          ))}
+          {!sellerPartnerRuns.length ? <li className="py-4 text-center text-xs text-slate-500">Nenhuma execução por vendedor registrada.</li> : null}
+        </ul>
+        <div className="mt-3 hidden overflow-x-auto sm:block">
           <table className="min-w-full text-left text-xs">
             <thead className="text-slate-500"><tr><th className="py-2 pr-3">Vendedor</th><th className="py-2 pr-3">Escopo</th><th className="py-2 pr-3">Status</th><th className="py-2 pr-3">Recebidos</th><th className="py-2 pr-3">Duração</th><th className="py-2 pr-3">Chamada ERP</th><th className="py-2 pr-3">Erro</th></tr></thead>
             <tbody className="divide-y divide-slate-100">
@@ -778,14 +795,36 @@ export default function ErpIntegrationPanel() {
       </div>
 
       <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h4 className="text-sm font-semibold text-slate-900">Histórico de execução</h4>
             <p className="mt-1 text-xs text-slate-500">Últimas execuções manuais e automáticas, com métricas, duração e correlationId.</p>
           </div>
           <button type="button" className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50" onClick={() => load().catch(() => undefined)}>Atualizar painel</button>
         </div>
-        <div className="mt-3 overflow-x-auto">
+        {/* Celular (abaixo de 640px): um cartão por execução; a tabela de 10 colunas fica só a partir de sm. */}
+        <ul className="mt-3 space-y-2 sm:hidden" aria-label="Histórico de execução">
+          {(data?.history ?? []).map((item) => (
+            <li key={item.id} className="rounded-lg border border-slate-200 p-3 text-xs">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <span className="block font-semibold text-slate-800">{item.scope}</span>
+                  <span className="block text-slate-700">{item.sellerName || "Global"} · {item.trigger === "scheduler" ? "Automática" : "Manual"}</span>
+                </div>
+                <span className={`shrink-0 whitespace-nowrap rounded-full px-2 py-1 font-semibold ring-1 ${statusClasses[item.status] || statusClasses.idle}`}>{statusLabel[item.status] || item.status}</span>
+              </div>
+              <span className="mt-2 block text-slate-600">{formatDate(item.finishedAt || item.startedAt)} · Qtd. <b className="text-slate-900">{item.syncedCount}</b> · {item.durationMs ?? 0}ms</span>
+              <details className="mt-1 text-slate-500">
+                <summary className="cursor-pointer py-1 font-semibold text-slate-600">Detalhes</summary>
+                <span className="block">Auth: {authModeLabel(item.authMode)}</span>
+                <span className="block break-all font-mono">correlationId: {item.correlationId || "—"}</span>
+              </details>
+              {item.errorMessage ? <span className="mt-1 block break-words text-red-700">{item.errorMessage}</span> : null}
+            </li>
+          ))}
+          {!(data?.history ?? []).length ? <li className="py-4 text-center text-xs text-slate-500">Nenhuma execução registrada.</li> : null}
+        </ul>
+        <div className="mt-3 hidden overflow-x-auto sm:block">
           <table className="min-w-full text-left text-xs">
             <thead className="text-slate-500">
               <tr>
