@@ -1747,7 +1747,7 @@ export default function OpportunitiesPage() {
   };
 
   return (
-    <div className="opportunity-touch-targets space-y-5 pb-4">
+    <div className="opportunity-touch-targets space-y-5 pb-4 max-sm:space-y-0">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <h2 className="text-2xl font-bold text-slate-900">Oportunidades</h2>
         <div className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto sm:justify-end">

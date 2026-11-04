@@ -82,7 +82,11 @@ assert.match(kpiCard, /className="text-sm font-bold text-slate-900 sm:text-base"
 assert.doesNotMatch(formatCurrencyBRL(1234567.89), / /, "moeda sem espaço comum");
 assert.match(formatCurrencyBRL(1234567.89), /^R\$ 1\.234\.567,89$/);
 
-// 7. O menu ⋯ da linha da tabela no celular saiu (a tabela não aparece mais no celular).
+// 7. Espaço entre blocos no celular: o shell já separa os filhos com gap de 16px abaixo de 768px; o space-y-5 somava
+// mais 20px (36px entre o seletor Pipeline/Lista e os KPIs). Abaixo de sm o space-y sai; a partir de sm, como antes.
+assert.match(page, /<div className="opportunity-touch-targets space-y-5 pb-4 max-sm:space-y-0">/);
+
+// 8. O menu ⋯ da linha da tabela no celular saiu (a tabela não aparece mais no celular).
 assert.equal((page.match(/opportunity-mobile-only flex justify-center/g) ?? []).length, 0);
 
 console.log("OPPORTUNITIES_MOBILE_LAYOUT=PASS");
