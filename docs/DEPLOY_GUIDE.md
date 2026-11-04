@@ -1,3 +1,108 @@
+## Limpeza manual de disco na VPS: previews legadas e `oci-backups` (04/11/2026)
+
+Dois scripts manuais, fora do deploy. Os dois simulam por padrão e só removem com `--apply` e a
+contagem esperada. Rode-os com `sudo`, no checkout do repositório na VPS. Os scripts só existem lá
+depois de um Deploy Production que inclua este PR: o checkout da VPS é atualizado pelo próprio deploy
+(`git pull --ff-only` antes do entrypoint), não pelo merge.
+Ambos gravam log com nomes e contagens: `/var/log/gest-o/legacy-preview-cleanup/` e
+`/var/log/gest-o/oci-backups-retention/`. Qualquer `RESULT=STOPPED` significa que nada foi
+removido naquele ponto (`mutations=` mostra quantos objetos já tinham saído). Não contorne a
+parada: leia o `reason` e investigue.
+
+### 1. Previews legadas (`scripts/legacy-preview-cleanup.sh --pr=N`)
+
+Para as 12 previews criadas antes de 30/08/2026 (PRs 535, 538, 539, 542, 545, 546, 547, 549, 570,
+604, 818 e 820), sem rótulos `com.gesto.preview`, que o Preview Cleanup não reconhece. Remove **uma
+preview por execução**: containers `gesto-pr-N-*`, rede `gesto-pr-N_default`, volume
+`gesto_pgdata_pr_N`, imagens api/web do projeto, `/var/www/preview/pr-N` e, se existir, o site
+`crm-preview-pr-N` do nginx. Por nome, sem `compose down`, sem `-f` e sem `prune`.
+O site compartilhado `crm-preview` (que atende todas as previews legadas) nunca é tocado: a saída
+mostra `nginx_site=shared_preserved`.
+
+**a) Lista de PRs fechados, gerada no Windows (PowerShell) e copiada com `scp`.** Obrigatória: o
+script para se o PR não estiver na lista como `CLOSED` ou `MERGED`. Se houver `gh` autenticado na
+VPS, ele também consulta e as duas fontes precisam concordar.
+
+```powershell
+$prs = 535,538,539,542,545,546,547,549,570,604,818,820
+$lines = foreach ($n in $prs) { "$n`t" + (gh pr view $n --repo giancarlosmp-hub/Gest-o --json state -q .state) }
+[IO.File]::WriteAllText("$PWD\closed-prs.tsv", (($lines -join "`n") + "`n"))
+Get-Content .\closed-prs.tsv
+scp -P <porta-ssh> .\closed-prs.tsv <usuario>@<vps>:/root/closed-prs.tsv
+```
+
+`WriteAllText` grava sem BOM e com LF; o script também aceita BOM e CRLF. Confira que todas as
+linhas dizem `CLOSED` ou `MERGED` antes de copiar.
+
+**b) Simulação** (não altera nada):
+
+```bash
+command -v gh && gh auth status   # opcional: mostra se o gh da VPS também será consultado
+sudo bash scripts/legacy-preview-cleanup.sh --pr=535 --closed-prs=/root/closed-prs.tsv
+```
+
+Confira `LEGACY_PREVIEW_COUNTS`: esperado `containers=3` (db, api, web), `volumes=1`, `images=2`.
+Com `running>0`, o apply para (`containers_running`): pare antes só os containers listados, por
+nome (`sudo docker stop gesto-pr-535-db-1 gesto-pr-535-api-1 gesto-pr-535-web-1`), e simule de novo.
+
+**c) Apply**, com a contagem vista na simulação:
+
+```bash
+sudo bash scripts/legacy-preview-cleanup.sh --pr=535 --closed-prs=/root/closed-prs.tsv --apply --expect-containers=3
+```
+
+**d) Conferência de produção** depois de cada PR:
+
+```bash
+docker ps --format '{{.Names}}\t{{.Status}}' | grep -E '^gest-o-(production|db)'
+curl -fsS --max-time 5 http://127.0.0.1:4000/health/version
+docker volume ls --format '{{.Name}}' | grep -E '^gest-o_pgdata'
+```
+
+**e) Espaço:** `df -h /`. Só então passe ao próximo PR.
+
+Paradas principais (`reason=`):
+
+| Motivo | Significado |
+|---|---|
+| `pr_not_closed`, `pr_state_missing_or_duplicated`, `pr_state_sources_disagree` | estado do PR não comprovado como fechado |
+| `production_volume`, `unexpected_volume`, `volume_used_outside_project` | algum container monta volume diferente de `gesto_pgdata_pr_N`, ou o volume é usado fora do projeto |
+| `image_protected_tag`, `image_foreign_tag`, `image_used_outside_project`, `image_in_deploy_evidence` | imagem com tag de produção/rollback/release/rebaseline, de outro projeto, usada por outro container ou citada em `/var/log/gest-o/{deploy,deploy-builds,rebaseline,oci-backups}` |
+| `container_name_not_legacy`, `container_has_new_preview_labels`, `container_set_diverged` | o conjunto não é uma preview legada (preview nova ou rótulos divergentes) |
+| `expect_containers_mismatch`, `containers_running` | contagem diferente da informada ou container rodando |
+| `preview_dir_symlink`, `preview_dir_path_diverged`, `preview_dir_has_new_preview` | pasta da preview não é exatamente `/var/www/preview/pr-N` ou contém preview nova |
+| `nginx_test_failed_site_restored` | `nginx -t` falhou depois de remover `crm-preview-pr-N`; o site foi restaurado e o nginx não foi recarregado |
+
+### 2. Retenção de `oci-backups` (`scripts/oci-backups-retention.sh`)
+
+Apaga pastas `/var/log/gest-o/oci-backups/<commit>/` cujos tars estão **todos** como
+`would_delete superseded` no relatório de retenção mais recente
+(`/var/log/gest-o/release-retention/<UTC>.tsv`, gravado a cada `phase=build` e `phase=cutover`).
+As proteções são recalculadas pelo próprio script, e a pasta fica se for: uma das 2 releases mais
+recentes por papel, a atual (imagem em uso ou commit do último cutover saudável), a de rollback
+(`previous-runtime.tsv` e `rollback-artifacts.tsv` do último cutover saudável), a do `build.tsv`
+pendente, sem `.release.tsv` (rebaseline/legado), com registro inverificável ou com arquivo fora do
+padrão `<role>.<hex>.tar.gz`/`.release.tsv`. Remove arquivo por arquivo e depois faz `rmdir`.
+Não remove tags do Docker (fica para depois, em `TD-DEPLOY-RETENTION-DELETE`).
+
+```bash
+sudo bash scripts/oci-backups-retention.sh                       # simulação: OCI_RETENTION_PLAN por pasta
+sudo bash scripts/oci-backups-retention.sh --apply --expect=<N>   # N = candidates= da simulação
+```
+
+O script 2 precisa de um relatório de retenção **mais novo que a última release** (o `released_at`
+do `.release.tsv` mais recente). O script não gera esse relatório: ele é gravado pelo próprio
+deploy, no fim de cada `phase=build` (e do `phase=cutover`, depois de salvar a release nova). Se
+parar com `report_stale` (há release mais nova que o relatório) ou `report_missing`, é isso que
+falta: um novo `phase=build`, aprovado como qualquer deploy, grava um relatório atualizado. Pastas de rebaseline (`gest-o-api.tar`,
+`gest-o-web.tar`) aparecem como `keep reason=...no_release_record` e não são removidas por este
+script. Depois do apply, faça a mesma conferência de produção do item 1d, confira que as pastas do
+commit atual e do rollback continuam em `/var/log/gest-o/oci-backups/` e rode `df -h /`.
+
+**Testes:** `scripts/smoke/legacy-preview-cleanup-safety.sh` (em `npm run test:docker-cleanup-safety`)
+e `scripts/smoke/oci-backups-retention-safety.sh` (em `npm run test:production-deploy`), com Docker
+falso e dados fictícios. Só rodam inteiros em Linux e no CI.
+
 ## Migration `20261103120000_opportunity_origin_agenda_stop_client_index` (03/11/2026)
 
 Só aditiva, sem `UPDATE`/`DELETE`: coluna `TEXT` opcional `Opportunity.origin` (sem default) e índice

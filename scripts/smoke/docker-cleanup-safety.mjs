@@ -93,6 +93,14 @@ assert.deepEqual(inventory.images[0].tags, ['same:a', 'same:b']);
 assert.equal(inventory.images[0].containers[0].state, 'exited', 'stopped container must remain a reference');
 assert.equal(inventory.images[0].classification, 'vínculo desconhecido, preservar');
 
+// The manifest mode stays read-only; removal exists only in the --pr mode,
+// covered by scripts/smoke/legacy-preview-cleanup-safety.sh.
 const cleanupSource = readFileSync(join(root, 'scripts/legacy-preview-cleanup.sh'), 'utf8');
-assert.doesNotMatch(cleanupSource, /docker\s+(container|network|volume|image)\s+rm|compose\s+down|prune/);
-console.log('DOCKER_CLEANUP_SAFETY=PASS apply=disabled');
+const manifestStart = cleanupSource.indexOf('\n# Manifest mode');
+assert.ok(manifestStart > 0, 'manifest mode section not found');
+const manifestMode = cleanupSource.slice(manifestStart);
+assert.match(manifestMode, /APPLY_DISABLED/);
+assert.doesNotMatch(manifestMode, /docker\s+(container|network|volume|image)\s+rm|compose\s+down|prune|\brm\s/);
+const cleanupCode = cleanupSource.split('\n').filter(line => !/^\s*#/.test(line)).join('\n');
+assert.doesNotMatch(cleanupCode, /compose\s+down|prune|rm\s+-rf/);
+console.log('DOCKER_CLEANUP_SAFETY=PASS manifest_apply=disabled');
