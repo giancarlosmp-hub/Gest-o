@@ -82,7 +82,7 @@ grep -q "gest-o-api:$SHA aponta para $RELEASED, que já possui artefato de relea
 fresh_build
 expect_deploy_ok cutover cutover
 out="$TMP/cutover.out"; ev="$DEPLOY_EVIDENCE_DIR/$SHA"
-if grep -Eq '^docker compose .* build|^docker build' "$COMMAND_LOG"; then fail 'cutover fez rebuild'; fi
+if grep -Eq '^docker compose .* build|^docker build( |$)' "$COMMAND_LOG"; then fail 'cutover fez rebuild'; fi
 grep -q "^DEPLOY_BUILD_EVIDENCE=LOADED path=$BUILD_EVIDENCE_DIR/$SHA/build.tsv api_image_id=$NEW_API web_image_id=$NEW_WEB" "$out"
 grep -q '^docker compose .* up -d --no-build --no-deps --pull never api web$' "$COMMAND_LOG"
 [[ "$(container_image gest-o-production-api-1)" == "$NEW_API" && "$(container_image gest-o-production-web-1)" == "$NEW_WEB" ]]

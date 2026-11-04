@@ -249,7 +249,7 @@ reset; touch "$FAKE_STATE/volumes/gest-o_pgdata_pr_42"; printf 'volume|gest-o_pg
 expect_stop volume_names_ambiguous "${APPLY[@]}"
 
 # --- Orphan volume mode: simulation by default, --apply removes only that volume. ---
-orphan_reset(){ reset; touch "$FAKE_STATE/volumes/gesto_pgdata_pr_43" "$FAKE_STATE/volumes/gest-o_pgdata_pr_44" "$FAKE_STATE/volumes/gesto_pgdata_pr_420"; printf '42\tCLOSED\n43\tMERGED\n44\tCLOSED\n420\tOPEN\n' >"$TMP/closed.tsv"; }
+orphan_reset(){ reset; touch "$FAKE_STATE/volumes/gesto_pgdata_pr_43" "$FAKE_STATE/volumes/gest-o_pgdata_pr_44" "$FAKE_STATE/volumes/gesto_pgdata_pr_420"; printf '42\tCLOSED\n43\tMERGED\n44\tCLOSED\n45\tCLOSED\n420\tOPEN\n' >"$TMP/closed.tsv"; }
 orphan_stop(){ # reason pr args...
   local reason=$1 pr=$2; shift 2; run "$@"
   [[ "$RC" -eq 1 ]] && grep -q "LEGACY_PREVIEW_RESULT=STOPPED pr=$pr reason=$reason mutations=0" <<<"$OUT" || fail "órfão: esperado $reason: $OUT"
