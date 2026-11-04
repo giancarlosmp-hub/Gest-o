@@ -424,6 +424,14 @@ done
 # Report only (always returns 0); run as a condition so `set -e` cannot make a
 # report problem fatal after a healthy cutover.
 if release_retention_report; then :; fi
+# Disk maintenance (retention of oci-backups/tags and build cache older than
+# 7 days) only after a healthy cutover whose release artifact was saved.  It
+# prints DEPLOY_RETENTION=... and DEPLOY_BUILD_CACHE=... and never fails the deploy.
+if [[ "$release_failed" == no ]]; then
+  if bash scripts/production-post-cutover-maintenance.sh "--commit=$APP_COMMIT"; then :; else printf 'DEPLOY_RETENTION=FAILED reason=maintenance_exit_%s\n' "$?"; fi
+else
+  printf 'DEPLOY_RETENTION=SKIPPED reason=release_artifact_incomplete\n'
+fi
 if [[ "$release_failed" == yes ]]; then
   log "Runtime $APP_COMMIT saudável, mas o artefato de release não foi concluído. NÃO execute rollback: o próximo phase=build recria o artefato."
   exit 3

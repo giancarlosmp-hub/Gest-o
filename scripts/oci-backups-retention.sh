@@ -4,6 +4,9 @@
 #
 #   oci-backups-retention.sh                      simulation: lists candidates and sizes
 #   oci-backups-retention.sh --apply --expect=N   removes exactly the N candidates
+#   oci-backups-retention.sh --apply --expect=N --expect-tags=M
+#                                                 also removes exactly the M tag candidates
+#                                                 (N may then be 0; N+M must be at least 1)
 #
 # A <commit> folder is a candidate only when every tar in it is reported as
 # "release ... would_delete superseded" by the newest retention report
@@ -14,22 +17,37 @@
 # (rebaseline/legacy) or with an unverifiable record.  The protections are
 # recomputed here; the report alone is never enough.
 #
-# Removal is file by file (rm -- <folder>/<name>) followed by rmdir.  Docker
-# tags are not touched.
+# Removal is file by file (rm -- <folder>/<name>) followed by rmdir.
+#
+# Docker tags gest-o-<role>:*, gest-o-<role>-release:* and gest-o-<role>-rollback:*
+# (never -rebaseline) are tag candidates when their image is none of: used by a
+# container (stopped included), the rollback set, the pending build, an image of
+# a folder that stays (record ID, file name or commit in the tag name) or an
+# image cited by rebaseline evidence.  They are removed only with --expect-tags,
+# after the folders, by name with `docker image rm <tag>` (never -f, never an ID).
+# Production calls this after a healthy cutover through
+# production-post-cutover-maintenance.sh.
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib/production-release-artifact.sh
 source "$SCRIPT_DIR/lib/production-release-artifact.sh"
 
-apply=no expect=''
+apply=no expect='' expect_tags=''
 for arg in "$@"; do
   case "$arg" in
     --apply) apply=yes ;;
     --expect=*) expect=${arg#--expect=} ;;
+    --expect-tags=*) expect_tags=${arg#--expect-tags=} ;;
     *) echo 'OCI_RETENTION_RESULT=INVALID_ARGUMENT'; exit 2 ;;
   esac
 done
-if [[ "$apply" == yes && ! "$expect" =~ ^[1-9][0-9]*$ ]]; then echo 'OCI_RETENTION_RESULT=EXPECT_REQUIRED'; exit 2; fi
+if [[ "$apply" == yes ]]; then
+  if [[ -z "$expect_tags" ]]; then
+    [[ "$expect" =~ ^[1-9][0-9]*$ ]] || { echo 'OCI_RETENTION_RESULT=EXPECT_REQUIRED'; exit 2; }
+  elif [[ ! "$expect" =~ ^(0|[1-9][0-9]*)$ || ! "$expect_tags" =~ ^(0|[1-9][0-9]*)$ || "$expect$expect_tags" == 00 ]]; then
+    echo 'OCI_RETENTION_RESULT=EXPECT_REQUIRED'; exit 2
+  fi
+fi
 
 KEEP=2
 root=$(release_artifact_root)
@@ -165,14 +183,63 @@ for name in "${dirs[@]}"; do
 done
 say "OCI_RETENTION_COUNTS dirs=${#dirs[@]} candidates=${#candidates[@]} keep=$(( ${#dirs[@]} - ${#candidates[@]} )) candidate_bytes=$candidate_bytes"
 
+# --- Docker tags: what stays after the folder plan protects its images. ---
+kept_ids='' kept_names=''
+for name in "${dirs[@]}"; do
+  [[ -n "${reasons[$name]}" ]] || continue
+  kept_names+="$name"$'
+'
+  while IFS= read -r base; do
+    if [[ "$base" =~ ^(api|web)\.([0-9a-f]{64})\. ]]; then kept_ids+="sha256:${BASH_REMATCH[2]}"$'
+'; fi
+  done <<<"${files[$name]}"
+done
+while IFS=$'	' read -r _ _ name id runtime _; do
+  [[ -n "$name" && -n "${reasons[$name]}" ]] || continue
+  kept_ids+="$id"$'
+'"$runtime"$'
+'
+done <<<"$rows"
+rebaseline_dir=${REBASELINE_EVIDENCE_DIR:-/var/log/gest-o/rebaseline}
+if [[ -e "$rebaseline_dir" ]]; then [[ -d "$rebaseline_dir" ]] || stop rebaseline_evidence_unreadable; fi
+image_rows=$(docker image ls --no-trunc --format '{{.Repository}}:{{.Tag}}{{"	"}}{{.ID}}') || stop images_unreadable
+rebaseline_ids=$(awk -F'	' '$1 ~ /^gest-o-(api|web)-rebaseline:/{print $2}' <<<"$image_rows")
+tag_candidates=()
+declare -A tag_planned=()
+while IFS=$'	' read -r tag id; do
+  [[ "$tag" =~ ^gest-o-(api|web)(-release|-rollback)?:([A-Za-z0-9_.-]+)$ ]] || continue
+  ref=${BASH_REMATCH[3]} why=''
+  if [[ ! "$id" =~ ^sha256:[0-9a-f]{64}$ ]]; then why+="id_unreadable,"
+  else
+    if grep -Fxq -e "$id" <<<"$in_use"; then why+="in_use,"; fi
+    if grep -Fxq -e "$id" <<<"$rollback_ids" || grep -Fxq -e "$ref" <<<"$rollback_commits"; then why+="current_rollback,"; fi
+    if [[ -n "$current_commit" && "$ref" == "$current_commit" ]]; then why+="current,"; fi
+    if grep -Fxq -e "$id" <<<"$pending_ids"; then why+="build_pending,"; fi
+    if grep -Fxq -e "$id" <<<"$kept_ids" || grep -Fxq -e "$ref" <<<"$kept_names"; then why+="kept_release,"; fi
+    if grep -Fxq -e "$id" <<<"$rebaseline_ids"; then why+="rebaseline,"
+    elif [[ -d "$rebaseline_dir" ]]; then
+      rc=0; grep -rlqF --exclude='*.tar' --exclude='*.tar.gz' -e "${id#sha256:}" -- "$rebaseline_dir" 2>>"$log" || rc=$?
+      case "$rc" in 0) why+="rebaseline," ;; 1) ;; *) stop rebaseline_evidence_unreadable ;; esac
+    fi
+  fi
+  if [[ -z "$why" ]]; then
+    tag_candidates+=("$tag"); tag_planned[$tag]=$id
+    say "OCI_RETENTION_TAG tag=$tag id=$id decision=candidate"
+  else
+    say "OCI_RETENTION_TAG tag=$tag id=$id decision=keep reason=${why%,}"
+  fi
+done <<<"$image_rows"
+say "OCI_RETENTION_TAG_COUNTS candidates=${#tag_candidates[@]}"
+
 if [[ "$apply" != yes ]]; then
-  say "OCI_RETENTION_RESULT=SIMULATED candidates=${#candidates[@]} mutations=0"
+  say "OCI_RETENTION_RESULT=SIMULATED candidates=${#candidates[@]} mutations=0 tag_candidates=${#tag_candidates[@]}"
   say "OCI_RETENTION_LOG=$log"
   exit 0
 fi
 
 # --- Apply: one file at a time by name, then rmdir (never recursive). ---
 [[ "$expect" == "${#candidates[@]}" ]] || stop expect_mismatch
+if [[ -n "$expect_tags" ]]; then [[ "$expect_tags" == "${#tag_candidates[@]}" ]] || stop expect_tags_mismatch; fi
 for name in "${candidates[@]}"; do
   d="$root/$name"
   [[ -d "$d" && ! -L "$d" && "$(realpath -e -- "$d")" == "$root_real/$name" ]] || stop dir_changed
@@ -192,6 +259,28 @@ for name in "${candidates[@]}"; do
   mutations=$((mutations + 1))
   say "OCI_RETENTION_REMOVED dir=$name"
 done
+
+# --- Tags: by name, after re-reading what the containers use now. ---
+removed_tags=0
+if [[ -z "$expect_tags" ]]; then
+  say "OCI_RETENTION_TAGS=NOT_APPLIED reason=expect_tags_absent candidates=${#tag_candidates[@]}"
+elif (( ${#tag_candidates[@]} > 0 )); then
+  cids=$(docker ps -aq --no-trunc) || stop containers_unreadable
+  in_use=''
+  for cid in $cids; do
+    img=$(docker inspect -f '{{.Image}}' "$cid" 2>/dev/null) || stop container_image_unreadable
+    in_use+="$img"$'
+'
+  done
+  for tag in "${tag_candidates[@]}"; do
+    now=$(docker image inspect -f '{{.Id}}' "$tag" 2>/dev/null) || stop tag_changed
+    [[ "$now" == "${tag_planned[$tag]}" ]] || stop tag_changed
+    if grep -Fxq -e "$now" <<<"$in_use"; then stop tag_now_in_use; fi
+    docker image rm "$tag" </dev/null >>"$log" 2>&1 || stop tag_rm_failed
+    mutations=$((mutations + 1)); removed_tags=$((removed_tags + 1))
+    say "OCI_RETENTION_REMOVED tag=$tag id=$now"
+  done
+fi
 avail_kb=$(df -Pk -- "$root" 2>/dev/null | awk 'NR==2{print $4}')
-say "OCI_RETENTION_RESULT=APPLIED removed_dirs=${#candidates[@]} mutations=$mutations avail_kb=${avail_kb:-unknown}"
+say "OCI_RETENTION_RESULT=APPLIED removed_dirs=${#candidates[@]} mutations=$mutations removed_tags=$removed_tags avail_kb=${avail_kb:-unknown}"
 say "OCI_RETENTION_LOG=$log"

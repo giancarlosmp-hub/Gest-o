@@ -93,6 +93,33 @@ try {
     "",
   ].join("\n"));
   chmodSync(join(fakeBin, "curl"), 0o755);
+  // Disco fictício: FAKE_DF_ROOT / FAKE_DF_DOCKER / FAKE_DF_LOG = percentual ou "fail".
+  writeFileSync(join(fakeBin, "df"), [
+    "#!/usr/bin/env bash",
+    'p="${*: -1}"',
+    'case "$p" in /) v=${FAKE_DF_ROOT:-50} ;; /var/lib/docker) v=${FAKE_DF_DOCKER:-50} ;; /var/log/gest-o) v=${FAKE_DF_LOG:-50} ;; *) exit 9 ;; esac',
+    '[[ "$v" != fail ]] || exit 1',
+    "printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\\nfake 100 %s %s %s%% %s\\n' \"$v\" \"$((100 - v))\" \"$v\" \"$p\"",
+    "",
+  ].join("\n"));
+  writeFileSync(join(fakeBin, "du"), [
+    "#!/usr/bin/env bash",
+    "printf '10\\t/var/log/gest-o/deploy\\n900\\t/var/log/gest-o/oci-backups\\n30\\t/var/log/gest-o/schema\\n500\\t/var/log/gest-o/rebaseline\\n20\\t/var/log/gest-o/deploy-builds\\n40\\t/var/log/gest-o/release-retention\\n'",
+    "",
+  ].join("\n"));
+  writeFileSync(join(fakeBin, "docker"), [
+    "#!/usr/bin/env bash",
+    'printf \'%s\\n\' "$*" >>"$FAKE_DOCKER_CALLS"',
+    'case "$*" in',
+    "  'system df') printf 'TYPE TOTAL ACTIVE SIZE RECLAIMABLE\\nImages 9 2 9.9GB 7GB (70%%)\\nBuild Cache 3 0 2GB 2GB\\n' ;;",
+    "  'system df -v') printf 'Images space usage:\\n\\nREPOSITORY TAG\\n\\nLocal Volumes space usage:\\n\\nVOLUME NAME LINKS SIZE\\nvolume_ficticio_a 1 1.5GB\\nvolume_ficticio_b 0 20MB\\n\\nBuild cache usage: 2GB\\n' ;;",
+    "  image\\ ls*) printf '1.1GB\\tsha256:aa\\timagem-ficticia:um\\n1.1GB\\tsha256:aa\\timagem-ficticia:alias\\n300MB\\tsha256:bb\\timagem-ficticia:dois\\n' ;;",
+    "  *) exit 97 ;;",
+    "esac",
+    "",
+  ].join("\n"));
+  for (const name of ["df", "du", "docker"]) chmodSync(join(fakeBin, name), 0o755);
+  const dockerCalls = join(driftTmp, "docker-calls");
   git(driftTmp, "init", "-q", "--bare", "origin.git");
   git(join(driftTmp, "origin.git"), "symbolic-ref", "HEAD", "refs/heads/main");
   const vps = join(driftTmp, "vps"), other = join(driftTmp, "other");
@@ -104,7 +131,7 @@ try {
   const health = commitSha => ({ FAKE_HEALTH_BODY: JSON.stringify({ commit: commitSha, builtAt: "2026-10-07T00:00:00Z" }) });
   const runDrift = healthEnv => spawnSync("bash", ["-s"], {
     input: drift.script.replace(driftCd, 'cd "$DRIFT_REPO"'),
-    env: { ...process.env, DRIFT_REPO: vps, PATH: `${fakeBin}${delimiter}${process.env.PATH}`, FAKE_HEALTH_EXIT: "0", FAKE_HEALTH_BODY: "", ...healthEnv },
+    env: { ...process.env, DRIFT_REPO: vps, PATH: `${fakeBin}${delimiter}${process.env.PATH}`, FAKE_HEALTH_EXIT: "0", FAKE_HEALTH_BODY: "", FAKE_DOCKER_CALLS: dockerCalls, ...healthEnv },
     encoding: "utf8",
   });
 
@@ -112,6 +139,35 @@ try {
   assert.equal(clean.status, 0, `drift limpo: ${clean.stderr}`);
   assert.doesNotMatch(clean.stdout, /\[INFO\]/);
   assert.match(clean.stdout, new RegExp(`^\\[OK\\] VPS working tree limpo e HEAD igual ao commit em produção \\(${production}\\)\\.$`, "m"));
+  assert.match(clean.stdout, /^\/ \(montado em \/\): 50%$/m);
+  assert.match(clean.stdout, /^\/var\/lib\/docker \(montado em \/var\/lib\/docker\): 50%$/m);
+  assert.match(clean.stdout, /^\/var\/log\/gest-o \(montado em \/var\/log\/gest-o\): 50%$/m);
+
+  // Disco: 80% passa; acima de 80% em qualquer caminho reprova, com uso, maiores itens e docker system df.
+  writeFileSync(dockerCalls, "");
+  const atLimit = runDrift({ ...health(production), FAKE_DF_ROOT: "80", FAKE_DF_DOCKER: "80", FAKE_DF_LOG: "80" });
+  assert.equal(atLimit.status, 0, `disco em 80%: ${atLimit.stderr}`);
+  assert.equal(readFileSync(dockerCalls, "utf8"), "", "docker chamado sem disco cheio");
+  for (const full of [{ FAKE_DF_ROOT: "81" }, { FAKE_DF_DOCKER: "92" }, { FAKE_DF_LOG: "85" }]) {
+    writeFileSync(dockerCalls, "");
+    const result = runDrift({ ...health(production), ...full });
+    assert.equal(result.status, 1, `disco cheio ${JSON.stringify(full)}: ${result.stdout}`);
+    assert.match(result.stderr, /^\[CRITICAL\] Disco acima de 80% na VPS!$/m);
+    assert.match(result.stderr, new RegExp(`: ${Object.values(full)[0]}%$`, "m"));
+    assert.match(result.stderr, /--- 5 maiores itens de \/var\/log\/gest-o \(MB\) ---\n900\t\/var\/log\/gest-o\/oci-backups\n500\t\/var\/log\/gest-o\/rebaseline\n40\t[^\n]+\n30\t[^\n]+\n20\t[^\n]+\n\n/);
+    assert.match(result.stderr, /--- docker system df ---\nTYPE TOTAL ACTIVE SIZE RECLAIMABLE\nImages 9 2 9\.9GB/);
+    assert.match(result.stderr, /--- 5 maiores imagens ---\n1\.1GB\tsha256:aa\timagem-ficticia:um\n300MB\tsha256:bb\timagem-ficticia:dois\n\n/);
+    assert.match(result.stderr, /--- 5 maiores volumes ---\n1\.5GB\tvolume_ficticio_a\n20MB\tvolume_ficticio_b\n\n/);
+    assert.doesNotMatch(result.stderr, /Drift detectado/);
+    assert.doesNotMatch(result.stdout, /\[OK\]/);
+    assert.deepEqual(readFileSync(dockerCalls, "utf8").trim().split("\n").map(line => line.split(" ").slice(0, 2).join(" ")).sort(), ["image ls", "system df", "system df"], "docker só com comandos de leitura");
+  }
+  const unreadable = runDrift({ ...health(production), FAKE_DF_DOCKER: "fail" });
+  assert.equal(unreadable.status, 0, `df ilegível não reprova: ${unreadable.stderr}`);
+  assert.match(unreadable.stdout, /^\/var\/lib\/docker: uso ilegível$/m);
+  const fullAndDrift = runDrift({ ...health("a".repeat(40)), FAKE_DF_ROOT: "95" });
+  assert.equal(fullAndDrift.status, 1);
+  assert.match(fullAndDrift.stderr, /Disco acima de 80%[\s\S]*Divergência de SHA entre HEAD local e o commit em produção/);
 
   git(driftTmp, "clone", "-q", "origin.git", "other");
   commit(other, "docs-only");
@@ -258,6 +314,21 @@ assert.match(deploy, /build_evidence_load "\$BUILD_EVIDENCE_ROOT" "\$APP_COMMIT"
 assert.match(deploy, /API_IMAGE=\$BUILD_EVIDENCE_API_IMAGE_ID/); assert.match(deploy, /APP_BUILT_AT=\$BUILD_EVIDENCE_BUILT_AT/);
 assert.match(cutoverPath, /"\$\{COMPOSE\[@\]\}" up -d --no-build --no-deps --pull never api web/);
 assert.match(cutoverPath, /não executa a imagem da evidência de build/);
+// Manutenção de disco: só depois da janela do cutover (sem trap ERR), com o artefato da release salvo,
+// dentro de `if` (nunca fatal).  O prune do cache existe só no script pós-cutover, com o comando aprovado.
+const maintenanceCall = 'if bash scripts/production-post-cutover-maintenance.sh "--commit=$APP_COMMIT"; then :; else printf';
+assert.equal(deploy.split("production-post-cutover-maintenance.sh").length, 2, "deploy chama a manutenção num único ponto");
+assert.ok(deploy.includes(maintenanceCall), "manutenção pós-cutover precisa rodar como condição de if");
+const maintenanceAt = deploy.indexOf(maintenanceCall);
+assert.ok(deploy.lastIndexOf("trap - ERR\nCUTOVER_WINDOW=no\n") < maintenanceAt && deploy.lastIndexOf("if release_retention_report; then :; fi") < maintenanceAt, "manutenção só depois do cutover saudável e do relatório");
+assert.ok(/if \[\[ "\$release_failed" == no \]\]; then\n  if bash scripts\/production-post-cutover-maintenance\.sh/.test(deploy), "manutenção só com o artefato da release salvo");
+const maintenance = read("scripts/production-post-cutover-maintenance.sh");
+assert.match(maintenance, /^\s*out=\$\(timeout 15m docker builder prune --force --filter until=168h 2>&1\); rc=\$\?$/m);
+assert.match(maintenance, /\nexit 0\n$/); assert.doesNotMatch(maintenance, /set -e|\bexit [1-9]/);
+const pruneOffenders = [...listFiles("scripts/"), ...listFiles(".github/workflows/")]
+  .filter(path => /\.(?:sh|bash|mjs|cjs|js|ts|ya?ml)$/.test(path) && !path.startsWith("scripts/smoke/"))
+  .filter(path => read(path).split("\n").some(line => !/^\s*#/.test(line) && /builder\s+prune/.test(line)));
+assert.deepEqual(pruneOffenders, ["scripts/production-post-cutover-maintenance.sh"], "docker builder prune só no script pós-cutover");
 assert.match(cutoverPath, /builtAt local .* divergente da evidência de build/);
 // `exit` não dispara o trap ERR: dentro da janela stop/start, die precisa executar o rollback.
 assert.match(deploy, /die\(\)\{ log "ERRO: \$\*" >&2; \[\[ "\$CUTOVER_WINDOW" != yes \]\] \|\| rollback; exit 1; \}/);

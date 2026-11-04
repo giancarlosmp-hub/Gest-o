@@ -1,3 +1,54 @@
+## Disco da VPS: retenção automática no cutover e alerta acima de 80% (04/11/2026)
+
+Continuação da limpeza manual abaixo (o disco chegou a 92% em 03-04/11/2026). A retenção passa a
+valer no primeiro `phase=cutover` que incluir o PR, porque o checkout da VPS só é atualizado pelo
+deploy. O alerta vale já no primeiro run do VPS Drift Detection depois do merge, porque o script é
+inline no workflow da `main`.
+
+**1. Depois de um `phase=cutover` saudável**, `scripts/deploy-production.sh` chama
+`scripts/production-post-cutover-maintenance.sh --commit=<sha>`. A chamada acontece depois que o
+runtime novo passou por todas as checagens, depois de salvar o artefato da release e de gravar o
+relatório de retenção, fora da janela de rollback. Ela só roda se `index.local.html` do commit
+existir e o artefato da release tiver sido salvo. No `exit 3` (artefato incompleto) sai
+`DEPLOY_RETENTION=SKIPPED reason=release_artifact_incomplete`.
+
+- **Retenção:** roda `scripts/oci-backups-retention.sh` em simulação e depois
+  `--apply --expect=<N> --expect-tags=<M>`, com as contagens que a própria simulação mostrou. As
+  regras são as mesmas da execução manual (seção 2 abaixo): pastas e tags.
+- **Cache de build:** `docker builder prune --force --filter until=168h` remove só o cache com
+  mais de 7 dias. É a única exceção aprovada à regra de não usar prune/`--force`: existe só neste
+  script, depois de cutover saudável, e o smoke reprova esse comando em qualquer outro arquivo de
+  `scripts/` ou `.github/workflows/`.
+- **Nunca falha o deploy:** o script sempre sai 0. O log do job mostra
+  `DEPLOY_RETENTION=OK removed_dirs=… removed_tags=…` ou `DEPLOY_RETENTION=FAILED step=… reason=…`,
+  e também `DEPLOY_BUILD_CACHE=OK reclaimed=…` ou `DEPLOY_BUILD_CACHE=FAILED`. A saída completa vai
+  para `/var/log/gest-o/oci-backups-retention/<UTC>-post-cutover.log`, e a da retenção também para
+  o próprio log dela, no mesmo diretório. Com `FAILED`, o runtime continua como está, **não**
+  execute rollback: leia o `reason` e, se for o caso, rode a retenção manual abaixo.
+
+**2. Alerta de disco no VPS Drift Detection** (diário, 06:00 BRT). O run mostra o uso de `/`,
+`/var/lib/docker` e `/var/log/gest-o` e **falha** quando qualquer um passa de 80%, e o GitHub manda o
+e-mail de falha. Na falha, o log traz `[CRITICAL] Disco acima de 80% na VPS!` com:
+
+- o uso dos três caminhos;
+- os 5 maiores itens de `/var/log/gest-o` (em MB);
+- o `docker system df`;
+- as 5 maiores imagens e os 5 maiores volumes (`docker system df -v`).
+
+Exatamente 80% não reprova. Uso ilegível aparece como `uso ilegível` e não reprova. Drift e disco
+cheio aparecem juntos no mesmo run. É só leitura: o alerta não apaga nada.
+
+**Testes:** `scripts/smoke/production-cutover-no-rebuild-safety.sh`, que roda o cutover real com o
+Docker falso:
+
+- tag órfã removida por nome;
+- falha da retenção e do cache sem rollback;
+- nada roda no `exit 3` nem em cutover revertido.
+
+`scripts/smoke/oci-backups-retention-safety.sh` cobre as tags e `scripts/smoke/production-deploy-safety.mjs`
+cobre o ponto único da chamada, o comando exato do cache e o disco no script do Drift com
+`df`/`du`/`docker` fictícios.
+
 ## Limpeza manual de disco na VPS: previews legadas e `oci-backups` (04/11/2026)
 
 Dois scripts manuais, fora do deploy. Os dois simulam por padrão e só removem com `--apply` e a
@@ -66,12 +117,26 @@ Paradas principais (`reason=`):
 | Motivo | Significado |
 |---|---|
 | `pr_not_closed`, `pr_state_missing_or_duplicated`, `pr_state_sources_disagree` | estado do PR não comprovado como fechado |
-| `production_volume`, `unexpected_volume`, `volume_used_outside_project` | algum container monta volume diferente de `gesto_pgdata_pr_N`, ou o volume é usado fora do projeto |
+| `production_volume`, `unexpected_volume`, `volume_used_outside_project` | algum container monta volume diferente de `gesto_pgdata_pr_N` ou do nome antigo `gest-o_pgdata_pr_N` (mesmo N do `--pr`; qualquer outro `gest-o_*` é `production_volume`), ou o volume é usado fora do projeto |
+| `volume_names_ambiguous` | o projeto monta os dois nomes (`gesto_pgdata_pr_N` e `gest-o_pgdata_pr_N`) |
 | `image_protected_tag`, `image_foreign_tag`, `image_used_outside_project`, `image_in_deploy_evidence` | imagem com tag de produção/rollback/release/rebaseline, de outro projeto, usada por outro container ou citada em `/var/log/gest-o/{deploy,deploy-builds,rebaseline,oci-backups}` |
 | `container_name_not_legacy`, `container_has_new_preview_labels`, `container_set_diverged` | o conjunto não é uma preview legada (preview nova ou rótulos divergentes) |
 | `expect_containers_mismatch`, `containers_running` | contagem diferente da informada ou container rodando |
 | `preview_dir_symlink`, `preview_dir_path_diverged`, `preview_dir_has_new_preview` | pasta da preview não é exatamente `/var/www/preview/pr-N` ou contém preview nova |
 | `nginx_test_failed_site_restored` | `nginx -t` falhou depois de remover `crm-preview-pr-N`; o site foi restaurado e o nginx não foi recarregado |
+
+**Volume órfão de preview** (sem nenhum container, por exemplo depois de uma limpeza parcial):
+
+```bash
+sudo bash scripts/legacy-preview-cleanup.sh --orphan-volume=gesto_pgdata_pr_535 --closed-prs=/root/closed-prs.tsv          # simulação
+sudo bash scripts/legacy-preview-cleanup.sh --orphan-volume=gesto_pgdata_pr_535 --closed-prs=/root/closed-prs.tsv --apply  # docker volume rm, sem -f
+```
+
+Só aceita `gesto_pgdata_pr_N` ou `gest-o_pgdata_pr_N`. O PR N precisa estar `CLOSED` ou `MERGED` na
+lista (e no `gh`, se autenticado), o volume precisa existir e nenhum container, parado ou não, pode
+usá-lo. Paradas: `volume_in_use`, `volume_not_found`, `pr_not_closed` e as demais de estado do PR.
+Outro nome sai com `ORPHAN_VOLUME_NAME_INVALID` (exit 2), sem chamar o Docker. Log:
+`/var/log/gest-o/legacy-preview-cleanup/<UTC>-orphan-volume-pr-N.log`.
 
 ### 2. Retenção de `oci-backups` (`scripts/oci-backups-retention.sh`)
 
@@ -83,12 +148,30 @@ recentes por papel, a atual (imagem em uso ou commit do último cutover saudáve
 (`previous-runtime.tsv` e `rollback-artifacts.tsv` do último cutover saudável), a do `build.tsv`
 pendente, sem `.release.tsv` (rebaseline/legado), com registro inverificável ou com arquivo fora do
 padrão `<role>.<hex>.tar.gz`/`.release.tsv`. Remove arquivo por arquivo e depois faz `rmdir`.
-Não remove tags do Docker (fica para depois, em `TD-DEPLOY-RETENTION-DELETE`).
+
+**Tags do Docker** `gest-o-api:*`, `gest-o-web:*`, `gest-o-<role>-release:*` e
+`gest-o-<role>-rollback:*` (nunca `-rebaseline`) aparecem como `OCI_RETENTION_TAG`. Uma tag é
+candidata quando a imagem dela não é de nenhuma destas:
+
+- em uso por algum container, inclusive parado;
+- do rollback atual, ou do commit atual ou de rollback pelo nome da tag;
+- do `build.tsv` pendente;
+- de uma pasta que fica (pelo ID do registro, pelo nome do arquivo ou pelo commit no nome da tag);
+- de rebaseline (tag `-rebaseline` com o mesmo ID ou ID citado em `/var/log/gest-o/rebaseline`).
+
+As tags só são removidas com `--expect-tags=<M>`, depois das pastas, uma por vez, pelo nome
+(`docker image rm <tag>`, nunca `-f`, nunca por ID). Antes de cada remoção, o script relê o ID e
+quais imagens os containers usam. Sem `--expect-tags`, o apply remove só as pastas e mostra
+`OCI_RETENTION_TAGS=NOT_APPLIED`.
 
 ```bash
-sudo bash scripts/oci-backups-retention.sh                       # simulação: OCI_RETENTION_PLAN por pasta
-sudo bash scripts/oci-backups-retention.sh --apply --expect=<N>   # N = candidates= da simulação
+sudo bash scripts/oci-backups-retention.sh                                        # simulação: pastas e tags
+sudo bash scripts/oci-backups-retention.sh --apply --expect=<N> --expect-tags=<M>  # N = candidates=, M = tag_candidates=
 ```
+
+Com `--expect-tags`, `N` pode ser 0 (só tags). Paradas novas: `expect_tags_mismatch`,
+`tag_changed`, `tag_now_in_use`, `tag_rm_failed`, `images_unreadable` e
+`rebaseline_evidence_unreadable`.
 
 O script 2 precisa de um relatório de retenção **mais novo que a última release** (o `released_at`
 do `.release.tsv` mais recente). O script não gera esse relatório: ele é gravado pelo próprio
@@ -247,6 +330,7 @@ O script continua inline (não depende de arquivos do checkout que ele verifica)
 | `HEAD` igual à produção, mas não contido em `origin/main` (`git merge-base --is-ancestor HEAD origin/main` falso: main reescrita, commit local ou `origin/main` ilegível) | exit 1, `--- Commit em produção não está contido em origin/main ---` com os dois SHAs |
 | `HEAD` igual à produção e a `origin/main` | exit 0, `[OK]` |
 | `HEAD` igual à produção, `origin/main` à frente | exit 0, `[INFO] main N commits à frente da produção` (`git rev-list --count HEAD..origin/main`) e `[OK]` |
+| `/`, `/var/lib/docker` ou `/var/log/gest-o` acima de 80% (`df -P`) | exit 1, `[CRITICAL] Disco acima de 80% na VPS!` com uso, 5 maiores itens de `/var/log/gest-o`, `docker system df` e 5 maiores imagens e volumes (ver "Disco da VPS" no início deste guia) |
 
 O commit é lido como no deploy (`node -pe '…commit'`). O teste executa a lógica inline extraída do workflow em repositórios git temporários, com um `curl` falso no `PATH` no lugar do health (sem rede), cobrindo os seis casos acima e respostas sem JSON ou com commit inválido.
 
@@ -273,7 +357,7 @@ O cutover não reconstrói mais as imagens: ele sobe exatamente os image IDs que
 
 **Artefatos**: `/var/log/gest-o/oci-backups/<commit>/<role>.<hex>.tar.gz` mais `<role>.<hex>.release.tsv`, gravado por último. Verificação offline: `index.json` com um único descritor cujo digest é o ID (no containerd, o ID é o digest do index OCI) e cujo ref name é a tag de release; o blob de topo precisa ter esse sha256. Comportamento confirmado com Docker 29.2.1 / Compose 5.0.2 e containerd: save/load preserva o ID, o compose sobe por ID com `--pull never`, e uma imagem em uso sem tag fixa deixa de ser inspecionável quando sua tag se move. Com containerd as camadas já saem comprimidas: o `gzip -1` reduz cerca de 0,3%. A checagem de disco exige `.Size × 1,1 + RELEASE_ARTIFACT_MIN_FREE_BYTES` (padrão 2 GiB).
 
-**Retenção**: só relatório (`RELEASE_RETENTION=report`; qualquer outro valor vira aviso). Mantém por papel as 2 releases mais recentes, as que estão em uso, as do rollback atual (último cutover concluído) e as imagens do `build.tsv` mais recente, que aguardam o cutover (`build_evidence`); o restante aparece como `would_delete`. Uma evidência de build ilegível faz o relatório ser pulado (`RELEASE_RETENTION=SKIPPED reason=build_evidence_unreadable`).
+**Retenção**: só relatório (`RELEASE_RETENTION=report`; qualquer outro valor vira aviso). Mantém por papel as 2 releases mais recentes, as que estão em uso, as do rollback atual (último cutover concluído) e as imagens do `build.tsv` mais recente, que aguardam o cutover (`build_evidence`); o restante aparece como `would_delete`. Uma evidência de build ilegível faz o relatório ser pulado (`RELEASE_RETENTION=SKIPPED reason=build_evidence_unreadable`). A biblioteca continua só reportando. Desde 04/11/2026, a remoção fica em `scripts/oci-backups-retention.sh`, chamado depois de cutover saudável (ver "Disco da VPS" no início deste guia).
 
 **Templates de `docker inspect` (Docker 29)**: o CLI renderiza `.Id` só a partir do JSON bruto (o campo Go é `ID`) e `.Descriptor.Digest` só a partir da struct tipada (a chave JSON é `digest`). Um `-f`/`--format` que misture os dois falha nos dois modos. Por isso a resolução de identidade de rollback faz uma consulta por campo, e `production-deploy-safety.mjs` reprova qualquer template que misture `.Id` com `.Descriptor` em `scripts/` ou `.github/workflows/`. Diretórios de rebaseline e tars legados aparecem como `report_only`. O relatório também vai para `/var/log/gest-o/release-retention/<UTC>.tsv`. A remoção fica para outro PR. Atenção: `docker rmi` sem `-f` só recusa a **última** tag de uma imagem em uso, então não pode ser a proteção da remoção futura.
 

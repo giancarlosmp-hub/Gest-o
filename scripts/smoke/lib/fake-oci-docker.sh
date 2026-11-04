@@ -201,6 +201,15 @@ case "${1:-}" in
     case "${2:-}" in
       inspect) shift 2; image_inspect "$@" ;;
       ls) awk -F'\t' '{print $1"\t"$2}' "$S/tags" | while IFS=$'\t' read -r ref id; do [[ -f "$S/blobs/${id#sha256:}" ]] && printf '%s\t%s\n' "$ref" "$id"; done ;;
+      # Untag by name only (never -f, never an ID); the last tag of an image a
+      # container uses is refused, like the real engine without -f.
+      rm)
+        [[ $# -eq 3 && "$3" != -* && "$3" != sha256:* ]] || die "fake engine refuses image rm form: $*"
+        id=$(awk -F'\t' -v r="$3" '$1==r{print $2; exit}' "$S/tags"); [[ -n "$id" ]] || die "No such image: $3"
+        if [[ "$(awk -F'\t' -v i="$id" '$2==i' "$S/tags" | wc -l)" -eq 1 ]] && awk -F'\t' -v i="$id" '$3==i{f=1} END{exit !f}' "$S/containers"; then
+          die "conflict: unable to remove repository reference \"$3\" (must force) - container is using its referenced image"
+        fi
+        awk -F'\t' -v r="$3" '$1!=r' "$S/tags" >"$S/tags.tmp"; mv "$S/tags.tmp" "$S/tags"; printf 'Untagged: %s\n' "$3" ;;
       *) die "unsupported image subcommand $2" ;;
     esac ;;
   tag) id=$(resolve "$2") || die "No such image: $2"; set_tag "$3" "$id" ;;
@@ -213,6 +222,11 @@ case "${1:-}" in
   start) set_container_field "$2" 5 true; printf '%s\n' "$2" ;;
   compose) shift; compose "$@" ;;
   network|volume) exit 0 ;;
-  rmi|rm|prune|system|builder) die "fake engine refuses destructive command: $*" ;;
+  # The one accepted cache cleanup is the exact post-cutover command.
+  builder)
+    [[ "$*" == 'builder prune --force --filter until=168h' ]] || die "fake engine refuses destructive command: $*"
+    fault builder-prune-fail && die "simulated builder prune failure"
+    printf 'Total reclaimed space: 0B\n' ;;
+  rmi|rm|prune|system) die "fake engine refuses destructive command: $*" ;;
   *) exit 0 ;;
 esac

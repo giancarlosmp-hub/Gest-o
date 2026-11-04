@@ -13,7 +13,8 @@ harness_init(){
   mkdir -p "$APP/scripts/lib" "$BIN" "$AUTH" "$HIST"
   cp "$ROOT/scripts/production-deploy-entrypoint.sh" "$ROOT/scripts/deploy-production.sh" \
     "$ROOT/scripts/production-preflight.sh" "$ROOT/scripts/schema-evidence-validation.sh" \
-    "$ROOT/scripts/schema-diff-filter.mjs" "$ROOT/scripts/production-rollback.sh" "$APP/scripts/"
+    "$ROOT/scripts/schema-diff-filter.mjs" "$ROOT/scripts/production-rollback.sh" \
+    "$ROOT/scripts/production-post-cutover-maintenance.sh" "$ROOT/scripts/oci-backups-retention.sh" "$APP/scripts/"
   cp "$ROOT/scripts/lib/production-backup-common.sh" "$ROOT/scripts/lib/pr827-backup-proof.sh" \
     "$ROOT/scripts/lib/production-preflight-proof.sh" "$ROOT/scripts/lib/production-rollback-image.sh" \
     "$ROOT/scripts/lib/production-rebaseline-proof.sh" "$ROOT/scripts/lib/production-build-evidence.sh" \
@@ -54,7 +55,7 @@ EOF
   export PRODUCTION_BUILD_EVIDENCE_EXPECTED_OWNER="$owner" RELEASE_ARTIFACT_EXPECTED_OWNER="$owner"
   export BUILD_EVIDENCE_DIR="$TMP/deploy-builds" RELEASE_ARTIFACT_ROOT="$TMP/oci-backups"
   export RELEASE_RETENTION_REPORT_DIR="$TMP/release-retention" DEPLOY_EVIDENCE_DIR="$TMP/deploy"
-  export REBASELINE_EVIDENCE_DIR="$TMP/rebaseline" SCHEMA_EVIDENCE_DIR="$TMP/schema"
+  export REBASELINE_EVIDENCE_DIR="$TMP/rebaseline" SCHEMA_EVIDENCE_DIR="$TMP/schema" OCI_RETENTION_LOG_DIR="$TMP/oci-retention-logs"
   # shellcheck source=scripts/lib/pr827-backup-proof.sh
   source "$ROOT/scripts/lib/pr827-backup-proof.sh"
   pr827_backup_proof_publish "$AUTH/production.sql.gz" "$SHA" "$BACKUP_RESULT_FILE" 3600

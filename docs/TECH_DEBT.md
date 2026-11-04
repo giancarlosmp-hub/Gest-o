@@ -207,14 +207,25 @@ corrigida neste registro.
 
 ### TD-DEPLOY-RETENTION-DELETE — retenção real de releases
 
-**Parcialmente resolvido (04/11/2026).** O script manual `scripts/oci-backups-retention.sh` (fora do
-deploy; simulação por padrão, `--apply --expect=N`) remove as pastas `/var/log/gest-o/oci-backups/<commit>/`
-superadas, com as proteções recalculadas; procedimento em [`DEPLOY_GUIDE.md`](DEPLOY_GUIDE.md)
-("Limpeza manual de disco na VPS"). **Continua pendente:** as tags `gest-o-*-release` do Docker (e as
-imagens que só elas seguram) não são removidas. A retenção do deploy segue só emitindo relatório
-(`RELEASE_RETENTION=report`, itens `would_delete`). A remoção das tags exige PR próprio,
-com proteção explícita de imagens em uso, do rollback atual e do `build.tsv` pendente: `docker rmi`
-sem `-f` só recusa a última tag de uma imagem em uso e não pode ser a proteção.
+**Resolvido (04/11/2026), com resíduos abaixo.** `scripts/oci-backups-retention.sh` remove as pastas
+`/var/log/gest-o/oci-backups/<commit>/` superadas e, com `--expect-tags=M`, as tags
+`gest-o-<role>:*`, `-release` e `-rollback` cuja imagem não é de nada que fica. A proteção é
+explícita: imagem em uso (inclusive por container parado), rollback atual, `build.tsv` pendente,
+pasta mantida e rebaseline. Ela não depende da recusa do `docker image rm` sem `-f`.
+
+Depois de cada `phase=cutover` saudável, o deploy roda a retenção sozinho, pela chamada
+`scripts/production-post-cutover-maintenance.sh`, que nunca falha o deploy e imprime
+`DEPLOY_RETENTION=OK|FAILED`. No mesmo passo roda o cache de build com mais de 7 dias. O alerta
+acima de 80% está no VPS Drift Detection. Detalhes em [`DEPLOY_GUIDE.md`](DEPLOY_GUIDE.md) ("Disco
+da VPS").
+
+**Resíduos:**
+
+- Tags `gest-o-<role>-rebaseline:*`, pastas de rebaseline (`no_release_record`) e
+  `/var/log/gest-o/rebaseline/` continuam manuais.
+- A biblioteca `production-release-artifact.sh` segue só reportando (`RELEASE_RETENTION=report`).
+  Ela é congelada na evidência do cutover e usada pelo `rollback.sh`.
+- Imagens que já estavam sem nenhuma tag (dangling) não são tratadas.
 
 ### TD-DEPLOY-RELEASE-PIN-LOG — `RELEASE_PIN` duplicado no log do cutover
 
