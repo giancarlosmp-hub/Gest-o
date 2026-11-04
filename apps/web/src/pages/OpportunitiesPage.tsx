@@ -1784,7 +1784,8 @@ export default function OpportunitiesPage() {
         </div>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      {/* Celular (até 640px): 2 colunas compactas. A partir de 641px a grade é a de sempre. */}
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-1 sm:gap-3 md:grid-cols-2 xl:grid-cols-4">
         {/* Fonte atual do KPI = payload de GET /opportunities/summary; provável causa de valores iguais entre vendedores = filtros/resumo não refletirem ownerSellerId/follow-up em todas as mutações. */}
         <Card title="Pipeline total" value={formatCurrencyBRL(summary.pipelineTotal)} loading={loading} />
         <Card title="Valor ponderado" value={formatCurrencyBRL(summary.weightedTotal)} loading={loading} />
@@ -2666,9 +2667,10 @@ function ReturnStatusBadge({ status }: { status: ReturnStatus }) {
 
 function Card({ title, value, loading }: { title: string; value: string; loading?: boolean }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-      <div className="text-xs text-slate-500">{title}</div>
-      {loading ? <div className="mt-1 h-6 w-3/4 animate-pulse rounded bg-slate-100" /> : <div className="font-bold text-slate-900">{value}</div>}
+    <div className="min-w-0 rounded-xl border border-slate-200 bg-white p-2 shadow-sm sm:p-3">
+      <div className="text-[11px] leading-tight text-slate-500 sm:text-xs">{title}</div>
+      {/* O valor em reais usa espaço não separável (Intl), então só quebra no " • " de Atrasadas, nunca no meio do valor. */}
+      {loading ? <div className="mt-1 h-6 w-3/4 animate-pulse rounded bg-slate-100" /> : <div className="text-sm font-bold text-slate-900 sm:text-base">{value}</div>}
     </div>
   );
 }

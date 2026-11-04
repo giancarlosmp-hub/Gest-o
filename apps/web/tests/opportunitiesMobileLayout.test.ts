@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { formatCurrencyBRL } from "../src/lib/formatters";
 import { countActiveOpportunityFilters, mobileFiltersLabel, type OpportunityFilterValues } from "../src/lib/opportunityFilters";
 
 // Oportunidades no celular: lista em cartões, filtros recolhidos em "Filtros (N)", Excluir só dentro do menu ⋯ com
@@ -67,7 +68,21 @@ assert.match(page, /const requestDeleteOpportunity = \(item: Pick<Opportunity, "
 assert.match(page, /<DeleteOpportunityConfirmModal/);
 assert.match(cardBlock, /aria-label="Abrir ações da oportunidade"/);
 
-// 6. O menu ⋯ da linha da tabela no celular saiu (a tabela não aparece mais no celular).
+// 6. KPIs do topo: 2 colunas compactas no celular; a partir de sm, a grade e o tamanho de antes
+// (1 coluna, md:2, xl:4; p-3, text-xs e valor 16px).
+assert.match(page, /<div className="grid grid-cols-2 gap-2 sm:grid-cols-1 sm:gap-3 md:grid-cols-2 xl:grid-cols-4">\s*\{\/\* Fonte atual do KPI/);
+for (const kpi of ["Pipeline total", "Valor ponderado", "Atrasadas", "Taxa de conversão"]) {
+  assert.match(page, new RegExp(`<Card title="${kpi}" `));
+}
+const kpiCard = page.slice(page.indexOf("function Card({ title, value, loading }"), page.indexOf("function Badge("));
+assert.match(kpiCard, /className="min-w-0 rounded-xl border border-slate-200 bg-white p-2 shadow-sm sm:p-3"/);
+assert.match(kpiCard, /className="text-\[11px\] leading-tight text-slate-500 sm:text-xs"/);
+assert.match(kpiCard, /className="text-sm font-bold text-slate-900 sm:text-base"/);
+// O valor não quebra no meio: "R$" e o número vêm unidos por espaço não separável; só o " • " de Atrasadas quebra.
+assert.doesNotMatch(formatCurrencyBRL(1234567.89), / /, "moeda sem espaço comum");
+assert.match(formatCurrencyBRL(1234567.89), /^R\$ 1\.234\.567,89$/);
+
+// 7. O menu ⋯ da linha da tabela no celular saiu (a tabela não aparece mais no celular).
 assert.equal((page.match(/opportunity-mobile-only flex justify-center/g) ?? []).length, 0);
 
 console.log("OPPORTUNITIES_MOBILE_LAYOUT=PASS");
