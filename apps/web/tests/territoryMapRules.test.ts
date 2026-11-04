@@ -9,6 +9,7 @@ import {
   statusFillColors,
   statusStrokeColors,
   territoryCityPathStyle,
+  territoryCityTooltip,
   type TerritoryCity,
   type TerritoryMunicipalityFeature
 } from "../src/lib/territoryMap";
@@ -131,6 +132,33 @@ for (const label of ["Aproximar mapa", "Afastar mapa", "Recentralizar mapa"]) {
 // Leaflet fora do pacote principal: o mapa é carregado sob demanda pela página.
 assert.match(page, /const TerritoryLeafletMap = lazy\(\(\) => import\("\.\.\/components\/territories\/TerritoryLeafletMap"\)\);/);
 assert.ok(!/from "leaflet"/.test(page), "a página não importa o Leaflet direto");
+// 8. Dica (computador): uma linha "Cidade/UF · status", só em cidades do território; cinza sem dica; sem dica nativa
+// (<title>) e sem dica no toque (só em aparelho com mouse).
+assert.equal(territoryCityTooltip(apiCity), "Cidade Fictícia/PR · Oportunidade aberta");
+assert.equal(territoryCityTooltip({ ...apiCity, status: "positive", statusLabel: "Cidade positivada" }), "Cidade Fictícia/PR · Cidade positivada");
+assert.equal(territoryCityTooltip({ ...apiCity, status: "no_sale", statusLabel: "Sem venda no mês" }), "Cidade Fictícia/PR · Sem venda no mês");
+assert.equal(territoryCityTooltip(createOutOfTerritoryCity("Sem Vínculo", "PR")), null);
+assert.match(mapComponent, /const hoverTooltips = window\.matchMedia\("\(hover: hover\) and \(pointer: fine\)"\)\.matches;/);
+assert.match(mapComponent, /const tooltip = territoryCityTooltip\(city\);\s*if \(hoverTooltips && tooltip\) \{\s*featureLayer\.bindTooltip\(tooltip, \{ sticky: true/);
+assert.ok(!mapComponent.includes("<title") && !page.includes("<title"), "sem dica nativa do navegador");
+assert.ok(!page.includes("getTooltipText"), "dica antiga de 9 linhas removida");
+
+// 9. Zoom no computador: Ctrl/Cmd + roda aproxima/afasta; a roda sozinha rola a página e mostra o aviso por 1,5 s.
+assert.match(mapComponent, /scrollWheelZoom: false/);
+assert.match(mapComponent, /doubleClickZoom: true/);
+assert.match(mapComponent, /if \(!event\.ctrlKey && !event\.metaKey\) \{\s*\/\/[^\n]*\n\s*setShowWheelHint\(true\);[\s\S]*?return;\s*\}/);
+assert.match(mapComponent, /const WHEEL_HINT_MS = 1500;/);
+assert.match(mapComponent, /event\.preventDefault\(\);\s*setShowWheelHint\(false\);/);
+assert.match(mapComponent, /map\.setZoomAround\(/);
+assert.match(mapComponent, /container\.addEventListener\("wheel", handleWheel, \{ passive: false \}\);/);
+assert.ok(mapComponent.includes('"Use Ctrl + rolagem para aproximar o mapa"'));
+
+// 10. Foco: sem retângulo do navegador no clique; no teclado (:focus-visible) o destaque é a borda da cidade.
+const styles = read("../src/index.css");
+assert.match(mapComponent, /className="territory-map relative z-0 /);
+assert.match(styles, /\.territory-map path\.leaflet-interactive:focus \{\s*outline: none;\s*\}/);
+assert.match(styles, /\.territory-map path\.leaflet-interactive:focus-visible \{\s*outline: none;\s*stroke: #2563eb;\s*stroke-width: 5px;/);
+
 // O SVG próprio saiu.
 assert.ok(!page.includes("<svg"), "mapa SVG antigo removido");
 
