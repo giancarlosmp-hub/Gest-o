@@ -322,3 +322,24 @@ textarea:focus {
     display: none !important;
   }
 }
+
+/* Mapa de Territórios (Leaflet): sem o retângulo de foco do navegador no clique; no teclado (:focus-visible) o destaque
+   é a própria borda da cidade, mais grossa e azul. A borda preta da cidade selecionada vem do estilo do Leaflet. */
+.territory-map path.leaflet-interactive:focus {
+  outline: none;
+}
+
+.territory-map path.leaflet-interactive:focus-visible {
+  outline: none;
+  stroke: #2563eb;
+  stroke-width: 5px;
+  stroke-opacity: 1;
+}
+
+/* Dica de uma linha ao passar o mouse ("Cidade/UF · status"). */
+.territory-map .territory-map-tooltip {
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #0f172a;
+}
