@@ -1360,8 +1360,9 @@ Pendente:
   catálogo passar de 1000 produtos ativos, o filtro volta a cortar sem ordem definida: ordenar a busca ou subir o
   limite.
 - (i) Cidade deduzida pelo nome do município não usa a UF (Toledo existe no PR e em MG); só o nome pesa na pontuação.
-- (j) A barra de pergunta do Assistente e o botão da Agenda usam `--mobile-action-bar-height` (6rem), um pouco maior que
-  a barra de ações real (cerca de 85 px + área segura): sobra uma faixa estreita entre as duas.
+- (j) Resolvido no PR 2 da série de UX no celular: `--mobile-action-bar-height` passou de 6rem para 5.3125rem (85 px,
+  a altura real da barra: 8 + 64 + 12 + 1 px; a área segura soma à parte). Vale para a barra de pergunta do Assistente,
+  o botão da Agenda e o espaço no fim das páginas.
 
 #### UX no celular: Oportunidades, Pedidos, Títulos, Integração ERP e Territórios (série de 3 PRs)
 
@@ -1389,10 +1390,25 @@ tela troca a tabela por cartões no celular.
     641 px a grade e o tamanho são os de antes.
   - Contrato em `apps/web/tests/opportunitiesMobileLayout.test.ts`, encadeado em `test:opportunity-quick-action` (passo
     que o CI já roda; um passo próprio exige mudar `.github/workflows`).
-- PR 2, Pedidos + Títulos em Aberto + Integração ERP (pendente): Pedidos já são cartões (só padding dobrado, 8 KPIs,
-  valor quebrando e filtros sempre abertos); Títulos em Aberto (`ClientDetailsPage.tsx`) e as duas tabelas da Integração
-  ERP viram cartões. Junto: o texto fixo "Desligada, nada é criado" do painel de Automações Comerciais passa a depender
-  do estado, e o item (j) acima (`--mobile-action-bar-height` para a altura real, cerca de 85 px).
+- Espaço dobrado entre blocos no celular: abaixo de 768 px o `.crm-page-shell > *` vira flex com `gap: 16px`, e as
+  páginas com `space-y-5` somavam mais 20 px (36 px entre blocos). Em Oportunidades e Pedidos o `space-y` sai abaixo
+  de 640 px (`max-sm:space-y-0`); a partir de 640 px fica como antes. Outras páginas com o mesmo padrão não foram
+  mexidas.
+- PR 2, Pedidos + Títulos em Aberto + Integração ERP (feito):
+  - Pedidos (já eram cartões): sem o padding próprio da página no celular (o shell já dá 16 px), espaço entre blocos
+    de 16 px, 8 KPIs compactos (sem ícone, valor de 15 px que não quebra: até "R$ 123.456.789,90" cabe em 360 px),
+    status, datas e vendedor em "Filtros (N)" (a busca fica visível), datas do rodapé do cartão empilhadas e itens do
+    detalhe em 2 colunas. Desktop igual.
+  - Títulos em Aberto (`ClientDetailsPage.tsx`): cartões no celular (documento, parcela, forma, vencimento, saldo,
+    valor e "vencido"/"em aberto"); a tabela fica a partir de 640 px. A regra de "vencido" (vencimento passado e saldo
+    maior que zero) foi para `describeOpenTitle`, usada pela tabela e pelos cartões, sem mudança.
+  - Integração ERP: "Resumo de clientes por vendedor" e "Histórico de execução" em cartões no celular (no histórico,
+    Auth e correlationId ficam em "Detalhes"); as tabelas ficam a partir de 640 px. Com 8 execuções o histórico caiu de
+    2413 px para 1165 px de altura em 360 px. O nome real e os códigos no bloco de diagnóstico não foram mexidos.
+  - Automações Comerciais: o texto do interruptor acompanha o estado ("Ligada: cria as oportunidades de reativação no
+    próximo ciclo. Confira a simulação abaixo." / "Desligada, nada é criado. ..."). Ele muda ao marcar, antes de salvar.
+  - Item (j) acima.
+  - Contrato em `apps/web/tests/ordersErpMobileLayout.test.ts`, encadeado em `test:orders` (passo que o CI já roda).
 - PR 3, mapa de Territórios (pendente): fundo OpenStreetMap com Leaflet 1.9.4 puro (sem react-leaflet), atribuição
   "© OpenStreetMap contributors". Cores, regra, legenda, números do topo e detalhe da cidade iguais, com teste de
   contrato da regra (`GET /territories/coverage`). Subtítulo do mapa passa a dizer o que o painel mostra (pedidos, valor
