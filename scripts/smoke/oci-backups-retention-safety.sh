@@ -143,11 +143,13 @@ done
 [[ "$(grep -c '^image rm ' "$FAKE_CALLS")" -eq 4 ]] || fail 'image rm além das candidatas'
 if grep -Eq '^image rm .*(-f|--force|sha256:)' "$FAKE_CALLS"; then fail 'image rm forçado ou por ID'; fi
 if grep -q UNEXPECTED "$FAKE_CALLS"; then fail "docker inesperado: $(cat "$FAKE_CALLS")"; fi
-# Only tags (no folder candidate left): --expect=0 is accepted with --expect-tags.
+# Only tags (every folder kept, so their tags stay too): --expect=0 is accepted with --expect-tags.
 reset; for n in 1 2 3; do printf 'c%sold\t%s\n' "$n" "$(id_of api "$n")" >>"$FAKE_CONTAINERS"; done
-run; grep -q 'SIMULATED candidates=0 mutations=0 tag_candidates=2$' <<<"$OUT" || fail "só tags: $OUT"
-run --apply --expect=0 --expect-tags=2
-grep -q 'APPLIED removed_dirs=0 mutations=2 removed_tags=2 ' <<<"$OUT" || fail "apply só de tags: $OUT"
+run; grep -q 'SIMULATED candidates=0 mutations=0 tag_candidates=1$' <<<"$OUT" || fail "só tags: $OUT"
+tag_plan "gest-o-web-rollback:${C[2]}" | grep -q 'decision=keep reason=kept_release' || fail "tag de pasta mantida: $OUT"
+run --apply --expect=0 --expect-tags=1
+grep -q 'APPLIED removed_dirs=0 mutations=1 removed_tags=1 ' <<<"$OUT" || fail "apply só de tags: $OUT"
+[[ "$(grep '^image rm ' "$FAKE_CALLS")" == "image rm gest-o-api:$(commit 9)" ]] || fail "só a tag órfã: $(grep '^image rm ' "$FAKE_CALLS")"
 
 # --- Stops. ---
 reset; expect_stop expect_mismatch --apply --expect=2
