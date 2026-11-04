@@ -13,6 +13,7 @@ import {
 import api from "../lib/apiClient";
 import { useSearchParams } from "react-router-dom";
 import { getApiErrorMessage } from "../lib/apiError";
+import MobileFiltersToggle from "../components/mobile/MobileFiltersToggle";
 import {
   formatOrderDate,
   formatOrderQuantity,
@@ -207,6 +208,9 @@ export default function OrdersPage() {
     [detailLoading, setDetailLoading] = useState(false),
     [detailError, setDetailError] = useState(""),
     [consulting, setConsulting] = useState(false);
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
+  // Filtros escondidos atrás de "Filtros (N)" no celular; a busca fica sempre visível e não conta.
+  const activeFiltersCount = [status, from, to, sellerId].filter(Boolean).length;
   const clientId = searchParams.get("clientId") || "";
   const query = useMemo(
     () => ({
@@ -283,7 +287,7 @@ export default function OrdersPage() {
     ["error", "Recusados pelo ERP", AlertCircle],
   ] as const;
   return (
-    <div className="mx-auto max-w-7xl space-y-5 p-4 sm:p-6">
+    <div className="mx-auto max-w-7xl space-y-5 max-sm:space-y-0 sm:p-6">
       <header className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
         <div>
           <p className="text-sm font-semibold text-brand-700">
@@ -311,16 +315,17 @@ export default function OrdersPage() {
       </p>
       <section
         aria-label="Resumo dos pedidos"
-        className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8"
+        className="grid grid-cols-2 gap-2 sm:gap-3 md:grid-cols-4 xl:grid-cols-8"
       >
         {cards.map(([key, label, Icon]) => (
           <article
             key={key}
-            className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm"
+            className="min-w-0 rounded-2xl border border-slate-200 bg-white p-2.5 shadow-sm sm:p-3"
           >
-            <Icon className="mb-2 text-brand-700" size={18} />
+            <Icon className="mb-2 text-brand-700 max-sm:hidden" size={18} />
             <p className="text-xs text-slate-500">{label}</p>
-            <p className="mt-1 text-lg font-bold text-slate-900">
+            {/* No celular o valor nunca quebra no meio (o shell aplica overflow-wrap: anywhere em <p>); desktop como antes. */}
+            <p className="mt-0.5 text-[15px] font-bold text-slate-900 max-sm:whitespace-nowrap max-sm:[overflow-wrap:normal] sm:mt-1 sm:text-lg">
               {key === "totalValue"
                 ? money.format(data?.summary[key] || 0)
                 : data?.summary[key] || 0}
@@ -342,6 +347,8 @@ export default function OrdersPage() {
             className="w-full rounded-xl border border-slate-300 py-2 pl-10 pr-3 text-sm"
           />
         </label>
+        <MobileFiltersToggle activeCount={activeFiltersCount} open={mobileFiltersOpen} onToggle={() => setMobileFiltersOpen((current) => !current)} panelId="orders-filters" />
+        <div id="orders-filters" className={`${mobileFiltersOpen ? "grid" : "hidden"} gap-3 sm:contents`}>
         <select
           aria-label="Status"
           value={status}
@@ -382,6 +389,7 @@ export default function OrdersPage() {
             </option>
           ))}
         </select>
+        </div>
       </section>
       {loading ? (
         <div
@@ -434,7 +442,7 @@ export default function OrdersPage() {
               </div>
               <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
                 <Status order={order} />
-                <strong>{money.format(order.totalValue)}</strong>
+                <strong className="whitespace-nowrap">{money.format(order.totalValue)}</strong>
               </div>
               {order.rejectionMessage && (
                 <p className="mt-2 text-xs text-red-700">
@@ -456,7 +464,7 @@ export default function OrdersPage() {
                   total={order.quantities.ordered}
                 />
               </div>
-              <div className="mt-4 flex justify-between border-t border-slate-100 pt-3 text-xs text-slate-500">
+              <div className="mt-4 flex flex-col gap-1 border-t border-slate-100 pt-3 text-xs text-slate-500 sm:flex-row sm:justify-between">
                 <span>Pedido {formatOrderDate(order.createdAt)}</span>
                 <span>
                   Última consulta ao ERP: {formatOrderDate(order.lastSyncAt)}
@@ -614,7 +622,7 @@ export default function OrdersPage() {
                         </div>
                         <strong>{money.format(item.values.net)}</strong>
                       </div>
-                      <div className="mt-3 grid grid-cols-4 gap-2 text-center text-xs">
+                      <div className="mt-3 grid grid-cols-2 gap-2 text-center text-xs sm:grid-cols-4">
                         <span>
                           Faturado
                           <br />
