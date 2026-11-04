@@ -137,7 +137,7 @@ import { getErpAutomaticSyncRuntimeStatus, refreshErpAutomaticSyncConfig, runAut
 import { investigateErpPartnerReadOnly } from "../services/erpPartnerInvestigationService.js";
 import { MANUAL_RESOLUTION_CONFIRMATION_PHRASE, resolveAmbiguousErpOrderManually } from "../services/erpOrderManualResolutionService.js";
 import { buildErpHealthcheckResponse } from "../services/erpOrderOperationalSummary.js";
-import { COMMERCIAL_AUTOMATIONS_CONFIG_KEY, DEFAULT_COMMERCIAL_AUTOMATIONS_CONFIG, getCommercialAutomationsStatus, loadCommercialAutomationsHistory, parseCommercialAutomationsConfig, runCommercialAutomations, simulateCommercialAutomations } from "../services/commercialAutomationsService.js";
+import { COMMERCIAL_AUTOMATIONS_CONFIG_KEY, DEFAULT_COMMERCIAL_AUTOMATIONS_CONFIG, getCommercialAutomationsStatus, loadCommercialAutomationsHistory, parseCommercialAutomationsConfig, runCommercialAutomations, simulateCommercialAutomations, WORKFLOW_INACTIVE_CLIENT_ORIGIN } from "../services/commercialAutomationsService.js";
 import { recordClientCodeChange } from "../services/clientCodeAuditService.js";
 import { buildClientCreditAlert, projectClientForResponse } from "../services/clientErpProjection.js";
 import { findBrazilMunicipality, invalidClientAddressMessage, listBrazilMunicipalities, BRAZIL_STATES } from "../services/brazilMunicipalities.js";
@@ -8862,7 +8862,7 @@ router.delete(["/events/:id", "/agenda/:id", "/agenda/events/:id"], async (req, 
 
   const timelineEvent = await prisma.timelineEvent.findUnique({
     where: { id: req.params.id },
-    select: { id: true, ownerSellerId: true }
+    select: { id: true, ownerSellerId: true, type: true, description: true }
   });
 
   if (!timelineEvent) {
@@ -8871,6 +8871,12 @@ router.delete(["/events/:id", "/agenda/:id", "/agenda/events/:id"], async (req, 
 
   if (req.user!.role === "vendedor" && timelineEvent.ownerSellerId !== req.user!.id) {
     return res.status(403).json({ message: "Acesso negado." });
+  }
+
+  // O evento da automação de inativos recentes segura a reativação por 90 dias (inclusive das oportunidades antigas,
+  // sem origin): nenhum perfil o exclui.
+  if (timelineEvent.type === "status" && timelineEvent.description?.includes(WORKFLOW_INACTIVE_CLIENT_ORIGIN)) {
+    return res.status(409).json({ message: "Evento registrado pela automação comercial não pode ser excluído." });
   }
 
   await prisma.timelineEvent.delete({ where: { id: req.params.id } });

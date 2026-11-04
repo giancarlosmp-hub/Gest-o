@@ -160,6 +160,43 @@ if (migrationId === "20261023120000_agenda_activity_planning_split") {
   }
   process.exit(0);
 }
+if (migrationId === "20261103120000_opportunity_origin_agenda_stop_client_index") {
+  const migration = resolveMigration(migrationId);
+  // Same contract: empty diff means already applied (the runner proves the catalog), otherwise
+  // the diff must be exactly the nullable origin column and the AgendaStop index.
+  if (statements.length === 0) process.exit(0);
+  const expectedColumns = new Map(Object.entries(migration.objects.columns));
+  const expectedIndexes = new Map(Object.entries(migration.objects.indexes));
+  const foundColumns = new Set();
+  const foundIndexes = new Set();
+  for (const statement of statements) {
+    const column = statement.match(/^ALTER\s+TABLE\s+(?:(?:"public"|public)\.)?"(Opportunity)"\s+ADD\s+COLUMN\s+"([^"]+)"\s+([\s\S]+)$/);
+    if (column) {
+      const key = `${column[1]}.${column[2]}`;
+      if (foundColumns.has(key) || expectedColumns.get(key) !== column[3].replace(/\s+/g, " ").trim()) {
+        throw new Error(`unapproved or partially-compatible pre-apply drift: ${statement.slice(0, 180)}`);
+      }
+      foundColumns.add(key);
+      continue;
+    }
+    const index = statement.match(/^CREATE\s+INDEX\s+"([^"]+)"\s+ON\s+(?:(?:"public"|public)\.)?"AgendaStop"\s*\(([^)]+)\)$/);
+    if (index) {
+      const [, name, rawColumns] = index;
+      const columns = rawColumns.split(",").map((value) => value.trim().replace(/^"|"$/g, ""));
+      const expected = expectedIndexes.get(name);
+      if (!expected || foundIndexes.has(name) || columns.length !== expected.length || columns.some((value, i) => value !== expected[i])) {
+        throw new Error(`unapproved or partially-compatible pre-apply drift: ${statement.slice(0, 180)}`);
+      }
+      foundIndexes.add(name);
+      continue;
+    }
+    throw new Error(`unapproved or partially-compatible pre-apply drift: ${statement.slice(0, 180)}`);
+  }
+  if (foundColumns.size !== expectedColumns.size || foundIndexes.size !== expectedIndexes.size) {
+    throw new Error("unapproved or partially-compatible pre-apply drift: authorized Opportunity origin/AgendaStop index operation set is incomplete");
+  }
+  process.exit(0);
+}
 for (const statement of statements) {
   const allowed = new RegExp(`^CREATE TYPE "${enums}" AS ENUM`, "s").test(statement)
     || new RegExp(`^CREATE TABLE "${tables}" \\(`, "s").test(statement)

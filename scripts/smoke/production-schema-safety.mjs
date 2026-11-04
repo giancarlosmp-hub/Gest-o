@@ -79,6 +79,10 @@ const agendaSplitSql = readFileSync(resolve(root, "apps/api/prisma/migrations/20
 const agendaSplitPreview = runPreview(agendaSplitSql);
 assert.equal(agendaSplitPreview.status, 0, `Agenda/Activity migration must pass the preview validator: ${agendaSplitPreview.stdout}${agendaSplitPreview.stderr}`);
 assert.match(agendaSplitPreview.stdout, /RESUMO aditivas=10 destrutivas=0 bloqueadas=0/);
+const opportunityOriginSql = readFileSync(resolve(root, "apps/api/prisma/migrations/20261103120000_opportunity_origin_agenda_stop_client_index/migration.sql"), "utf8");
+const opportunityOriginPreview = runPreview(opportunityOriginSql);
+assert.equal(opportunityOriginPreview.status, 0, `Opportunity origin migration must pass the preview validator: ${opportunityOriginPreview.stdout}${opportunityOriginPreview.stderr}`);
+assert.match(opportunityOriginPreview.stdout, /RESUMO aditivas=2 destrutivas=0 bloqueadas=0/);
 for (const [name, sql] of [
   ["enum value rename", `ALTER TYPE "AgendaEventStatus" RENAME VALUE 'vencido' TO 'cancelado';\n`],
   ["enum value drop", `ALTER TYPE "AgendaEventStatus" DROP VALUE 'vencido';\n`],
@@ -242,6 +246,11 @@ const agendaSplitEntry = spawnSync("node", [registry, "20261023120000_agenda_act
 assert.equal(agendaSplitEntry.status, 0, agendaSplitEntry.stderr);
 assert.equal(JSON.parse(agendaSplitEntry.stdout).sha256, "df6508474fed9dd2a7a3f7492946d69158b12ce43e599f2fb6178540af8d2b5e");
 assert.doesNotMatch(agendaSplitSql, /\b(UPDATE|DELETE|INSERT|DROP|RENAME|TRUNCATE)\b|NOT NULL|DEFAULT/i, "Agenda/Activity migration must only add enum values and nullable columns");
+const opportunityOriginEntry = spawnSync("node", [registry, "20261103120000_opportunity_origin_agenda_stop_client_index"], { cwd: root, encoding: "utf8" });
+assert.equal(opportunityOriginEntry.status, 0, opportunityOriginEntry.stderr);
+assert.equal(JSON.parse(opportunityOriginEntry.stdout).sha256, "ac1dc481223a01f1b6137ddd72c121f62ce57f275616a85c0f0b5e4677d9db90");
+assert.doesNotMatch(opportunityOriginSql, /\b(UPDATE|DELETE|INSERT|DROP|RENAME|TRUNCATE|CONCURRENTLY|UNIQUE)\b|NOT NULL|DEFAULT/i, "Opportunity origin migration must only add a nullable column and a plain index");
+assert.equal(opportunityOriginSql.match(/IF NOT EXISTS/g)?.length, 2, "Opportunity origin migration must be idempotent");
 
 const apply = readFileSync(resolve(root, "scripts/production-schema-apply.sh"), "utf8");
 const productPricePostgres = readFileSync(resolve(root, "scripts/smoke/product-price-authority-migration-postgres.sh"), "utf8");
@@ -252,6 +261,8 @@ assert.match(productPricePostgres, /20260911190000_product_price_authority[\s\S]
   "authority harness must apply every later expansion before comparing with the current schema");
 for (const agendaSplitPostcondition of ["migration Agenda/Atividades parcialmente aplicada", "agenda_split_state\" == 0:0", "agenda_split_state\" == 8:2", "migration Agenda/Atividades já presente; DDL ignorado", "rows_using_new_objects", "8:2:0", "is_nullable='YES' AND data_type='text'"]) assert.ok(apply.includes(agendaSplitPostcondition), `missing Agenda/Activity postcondition ${agendaSplitPostcondition}`);
 assert.match(apply, /agenda_split_state" == 8:2 \]\]; then\n  log "migration Agenda\/Atividades já presente; DDL ignorado[\s\S]*else[\s\S]*admin_psql --single-transaction/, "already-applied Agenda/Activity path must not repeat DDL");
+for (const opportunityOriginPostcondition of ["migration origem da oportunidade/índice de paradas parcialmente aplicada", "opportunity_origin_state\" == 0:0", "opportunity_origin_state\" == 1:1", "migration origem da oportunidade/índice de paradas já presente; DDL ignorado", "indexname='AgendaStop_clientId_checkOutAt_idx'", "column_default IS NULL", "WHERE \"origin\" IS NOT NULL", "1:1:0"]) assert.ok(apply.includes(opportunityOriginPostcondition), `missing Opportunity origin postcondition ${opportunityOriginPostcondition}`);
+assert.match(apply, /opportunity_origin_state" == 1:1 \]\]; then\n  log "migration origem da oportunidade\/índice de paradas já presente; DDL ignorado[\s\S]*else[\s\S]*admin_psql --single-transaction/, "already-applied Opportunity origin path must not repeat DDL");
 assert.match(apply, /production-schema-migrations\.mjs "\$MIGRATION_ID_REQUESTED"/);
 for (const ordersPostcondition of ["orders-counts.before.tsv", "tenant_not_null", "tenant_nulls", "ErpOperationalOrderStatus", "ErpRequestAuthorizationStatus", "ErpOrderSync_tenantId_fkey", "ErpOrderSync_tenantId_createdAt_idx", "ErpOrderSync_tenantId_sellerId_createdAt_idx", "ErpOrderStatusHistory", "ErpOrderStatusHistory_erpOrderSyncId_fkey", "ErpOrderStatusHistory_opportunityId_fkey", "ErpOrderStatusHistory_erpOrderSyncId_occurredAt_idx", "ErpOrderStatusHistory_opportunityId_occurredAt_idx", "migration-backfill"]) assert.ok(apply.includes(ordersPostcondition), `missing Orders postcondition ${ordersPostcondition}`);
 assert.match(apply, /20260731150000_safe_production_schema_transition\)[\s\S]*required_tables/, "the historical migration must retain its dedicated postconditions");
@@ -524,6 +535,32 @@ assertAgendaSplitDiff("unexpected extra column", `${agendaSplitFullDiff}ALTER TA
 assertAgendaSplitDiff("column type change", `${agendaSplitFullDiff}ALTER TABLE "Activity" ALTER COLUMN "type" SET DATA TYPE TEXT;\n`, false);
 assertAgendaSplitDiff("enum value rename", `${agendaSplitFullDiff}ALTER TYPE "AgendaEventStatus" RENAME VALUE 'vencido' TO 'cancelado';\n`, false);
 assertAgendaSplitDiff("duplicated enum value", `${agendaSplitFullDiff}${agendaSplitEnumLines[0]}\n`, false);
+
+function assertOpportunityOriginDiff(name, sql, accepted) {
+  const testDir = mkdtempSync(resolve(tmpdir(), "gesto-opportunity-origin-diff-"));
+  const input = resolve(testDir, "input.sql");
+  const output = resolve(testDir, "output.sql");
+  writeFileSync(input, sql);
+  const result = spawnSync("node", [resolve(root, "scripts/schema-diff-filter.mjs"), input, output, "pre", "20261103120000_opportunity_origin_agenda_stop_client_index"], { encoding: "utf8" });
+  rmSync(testDir, { recursive: true });
+  assert.equal(result.status === 0, accepted, `${name}: ${result.stdout}${result.stderr}`);
+}
+// Exactly what `prisma migrate diff` emits for this migration against the previous schema.
+const opportunityOriginColumnLine = `-- AlterTable\nALTER TABLE "Opportunity" ADD COLUMN     "origin" TEXT;`;
+const agendaStopIndexLine = `-- CreateIndex\nCREATE INDEX "AgendaStop_clientId_checkOutAt_idx" ON "AgendaStop"("clientId", "checkOutAt");`;
+const opportunityOriginFullDiff = `${opportunityOriginColumnLine}\n\n${agendaStopIndexLine}\n`;
+assertOpportunityOriginDiff("complete Opportunity origin diff", opportunityOriginFullDiff, true);
+assertOpportunityOriginDiff("already applied (empty diff)", "", true);
+assertOpportunityOriginDiff("reordered Opportunity origin diff", `${agendaStopIndexLine}\n${opportunityOriginColumnLine}\n`, true);
+assertOpportunityOriginDiff("partial: column without index", opportunityOriginColumnLine, false);
+assertOpportunityOriginDiff("partial: index without column", agendaStopIndexLine, false);
+assertOpportunityOriginDiff("non-null origin column", opportunityOriginFullDiff.replace(`"origin" TEXT`, `"origin" TEXT NOT NULL`), false);
+assertOpportunityOriginDiff("defaulted origin column", opportunityOriginFullDiff.replace(`"origin" TEXT`, `"origin" TEXT DEFAULT 'manual'`), false);
+assertOpportunityOriginDiff("single-column index", opportunityOriginFullDiff.replace(`("clientId", "checkOutAt")`, `("clientId")`), false);
+assertOpportunityOriginDiff("unique index", opportunityOriginFullDiff.replace("CREATE INDEX", "CREATE UNIQUE INDEX"), false);
+assertOpportunityOriginDiff("unexpected extra column", `${opportunityOriginFullDiff}ALTER TABLE "Opportunity" ADD COLUMN "unexpected" TEXT;\n`, false);
+assertOpportunityOriginDiff("column type change", `${opportunityOriginFullDiff}ALTER TABLE "Opportunity" ALTER COLUMN "notes" SET DATA TYPE VARCHAR(10);\n`, false);
+assertOpportunityOriginDiff("duplicated column", `${opportunityOriginFullDiff}${opportunityOriginColumnLine}\n`, false);
 const bootstrap = readFileSync(resolve(root, "apps/api/src/scripts/bootstrap.ts"), "utf8");
 assert.match(bootstrap, /type DatabaseSchemaMode = "external" \| "ephemeral-push"/);
 assert.match(bootstrap, /if \(value === "external" \|\| value === "ephemeral-push"\) return value/);

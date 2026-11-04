@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { CommercialPriorityService, calculateCommercialPriority, COMMERCIAL_PRIORITY_WEIGHTS } from "./commercialPriorityService.js";
-import { WORKFLOW_INACTIVE_CLIENT_ORIGIN } from "./commercialAutomationsService.js";
+import { INACTIVE_RECENT_AUTOMATION_ORIGIN, WORKFLOW_INACTIVE_CLIENT_ORIGIN } from "./commercialAutomationsService.js";
 
 test("calcula prioridade urgente com follow-up vencido, inatividade e oportunidade alta", () => {
   const result = calculateCommercialPriority({
@@ -147,4 +147,12 @@ test("títulos vencidos: motivo traz o total em R$, não uma quantidade; o peso 
 
   // Em aberto continua sem valor no texto.
   assert.deepEqual(titlesScore({ overdueTitlesTotal: 0, openTitlesTotal: 25000 }).reasons, ["Cliente com títulos em aberto"]);
+});
+
+test("oportunidade automática pela coluna origin; notas sem a marca não bastam (dados fictícios)", () => {
+  const base = { now: new Date("2026-07-09T12:00:00.000Z"), client: { ownerSellerId: "seller-1" } };
+  const byOrigin = calculateCommercialPriority({ ...base, opportunity: { stage: "prospeccao", origin: INACTIVE_RECENT_AUTOMATION_ORIGIN, notes: "" } });
+  assert.ok(byOrigin.reasons.includes("Oportunidade criada automaticamente"));
+  const manual = calculateCommercialPriority({ ...base, opportunity: { stage: "prospeccao", origin: null, notes: "Inativo recente (texto digitado)" } });
+  assert.ok(!manual.reasons.includes("Oportunidade criada automaticamente"));
 });

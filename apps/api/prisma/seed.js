@@ -1,5 +1,12 @@
-import { PrismaClient } from "@prisma/client";
-import { hashPassword, verifyPassword } from "../dist/utils/password.js";
+// Este seed apaga dados (deleteMany em clientes, oportunidades, vendas...). Só roda em banco descartável: a trava
+// vem antes de qualquer import, porque imports estáticos executariam antes dela.
+if (process.env.DATABASE_SCHEMA_MODE !== "ephemeral-push") {
+  console.error("seed.js recusado: só roda em banco descartável (DATABASE_SCHEMA_MODE=ephemeral-push)");
+  process.exit(1);
+}
+
+const { PrismaClient } = await import("@prisma/client");
+const { hashPassword, verifyPassword } = await import("../dist/utils/password.js");
 
 const prisma = new PrismaClient();
 

@@ -1,3 +1,20 @@
+# Origem da oportunidade, índice das paradas e trava do seed.js: migration aditiva cadastrada, não aplicada — 03/11/2026
+
+- Migration `20261103120000_opportunity_origin_agenda_stop_client_index`: `Opportunity.origin` (`TEXT` opcional) e
+  índice `AgendaStop("clientId", "checkOutAt")`. **Não aplicada em produção.** Depois do merge, o cutover fica bloqueado
+  até o apply.
+- Ordem, tudo no mesmo SHA do merge e sem mesclar nada no meio: **Prepare Production Recovery Backup** →
+  **Deploy Production** `phase=build` → **Production Schema PR827** `preview` → `apply`
+  (`confirm=PRODUCTION_SCHEMA_APPLY`) → **Deploy Production** `phase=cutover`. Depois, o script
+  `opportunities:backfill-origin`: CSV de backup → simulação → `--apply --expect=N` → simulação de novo.
+- Automação de inativos recentes grava `origin = "automation:inactive_recent"` e notas sem a marca técnica; 90 dias e
+  teto diário leem `origin`, com a marca nas notas e o evento da linha do tempo como reserva das antigas.
+  `DELETE /events/:id` recusa (409) o evento da automação para todos os perfis. `seed.js` recusa fora de
+  `ephemeral-push` antes de qualquer import.
+- Procedimento: [`DEPLOY_GUIDE.md`](DEPLOY_GUIDE.md), seção “Migration
+  `20261103120000_opportunity_origin_agenda_stop_client_index`”. Detalhes: `TECH_DEBT.md`,
+  “TD-COMMERCIAL-AUTOMATIONS-RECENT-REACTIVATION”, “TD-PLANNING-VISIT-SUGGESTIONS” e “TD-SEED-GUARD”.
+
 # Oportunidade por voz no Assistente Comercial, fase 1 (interpretação) — código pronto, aguardando merge — 28/10/2026
 
 - `POST /ai/crm-assistant/opportunity-draft/parse` recebe `{ text }` (a frase ditada) e devolve o rascunho sem gravar:

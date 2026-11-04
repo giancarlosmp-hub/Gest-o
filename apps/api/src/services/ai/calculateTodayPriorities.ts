@@ -4,7 +4,7 @@ import type { OpportunityInsightInput } from "../opportunityInsight.js";
 import type { CommercialTemperature, TodayPriorityItem, TodayPriorityRisk } from "./types.js";
 import { generateOpportunityInsight } from "../opportunityInsight.js";
 import { calculateCommercialPriority, type CommercialPriorityInput, type CommercialPriorityLevel } from "../commercialPriorityService.js";
-import { WORKFLOW_INACTIVE_CLIENT_ORIGIN } from "../commercialAutomationsService.js";
+import { isInactiveRecentAutomationOpportunity } from "../commercialAutomationsService.js";
 
 export type TodayPriorityInput = OpportunityInsightInput & {
   id: string;
@@ -12,6 +12,7 @@ export type TodayPriorityInput = OpportunityInsightInput & {
   ownerSellerId?: string | null;
   title?: string | null;
   notes?: string | null;
+  origin?: string | null;
   client?: {
     id?: string | null;
     name?: string | null;
@@ -52,6 +53,7 @@ export const TODAY_PRIORITIES_OPPORTUNITY_SELECT = {
   ownerSellerId: true,
   title: true,
   notes: true,
+  origin: true,
   client: {
     select: {
       id: true,
@@ -140,7 +142,7 @@ export const buildCommercialPriorityInput = (opportunity: TodayPriorityInput, no
     lastContactAt: opportunity.lastContactAt,
     createdAt: opportunity.createdAt,
     notes: opportunity.notes,
-    source: opportunity.notes?.includes(WORKFLOW_INACTIVE_CLIENT_ORIGIN) ? "automatic" : undefined
+    source: isInactiveRecentAutomationOpportunity(opportunity) ? "automatic" : undefined
   },
   activities: opportunity.activities.map((activity) => ({
     date: activity.date,
@@ -155,7 +157,7 @@ export const buildCommercialPriorityInput = (opportunity: TodayPriorityInput, no
     description: event.description
   })),
   workflow: {
-    automaticallyCreatedOpportunity: Boolean(opportunity.notes?.includes(WORKFLOW_INACTIVE_CLIENT_ORIGIN))
+    automaticallyCreatedOpportunity: isInactiveRecentAutomationOpportunity(opportunity)
   },
   ai: {
     hasContext: Boolean(getLatestObservation(opportunity))

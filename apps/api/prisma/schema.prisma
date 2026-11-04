@@ -317,6 +317,7 @@ model AgendaStop {
   updatedAt        DateTime    @updatedAt
 
   @@unique([agendaEventId, order])
+  @@index([clientId, checkOutAt])
 }
 
 model Contact {
@@ -359,6 +360,8 @@ model Opportunity {
   lastContactAt        DateTime?
   probability          Int?
   notes                String?
+  // Origem gravada pelo sistema (ex.: "automation:inactive_recent"); nula nas criadas pela tela/API. Não editável.
+  origin               String?
   priceTableCode       String?                @default("1")
   clientId             String
   client               Client                 @relation(fields: [clientId], references: [id])

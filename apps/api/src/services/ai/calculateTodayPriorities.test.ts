@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { calculateTodayPriorities, __todayPrioritiesTestUtils, type TodayPriorityInput } from "./calculateTodayPriorities.js";
+import { calculateTodayPriorities, TODAY_PRIORITIES_OPPORTUNITY_SELECT, __todayPrioritiesTestUtils, type TodayPriorityInput } from "./calculateTodayPriorities.js";
 import { COMMERCIAL_PRIORITY_THRESHOLDS, COMMERCIAL_PRIORITY_WEIGHTS } from "../commercialPriorityService.js";
-import { WORKFLOW_INACTIVE_CLIENT_ORIGIN } from "../commercialAutomationsService.js";
+import { INACTIVE_RECENT_AUTOMATION_ORIGIN, WORKFLOW_INACTIVE_CLIENT_ORIGIN } from "../commercialAutomationsService.js";
 
 const todayStart = new Date("2026-07-16T00:00:00.000Z");
 
@@ -16,6 +16,7 @@ const makeOpportunity = (overrides: Partial<TodayPriorityInput> = {}): TodayPrio
   createdAt: overrides.createdAt || new Date("2026-07-10T00:00:00.000Z"),
   lastContactAt: overrides.lastContactAt ?? new Date("2026-07-15T00:00:00.000Z"),
   notes: overrides.notes,
+  origin: overrides.origin,
   clientId: overrides.clientId || "client-1",
   ownerSellerId: overrides.ownerSellerId || "seller-1",
   client: overrides.client ?? {
@@ -135,4 +136,12 @@ test("rota mantém filtro de carteira do vendedor e não altera gates existentes
   assert.ok(source.includes('router.get("/ai/today-priorities"'));
   assert.ok(source.includes("ownerSellerId: req.user.id"));
   assert.ok(source.includes("stage: { notIn: [...CLOSED_STAGE_VALUES] }"));
+});
+
+test("oportunidade da automação pela coluna origin, sem a marca nas notas (dados fictícios)", () => {
+  assert.equal(TODAY_PRIORITIES_OPPORTUNITY_SELECT.origin, true, "a consulta das prioridades lê origin");
+  const [byOrigin] = calculateTodayPriorities([makeOpportunity({ origin: INACTIVE_RECENT_AUTOMATION_ORIGIN, notes: "Inativo recente pela regra oficial da carteira." })], todayStart);
+  assert.ok(byOrigin.priorityReasons.includes("Oportunidade criada automaticamente"));
+  const [manual] = calculateTodayPriorities([makeOpportunity({ origin: null, notes: "Observação ficticia" })], todayStart);
+  assert.ok(!manual.priorityReasons.includes("Oportunidade criada automaticamente"));
 });

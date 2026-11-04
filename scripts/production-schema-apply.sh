@@ -120,6 +120,12 @@ if [[ "$MIGRATION_ID_REQUESTED" == 20261023120000_agenda_activity_planning_split
   agenda_split_state="$(admin_psql -Atc "$agenda_split_enum_sql"):$(admin_psql -Atc "$agenda_split_columns_sql")"
   [[ "$agenda_split_state" == 0:0 || "$agenda_split_state" == 8:2 ]] || die "migration Agenda/Atividades parcialmente aplicada"
 fi
+opportunity_origin_column_sql="SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='Opportunity' AND column_name='origin'"
+agenda_stop_client_index_sql="SELECT count(*) FROM pg_indexes WHERE schemaname='public' AND tablename='AgendaStop' AND indexname='AgendaStop_clientId_checkOutAt_idx'"
+if [[ "$MIGRATION_ID_REQUESTED" == 20261103120000_opportunity_origin_agenda_stop_client_index ]]; then
+  opportunity_origin_state="$(admin_psql -Atc "$opportunity_origin_column_sql"):$(admin_psql -Atc "$agenda_stop_client_index_sql")"
+  [[ "$opportunity_origin_state" == 0:0 || "$opportunity_origin_state" == 1:1 ]] || die "migration origem da oportunidade/índice de paradas parcialmente aplicada"
+fi
 
 # Repeat every mutable safety gate immediately before granting the migration its short-lived
 # administrative authority. The runtime URL remains in use for Prisma and incident reads.
@@ -138,6 +144,8 @@ elif [[ "$MIGRATION_ID_REQUESTED" == 20260927160000_product_price_source_observa
   log "migration de observação de origem ProductPrice já presente; DDL ignorado e pós-condições serão revalidadas"
 elif [[ "$MIGRATION_ID_REQUESTED" == 20261023120000_agenda_activity_planning_split && "$agenda_split_state" == 8:2 ]]; then
   log "migration Agenda/Atividades já presente; DDL ignorado e pós-condições serão revalidadas"
+elif [[ "$MIGRATION_ID_REQUESTED" == 20261103120000_opportunity_origin_agenda_stop_client_index && "$opportunity_origin_state" == 1:1 ]]; then
+  log "migration origem da oportunidade/índice de paradas já presente; DDL ignorado e pós-condições serão revalidadas"
 else
   log "aplicando migration versionada isoladamente; containers da aplicação não serão iniciados"
   admin_psql --single-transaction -f - < "$MIGRATION"
@@ -196,6 +204,15 @@ case "$MIGRATION_ID_REQUESTED" in
     touched_rows=$(admin_psql -Atc "SELECT (SELECT count(*) FROM \"AgendaEvent\" WHERE \"notDoneReason\" IS NOT NULL OR status::text='nao_realizado' OR type::text IN ('ligacao','whatsapp','visita','proposta','fechamento')) + (SELECT count(*) FROM \"Activity\" WHERE \"noNextStepReason\" IS NOT NULL OR type::text IN ('reuniao_online','reuniao_presencial'))")
     [[ "$enum_values:$columns:$touched_rows" == 8:2:0 ]] || die "pós-condições da migration Agenda/Atividades divergentes"
     printf 'enum_values\t%s\ncolumns_nullable\t%s\nrows_using_new_objects\t%s\nexisting_rows_preserved\tPASS\nold_api_compatible\tPASS\n' "$enum_values" "$columns" "$touched_rows" >"$evidence/post-validation.tsv"
+    ;;
+  20261103120000_opportunity_origin_agenda_stop_client_index)
+    columns=$(admin_psql -Atc "$opportunity_origin_column_sql AND is_nullable='YES' AND data_type='text' AND column_default IS NULL")
+    index=$(admin_psql -Atc "$agenda_stop_client_index_sql AND indexdef LIKE '%(\"clientId\", \"checkOutAt\")'")
+    # The running (old) API does not know the column, so any filled row would mean the
+    # migration itself wrote data. Race-free, unlike row counts.
+    touched_rows=$(admin_psql -Atc 'SELECT count(*) FROM "Opportunity" WHERE "origin" IS NOT NULL')
+    [[ "$columns:$index:$touched_rows" == 1:1:0 ]] || die "pós-condições da migration origem da oportunidade/índice de paradas divergentes"
+    printf 'columns_nullable\t%s\nagenda_stop_client_index\t%s\nrows_using_new_objects\t%s\nexisting_rows_preserved\tPASS\nold_api_compatible\tPASS\n' "$columns" "$index" "$touched_rows" >"$evidence/post-validation.tsv"
     ;;
   *) die "migration sem pós-condições cadastradas" ;;
 esac
