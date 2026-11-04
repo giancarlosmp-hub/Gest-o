@@ -1423,6 +1423,16 @@ tela troca a tabela por cartões no celular.
     acima da atribuição; o painel completo continua abaixo. Os 6 números do topo ficam em 2 colunas compactas (valor de
     15 px sem quebra, até "R$ 123.456.789,90" em 360 px) e o espaço dobrado entre blocos saiu, como em Pedidos.
   - Subtítulo: "Toque em uma cidade para ver pedidos, valor vendido e oportunidades."
+  - Ajustes após a preview:
+    - Computador: dica de uma linha que segue o mouse ("Cidade/UF · status"), só nas cidades do território; cinza sem
+      dica; no toque, nenhuma dica. Ctrl/Cmd + roda aproxima e afasta (também a pinça do trackpad); a roda sozinha rola
+      a página e mostra por 1,5 s "Use Ctrl + rolagem para aproximar o mapa" (Cmd no Mac). Sem o retângulo de foco no
+      clique; no teclado (`:focus-visible`) a borda da cidade fica azul e grossa. A borda preta da selecionada continua.
+    - Celular: lista de cidades compacta (uma linha por cidade, verde → amarelo → vermelho e nome; pedidos · vendido ·
+      oportunidades só quando algum passa de zero) com filtros Todas/Verde/Amarelo/Vermelho e contagem, só na tela.
+      Tocar na lista seleciona a cidade no mapa, abre o resumo e rola até o mapa. Sem o painel "Cidade selecionada" e
+      sem o cartão vazio abaixo do mapa. Tablet (640–1023 px) e desktop como estavam.
+    - Layout em `apps/web/tests/territoriesMobileLayout.test.ts`, também encadeado em `test:responsive`.
   - Contrato em `apps/web/tests/territoryMapRules.test.ts`, encadeado em `test:responsive` (passo que o CI já roda):
     hash do bloco de `GET /territories/coverage` (com quebras de linha normalizadas), a lista de etapas abertas, as
     cores por status e os textos/fontes de legenda, topo, seletor e detalhe. Se a rota mudar, o teste falha de propósito.
