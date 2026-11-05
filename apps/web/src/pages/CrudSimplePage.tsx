@@ -1,7 +1,7 @@
 import { ChangeEvent, FormEvent, MouseEvent, useEffect, useMemo, useState } from "react";
 import { MoreHorizontal } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { ABC_CLASSES, CLIENT_IN_COLLECTION_LABEL, COOLING_STATUS_FILTER, COOLING_STATUS_FILTER_LABEL, PORTFOLIO_STATUSES, PORTFOLIO_STATUS_LABELS, isAbcClass, isClientStatusFilter, isPortfolioStatus } from "@salesforce-pro/shared";
+import { ABC_CLASSES, CLIENT_IN_COLLECTION_LABEL, COOLING_STATUS_FILTER, COOLING_STATUS_FILTER_LABEL, PORTFOLIO_STATUSES, PORTFOLIO_STATUS_LABELS, isAbcClass, isClientStatusFilter, isPortfolioStatus, normalizeBrazilPhone } from "@salesforce-pro/shared";
 import api from "../lib/apiClient";
 import { toast } from "sonner";
 import { useAuth } from "../context/AuthContext";
@@ -561,6 +561,9 @@ export default function CrudSimplePage({
     }
     if (isUsersPage && fieldKey === "erpLoginConfigured") {
       return item.erpLoginConfigured ? "Senha ERP configurada" : "Login FV3 pendente";
+    }
+    if (isUsersPage && fieldKey === "phone") {
+      return typeof item.phone === "string" && item.phone ? normalizeBrazilPhone(item.phone).display : "—";
     }
     const value = item[fieldKey];
     if (value === null || value === undefined || value === "") return "—";
@@ -1638,7 +1641,9 @@ export default function CrudSimplePage({
           erpCode: selectedSalesman?.code ?? payload.erpCode ?? null,
           erpOperatorCode: selectedSalesman?.erpOperatorCode ?? payload.erpOperatorCode ?? null,
           erpRawPayload: selectedSalesman?.raw ?? payload.erpRawPayload,
-          erpLoginUsername: payload.erpLoginUsername ? String(payload.erpLoginUsername).trim() : null
+          erpLoginUsername: payload.erpLoginUsername ? String(payload.erpLoginUsername).trim() : null,
+          // Validado e normalizado (55DDDNÚMERO) pela API; vazio limpa.
+          phone: payload.phone ? String(payload.phone).trim() : null
         };
 
         if (!userPayload.erpCode) {
@@ -1715,7 +1720,9 @@ export default function CrudSimplePage({
   const onEdit = (item: any) => {
     setFormError(null);
     setFormFieldErrors({});
-    const nextForm = endpoint === "/users" ? { ...item, password: "", erpLoginPassword: "" } : item;
+    const nextForm = endpoint === "/users"
+      ? { ...item, password: "", erpLoginPassword: "", phone: typeof item.phone === "string" && item.phone ? normalizeBrazilPhone(item.phone).display : "" }
+      : item;
 
     if (createInModal) {
       setEditing(item.id);
@@ -1871,7 +1878,8 @@ export default function CrudSimplePage({
             const isPasswordOptionalOnUserEdit = endpoint === "/users" && f.key === "password" && Boolean(editing);
             const isErpSalesmanField = endpoint === "/users" && f.type === "erpSalesman";
             const isOptionalErpLoginField = endpoint === "/users" && ["erpLoginUsername", "erpLoginPassword", "erpLoginConfigured"].includes(f.key);
-            const isFieldRequired = !isPasswordOptionalOnUserEdit && !isErpSalesmanField && !isOptionalErpLoginField;
+            const isOptionalUserPhoneField = endpoint === "/users" && f.key === "phone";
+            const isFieldRequired = !isPasswordOptionalOnUserEdit && !isErpSalesmanField && !isOptionalErpLoginField && !isOptionalUserPhoneField;
 
             const fieldControlClass = "mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100";
 
