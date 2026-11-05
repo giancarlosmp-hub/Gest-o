@@ -1603,3 +1603,17 @@ diretor e gerente. Pendente:
 - Vendedor editar o próprio celular: decidido não fazer agora (exigiria rota própria).
 - `GET /users` continua devolvendo `erpRawPayload` (usado pela tela de vínculo ERP) a diretor e gerente.
 - O envio do resumo diário por WhatsApp é tarefa futura; só o cadastro existe.
+
+### TD-CLIENT-DELETE-MERGE — exclusão de cliente com histórico e duplicados do ERP
+
+**Aberto, médio.** A exclusão passou a bloquear com 409 e há "Mesclar duplicado" na tela do cliente. Pendente:
+
+- Rotas async da API sem repasse de erro (Express 4 sem wrapper): qualquer erro não tratado vira 408 depois de
+  15 s em vez de 500. Corrigir de forma global em PR próprio.
+- "Arquivar" manual de cliente não existe; o 409 da exclusão cita só "Mesclar duplicado".
+- A sincronização não arquiva parceiro que saiu do ERP: um duplicado que ficou com o documento bloqueia o código
+  antigo (ambíguo) até alguém mesclar.
+- `GET /clients/diagnostics/duplicate-documents` agrupa por `cnpjNormalized`, que tem índice único: não acha o caso
+  em que um cadastro tem o documento só em `cnpj` (o que a sugestão do "Mesclar duplicado" já cobre).
+- Contatos trazidos na mesclagem podem repetir os do cadastro que fica (não há deduplicação de contato).
+- Mesclagens manuais antigas usavam o prefixo `[ARQUIVADO]` e motivo livre; continuam como estão.
