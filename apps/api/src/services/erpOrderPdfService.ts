@@ -768,9 +768,10 @@ export const getErpOrderPdfBranch = async (
   return findPdfBranch(branches, getPayload(order).CODFILIAL);
 };
 
-const findPdfPartner = (
+// Mesma busca usada pelos telefones do ERP no detalhe do cliente (clientErpContacts.ts).
+export const findPdfPartner = (
   partners: Record<string, unknown>[],
-  client: ErpOrderPdfRecord["opportunity"]["client"],
+  client: Pick<Client, "code" | "cnpj">,
 ) => {
   const normalizedCode = normalizeErpParameterCode(cleanText(client.code, ""));
   if (normalizedCode) {
@@ -794,6 +795,10 @@ const findPdfPartner = (
 
   return null;
 };
+
+export const getStoredErpPartnerRows = (
+  prisma: Pick<PrismaClient, "appConfig">,
+) => getStoredReferenceRows(prisma, "erp.ultrafv3.partners");
 
 export const getErpOrderPdfPartner = async (
   prisma: Pick<PrismaClient, "appConfig">,
