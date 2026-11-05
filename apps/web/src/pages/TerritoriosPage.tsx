@@ -1,31 +1,38 @@
-import { type PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, CheckCircle2, CircleDollarSign, Info, LocateFixed, MapPinned, Minus, Plus, Settings2, Target, TrendingUp } from "lucide-react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AlertCircle, CheckCircle2, CircleDollarSign, Info, MapPinned, Settings2, Target, TrendingUp, X } from "lucide-react";
 import { Link } from "react-router-dom";
 import api from "../lib/apiClient";
 import { useAuth } from "../context/AuthContext";
 import { formatCurrencyBRL, formatNumberBR, formatPercentBR } from "../lib/formatters";
 import { getApiErrorMessage } from "../lib/apiError";
 import { brazilMonthKey } from "../lib/brazilDate";
+import {
+  calculateBounds,
+  countTerritoryCitiesByStatus,
+  createOutOfTerritoryCity,
+  expandBounds,
+  filterTerritoryCities,
+  getCityGeoMatch,
+  getCityStateNameKey,
+  getFeatureCityName,
+  getFeatureState,
+  sortTerritoryCitiesForList,
+  territoryCityListMetrics,
+  type TerritoryCity,
+  type TerritoryCityStatus,
+  type TerritoryListFilter,
+  type TerritoryMunicipalityFeature,
+  type TerritoryMunicipalityGeoJson
+} from "../lib/territoryMap";
+
+// Leaflet (JS + CSS) só é baixado quando a tela de Territórios abre, fora do pacote principal do app.
+const TerritoryLeafletMap = lazy(() => import("../components/territories/TerritoryLeafletMap"));
 
 type SellerOption = {
   id: string;
   name: string;
   role: string;
   isActive?: boolean;
-};
-
-type TerritoryCityStatus = "positive" | "opportunity" | "no_sale" | "out_of_territory";
-
-type TerritoryCity = {
-  id?: string;
-  city: string;
-  state: string;
-  status: TerritoryCityStatus;
-  statusLabel: string;
-  ibgeCode?: string | number | null;
-  orderCount: number;
-  soldValue: number;
-  openOpportunityCount: number;
 };
 
 type TerritoryCoverageResponse = {
@@ -50,308 +57,6 @@ const TERRITORY_GEOJSON_STATES = [
   { uf: "MS", url: "https://cdn.jsdelivr.net/gh/tbrugz/geodata-br@master/geojson/geojs-50-mun.json" }
 ] as const;
 // GeoJSON por UF com fonte IBGE, CC0-1.0 (tbrugz/geodata-br).
-const MAP_WIDTH = 1100;
-const MAP_HEIGHT = 760;
-const MAP_PADDING = 18;
-
-type GeoJsonPosition = [number, number] | [number, number, number];
-type GeoJsonPolygon = GeoJsonPosition[][];
-type GeoJsonMultiPolygon = GeoJsonPolygon[];
-
-type GeoJsonGeometry = {
-  type: "Polygon" | "MultiPolygon";
-  coordinates: GeoJsonPolygon | GeoJsonMultiPolygon;
-};
-
-type TerritoryMunicipalityFeature = {
-  type: "Feature";
-  properties: Record<string, string | number | null | undefined>;
-  geometry: GeoJsonGeometry | null;
-};
-
-type TerritoryMunicipalityGeoJson = {
-  type: "FeatureCollection";
-  features: TerritoryMunicipalityFeature[];
-};
-
-type ProjectedBounds = {
-  minLon: number;
-  maxLon: number;
-  minLat: number;
-  maxLat: number;
-};
-
-type MapTransform = {
-  scale: number;
-  x: number;
-  y: number;
-};
-
-type DragState = {
-  pointerId: number;
-  startX: number;
-  startY: number;
-  originX: number;
-  originY: number;
-  moved: boolean;
-};
-
-type StateLabel = {
-  state: string;
-  x: number;
-  y: number;
-};
-
-type StateBoundarySegment = {
-  state: string;
-  start: GeoJsonPosition;
-  end: GeoJsonPosition;
-};
-
-const DEFAULT_MAP_TRANSFORM: MapTransform = { scale: 1, x: 0, y: 0 };
-const MAP_MIN_ZOOM = 0.85;
-const MAP_MAX_ZOOM = 3.2;
-const MAP_ZOOM_STEP = 0.22;
-const MOBILE_EMPTY_MAP_ZOOM = 1.18;
-
-function getInitialMapTransform(hasTerritory: boolean, isMobile: boolean): MapTransform {
-  if (hasTerritory || !isMobile) return DEFAULT_MAP_TRANSFORM;
-
-  return {
-    scale: MOBILE_EMPTY_MAP_ZOOM,
-    x: (MAP_WIDTH * (1 - MOBILE_EMPTY_MAP_ZOOM)) / 2,
-    y: (MAP_HEIGHT * (1 - MOBILE_EMPTY_MAP_ZOOM)) / 2
-  };
-}
-
-const statusFillColors: Record<TerritoryCityStatus, string> = {
-  positive: "#059669",
-  opportunity: "#f59e0b",
-  no_sale: "#dc2626",
-  out_of_territory: "#e8edf3"
-};
-
-const statusStrokeColors: Record<TerritoryCityStatus, string> = {
-  positive: "#065f46",
-  opportunity: "#92400e",
-  no_sale: "#991b1b",
-  out_of_territory: "#b8c2cc"
-};
-
-function normalizeCityKey(value: string) {
-  return value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/['’]/g, "")
-    .replace(/[^a-zA-Z0-9]+/g, " ")
-    .trim()
-    .replace(/\s+/g, " ")
-    .toUpperCase();
-}
-
-function getFeatureCityName(feature: TerritoryMunicipalityFeature) {
-  const props = feature.properties ?? {};
-  const candidate = props.name ?? props.nome ?? props.NM_MUN ?? props.NM_MUNICIP ?? props.description ?? props.municipio ?? props.MUNICIPIO;
-  return String(candidate ?? "Município");
-}
-
-function getFeatureIbgeCode(feature: TerritoryMunicipalityFeature) {
-  const props = feature.properties ?? {};
-  const candidate = props.id ?? props.codigo_ibge ?? props.CD_MUN ?? props.CD_GEOCMU ?? props.geocodigo;
-  return candidate === undefined || candidate === null ? "" : String(candidate);
-}
-
-function getFeatureState(feature: TerritoryMunicipalityFeature) {
-  const props = feature.properties ?? {};
-  const explicitState = props.__state ?? props.uf ?? props.UF ?? props.state;
-  if (explicitState) return String(explicitState).toUpperCase();
-
-  const ibgeCode = getFeatureIbgeCode(feature);
-  if (ibgeCode.startsWith("41")) return "PR";
-  if (ibgeCode.startsWith("42")) return "SC";
-  if (ibgeCode.startsWith("50")) return "MS";
-  return "";
-}
-
-function getPolygons(geometry: GeoJsonGeometry | null): GeoJsonPolygon[] {
-  if (!geometry) return [];
-  if (geometry.type === "Polygon") return [geometry.coordinates as GeoJsonPolygon];
-  if (geometry.type === "MultiPolygon") return geometry.coordinates as GeoJsonMultiPolygon;
-  return [];
-}
-
-function calculateBounds(features: TerritoryMunicipalityFeature[]): ProjectedBounds {
-  const bounds = features.reduce<ProjectedBounds>((acc, feature) => {
-    getPolygons(feature.geometry).forEach((polygon) => {
-      polygon.forEach((ring) => {
-        ring.forEach(([lon, lat]) => {
-          acc.minLon = Math.min(acc.minLon, lon);
-          acc.maxLon = Math.max(acc.maxLon, lon);
-          acc.minLat = Math.min(acc.minLat, lat);
-          acc.maxLat = Math.max(acc.maxLat, lat);
-        });
-      });
-    });
-    return acc;
-  }, { minLon: Infinity, maxLon: -Infinity, minLat: Infinity, maxLat: -Infinity });
-
-  return Number.isFinite(bounds.minLon) ? bounds : { minLon: -54, maxLon: -48, minLat: -27, maxLat: -22 };
-}
-
-
-function expandBounds(bounds: ProjectedBounds, paddingRatio: number): ProjectedBounds {
-  const lonPadding = Math.max((bounds.maxLon - bounds.minLon) * paddingRatio, 0.12);
-  const latPadding = Math.max((bounds.maxLat - bounds.minLat) * paddingRatio, 0.12);
-
-  return {
-    minLon: bounds.minLon - lonPadding,
-    maxLon: bounds.maxLon + lonPadding,
-    minLat: bounds.minLat - latPadding,
-    maxLat: bounds.maxLat + latPadding
-  };
-}
-
-function getCityStateNameKey(state: string, city: string) {
-  return `${state.toUpperCase()}::${normalizeCityKey(city)}`;
-}
-
-function normalizeIbgeCode(value: string | number | null | undefined) {
-  return value === undefined || value === null ? "" : String(value).trim();
-}
-
-function getCityGeoMatch(feature: TerritoryMunicipalityFeature, citiesByIbgeCode: Map<string, TerritoryCity>, citiesByStateAndName: Map<string, TerritoryCity>) {
-  const featureIbgeCode = normalizeIbgeCode(getFeatureIbgeCode(feature));
-  if (featureIbgeCode) {
-    const cityByIbge = citiesByIbgeCode.get(featureIbgeCode);
-    if (cityByIbge) return cityByIbge;
-  }
-
-  const featureState = getFeatureState(feature);
-  if (!featureState) return null;
-
-  return citiesByStateAndName.get(getCityStateNameKey(featureState, getFeatureCityName(feature))) ?? null;
-}
-
-function getSegmentKey(start: GeoJsonPosition, end: GeoJsonPosition) {
-  const normalizePoint = ([lon, lat]: GeoJsonPosition) => `${lon.toFixed(6)},${lat.toFixed(6)}`;
-  const a = normalizePoint(start);
-  const b = normalizePoint(end);
-  return a < b ? `${a}|${b}` : `${b}|${a}`;
-}
-
-function buildStateBoundarySegments(features: TerritoryMunicipalityFeature[]): StateBoundarySegment[] {
-  const segmentsByState = new Map<string, Map<string, { count: number; segment: StateBoundarySegment }>>();
-
-  features.forEach((feature) => {
-    const state = getFeatureState(feature);
-    if (!state) return;
-    const stateSegments = segmentsByState.get(state) ?? new Map<string, { count: number; segment: StateBoundarySegment }>();
-    getPolygons(feature.geometry).forEach((polygon) => {
-      polygon.forEach((ring) => {
-        for (let index = 0; index < ring.length - 1; index += 1) {
-          const start = ring[index];
-          const end = ring[index + 1];
-          const key = getSegmentKey(start, end);
-          const current = stateSegments.get(key);
-          stateSegments.set(key, { count: (current?.count ?? 0) + 1, segment: current?.segment ?? { state, start, end } });
-        }
-      });
-    });
-    segmentsByState.set(state, stateSegments);
-  });
-
-  return Array.from(segmentsByState.values()).flatMap((segments) =>
-    Array.from(segments.values())
-      .filter((item) => item.count === 1)
-      .map((item) => item.segment)
-  );
-}
-
-function stateBoundarySegmentsToPath(segments: StateBoundarySegment[], bounds: ProjectedBounds) {
-  return segments.map(({ start, end }) => {
-    const startPoint = projectPosition(start, bounds);
-    const endPoint = projectPosition(end, bounds);
-    return `M${startPoint.x.toFixed(2)},${startPoint.y.toFixed(2)} L${endPoint.x.toFixed(2)},${endPoint.y.toFixed(2)}`;
-  }).join(" ");
-}
-
-function calculateStateLabels(features: TerritoryMunicipalityFeature[], bounds: ProjectedBounds): StateLabel[] {
-  return TERRITORY_GEOJSON_STATES.map(({ uf }) => {
-    const stateBounds = calculateBounds(features.filter((feature) => getFeatureState(feature) === uf));
-    const center = projectPosition([
-      (stateBounds.minLon + stateBounds.maxLon) / 2,
-      (stateBounds.minLat + stateBounds.maxLat) / 2
-    ], bounds);
-    return { state: uf, x: center.x, y: center.y };
-  });
-}
-
-function clampMapScale(scale: number) {
-  return Math.min(Math.max(scale, MAP_MIN_ZOOM), MAP_MAX_ZOOM);
-}
-
-function zoomMapTransform(current: MapTransform, delta: number): MapTransform {
-  const nextScale = clampMapScale(Number((current.scale + delta).toFixed(2)));
-  return { ...current, scale: nextScale };
-}
-
-function projectPosition([lon, lat]: GeoJsonPosition, bounds: ProjectedBounds) {
-  const lonRange = bounds.maxLon - bounds.minLon || 1;
-  const latRange = bounds.maxLat - bounds.minLat || 1;
-  const drawableWidth = MAP_WIDTH - MAP_PADDING * 2;
-  const drawableHeight = MAP_HEIGHT - MAP_PADDING * 2;
-  const scale = Math.min(drawableWidth / lonRange, drawableHeight / latRange);
-  const mapPixelWidth = lonRange * scale;
-  const mapPixelHeight = latRange * scale;
-  const offsetX = (MAP_WIDTH - mapPixelWidth) / 2;
-  const offsetY = (MAP_HEIGHT - mapPixelHeight) / 2;
-
-  return {
-    x: offsetX + (lon - bounds.minLon) * scale,
-    y: offsetY + (bounds.maxLat - lat) * scale
-  };
-}
-
-function polygonToPath(polygon: GeoJsonPolygon, bounds: ProjectedBounds) {
-  return polygon
-    .map((ring) => ring
-      .map((position, index) => {
-        const point = projectPosition(position, bounds);
-        return `${index === 0 ? "M" : "L"}${point.x.toFixed(2)},${point.y.toFixed(2)}`;
-      })
-      .join(" ") + " Z")
-    .join(" ");
-}
-
-function featureToPath(feature: TerritoryMunicipalityFeature, bounds: ProjectedBounds) {
-  return getPolygons(feature.geometry).map((polygon) => polygonToPath(polygon, bounds)).join(" ");
-}
-
-function getTooltipText(city: TerritoryCity, sellerName?: string) {
-  return [
-    `Cidade: ${city.city}`,
-    `UF: ${city.state}`,
-    `Código IBGE: ${city.ibgeCode ?? "-"}`,
-    `Status: ${city.statusLabel || statusStyles[city.status].label}`,
-    `Vendedor: ${sellerName ?? "-"}`,
-    `Pedidos ERP: ${city.orderCount}`,
-    `Valor vendido: ${formatCurrencyBRL(city.soldValue)}`,
-    `Oportunidades abertas: ${city.openOpportunityCount}`
-  ].join("\n");
-}
-
-function createOutOfTerritoryCity(city: string, state: string): TerritoryCity {
-  return {
-    city,
-    state,
-    status: "out_of_territory",
-    statusLabel: "Fora do território",
-    orderCount: 0,
-    soldValue: 0,
-    openOpportunityCount: 0
-  };
-}
-
 function DetailRow({ label, value }: { label: string; value: string | number }) {
   return (
     <div className="rounded-xl bg-slate-50 p-3">
@@ -434,13 +139,14 @@ function SummaryCard({ title, value, icon: Icon, tone = "slate" }: { title: stri
   }[tone];
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+    <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
       <div className="flex items-start justify-between gap-3">
-        <div>
+        <div className="min-w-0">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</p>
-          <p className="mt-2 text-2xl font-bold text-slate-900">{value}</p>
+          {/* Celular: valor menor e sem quebra no meio (o shell aplica overflow-wrap: anywhere em <p>). */}
+          <p className="mt-1 text-[15px] font-bold text-slate-900 max-sm:whitespace-nowrap max-sm:[overflow-wrap:normal] sm:mt-2 sm:text-2xl">{value}</p>
         </div>
-        <span className={`rounded-xl p-2 ${toneClasses}`}>
+        <span className={`rounded-xl p-2 max-sm:hidden ${toneClasses}`}>
           <Icon size={20} />
         </span>
       </div>
@@ -459,11 +165,6 @@ export default function TerritoriosPage() {
   const [territoryGeoJson, setTerritoryGeoJson] = useState<TerritoryMunicipalityGeoJson | null>(null);
   const [geoJsonError, setGeoJsonError] = useState<string | null>(null);
   const [selectedCity, setSelectedCity] = useState<TerritoryCity | null>(null);
-  const [mapTransform, setMapTransform] = useState<MapTransform>(DEFAULT_MAP_TRANSFORM);
-  const [isMobileMap, setIsMobileMap] = useState(false);
-  const dragState = useRef<DragState | null>(null);
-  const suppressNextMapClick = useRef(false);
-  const pendingMapSelection = useRef<TerritoryCity | null>(null);
 
   const canChooseSeller = user?.role === "diretor" || user?.role === "gerente";
   const canManageTerritories = user?.role === "diretor" || user?.role === "gerente";
@@ -497,26 +198,28 @@ export default function TerritoriosPage() {
     const focusedFeatures = territoryFeatures.length > 0 ? territoryFeatures : (territoryGeoJson?.features ?? []);
     return expandBounds(calculateBounds(focusedFeatures), territoryFeatures.length > 0 ? 0.22 : 0.05);
   }, [territoryFeatures, territoryGeoJson]);
-  const stateBoundaryPath = useMemo(() => {
-    if (!territoryGeoJson) return "";
-    return stateBoundarySegmentsToPath(buildStateBoundarySegments(territoryGeoJson.features), geoBounds);
-  }, [geoBounds, territoryGeoJson]);
-  const stateLabels = useMemo(() => territoryGeoJson ? calculateStateLabels(territoryGeoJson.features, geoBounds) : [], [geoBounds, territoryGeoJson]);
+  // Cada polígono recebe a cidade da resposta da API (por IBGE ou UF + nome); sem correspondência, fica fora do território.
+  const resolveMapCity = useCallback((feature: TerritoryMunicipalityFeature) =>
+    getCityGeoMatch(feature, citiesByIbgeCode, citiesByStateAndName)
+      ?? createOutOfTerritoryCity(getFeatureCityName(feature), getFeatureState(feature)),
+  [citiesByIbgeCode, citiesByStateAndName]);
+  // Lista do celular: filtro por status só na tela (sem parâmetro novo na API) e ordem verde, amarelo, vermelho, nome.
+  const [listFilter, setListFilter] = useState<TerritoryListFilter>("all");
+  const [revealSelectedKey, setRevealSelectedKey] = useState(0);
+  const mapAreaRef = useRef<HTMLDivElement | null>(null);
+  const listCounts = useMemo(() => countTerritoryCitiesByStatus(coverage?.cities ?? []), [coverage]);
+  const mobileListCities = useMemo(() => filterTerritoryCities(sortTerritoryCitiesForList(coverage?.cities ?? []), listFilter), [coverage, listFilter]);
+  // Tocar na lista = mesma seleção do toque no mapa (resumo por cima do mapa) e a tela rola até o mapa.
+  const selectCityFromList = (city: TerritoryCity) => {
+    setSelectedCity(city);
+    setRevealSelectedKey((current) => current + 1);
+    mapAreaRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
   const selectedSeller = coverage?.seller ?? sellers.find((seller) => seller.id === selectedSellerId);
   const hasTerritoryCities = (coverage?.cities.length ?? 0) > 0;
   const hasNoTerritory = Boolean(coverage && !loading && !hasTerritoryCities);
   const canInspectMunicipalities = !hasNoTerritory;
   const missingCities = Math.max((coverage?.summary.totalCities ?? 0) - (coverage?.summary.positiveCities ?? 0), 0);
-
-  useEffect(() => {
-    const mediaQuery = window.matchMedia("(max-width: 640px)");
-    const updateMobileMap = () => setIsMobileMap(mediaQuery.matches);
-
-    updateMobileMap();
-    mediaQuery.addEventListener("change", updateMobileMap);
-
-    return () => mediaQuery.removeEventListener("change", updateMobileMap);
-  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -566,6 +269,7 @@ export default function TerritoriosPage() {
 
   useEffect(() => {
     setSelectedCity(null);
+    setListFilter("all");
   }, [selectedSellerId, month]);
 
   useEffect(() => {
@@ -591,61 +295,8 @@ export default function TerritoriosPage() {
     return () => { mounted = false; };
   }, [selectedSellerId, month]);
 
-  const handleMapPointerDown = (event: ReactPointerEvent<SVGSVGElement>) => {
-    if (!(event.target instanceof SVGPathElement) || event.target.dataset.municipality !== "true") {
-      pendingMapSelection.current = null;
-    }
-
-    dragState.current = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      originX: mapTransform.x,
-      originY: mapTransform.y,
-      moved: false
-    };
-    event.currentTarget.setPointerCapture(event.pointerId);
-  };
-
-  const handleMapPointerMove = (event: ReactPointerEvent<SVGSVGElement>) => {
-    const currentDrag = dragState.current;
-    if (!currentDrag || currentDrag.pointerId !== event.pointerId) return;
-    const deltaX = event.clientX - currentDrag.startX;
-    const deltaY = event.clientY - currentDrag.startY;
-    const moved = currentDrag.moved || Math.hypot(deltaX, deltaY) > 4;
-    dragState.current = { ...currentDrag, moved };
-    if (!moved) return;
-    suppressNextMapClick.current = true;
-    setMapTransform((current) => ({ ...current, x: currentDrag.originX + deltaX, y: currentDrag.originY + deltaY }));
-  };
-
-  const handleMapPointerEnd = (event: ReactPointerEvent<SVGSVGElement>) => {
-    const currentDrag = dragState.current;
-    if (!currentDrag || currentDrag.pointerId !== event.pointerId) return;
-
-    const selectedMunicipality = pendingMapSelection.current;
-    pendingMapSelection.current = null;
-
-    if (currentDrag.moved) {
-      suppressNextMapClick.current = true;
-    } else if (selectedMunicipality) {
-      setSelectedCity(selectedMunicipality);
-    }
-
-    dragState.current = null;
-    event.currentTarget.releasePointerCapture(event.pointerId);
-  };
-
-  useEffect(() => {
-    setMapTransform(getInitialMapTransform(hasTerritoryCities, isMobileMap));
-  }, [hasTerritoryCities, isMobileMap, selectedSellerId, month]);
-
-  const resetMapView = () => {
-    setMapTransform(getInitialMapTransform(hasTerritoryCities, isMobileMap));
-  };
-
   return (
-    <div className="space-y-6 p-4 sm:p-6 lg:p-8">
+    <div className="space-y-6 max-sm:space-y-0 sm:p-6 lg:p-8">
       <header className="flex flex-col gap-3 rounded-3xl bg-gradient-to-br from-brand-700 to-brand-500 px-4 py-4 text-white shadow-lg sm:gap-4 sm:p-6 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <div className="mb-2 inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide sm:mb-3 sm:gap-2 sm:px-3 sm:text-xs">
@@ -710,7 +361,7 @@ export default function TerritoriosPage() {
         </div>
       ) : null}
 
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
+      <section className="grid grid-cols-2 gap-2 sm:gap-4 xl:grid-cols-6">
         <SummaryCard title="Total de cidades" value={formatNumberBR(coverage?.summary.totalCities ?? 0)} icon={MapPinned} />
         <SummaryCard title="Cidades positivadas" value={formatNumberBR(coverage?.summary.positiveCities ?? 0)} icon={CheckCircle2} tone="green" />
         <SummaryCard title="Oportunidade aberta" value={formatNumberBR(coverage?.summary.opportunityCities ?? 0)} icon={Target} tone="yellow" />
@@ -740,7 +391,7 @@ export default function TerritoriosPage() {
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div>
                 <h2 className="text-xl font-bold text-slate-900">Mapa real dos municípios de PR, SC e MS</h2>
-                <p className="mt-1 text-sm text-slate-500">Clique em uma cidade para ver clientes, oportunidades e pedidos.</p>
+                <p className="mt-1 text-sm text-slate-500">Toque em uma cidade para ver pedidos, valor vendido e oportunidades.</p>
               </div>
               <div className="rounded-2xl bg-slate-50 p-3 ring-1 ring-slate-200">
                 <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-600">Território do vendedor</p>
@@ -759,147 +410,54 @@ export default function TerritoriosPage() {
           </div>
 
           <div className="grid gap-4 p-3 sm:p-5 lg:grid-cols-[minmax(0,1fr)_360px] lg:p-6">
-            <div className="relative overflow-hidden rounded-3xl border border-slate-200 bg-gradient-to-br from-slate-50 via-white to-emerald-50/30 shadow-[0_24px_70px_rgba(15,23,42,0.12)] ring-1 ring-white">
-              <div className="absolute left-4 top-4 z-10 inline-flex w-max max-w-max overflow-hidden rounded-2xl border border-slate-200 bg-white/95 shadow-lg backdrop-blur" style={{ width: "max-content" }}>
-                <button
-                  type="button"
-                  className="inline-flex h-10 w-10 items-center justify-center border-r border-slate-200 text-slate-700 transition hover:bg-slate-50"
-                  onClick={() => setMapTransform((current) => zoomMapTransform(current, MAP_ZOOM_STEP))}
-                  aria-label="Aproximar mapa"
-                >
-                  <Plus size={18} />
-                </button>
-                <button
-                  type="button"
-                  className="inline-flex h-10 w-10 items-center justify-center border-r border-slate-200 text-slate-700 transition hover:bg-slate-50"
-                  onClick={() => setMapTransform((current) => zoomMapTransform(current, -MAP_ZOOM_STEP))}
-                  aria-label="Afastar mapa"
-                >
-                  <Minus size={18} />
-                </button>
-                <button
-                  type="button"
-                  className="inline-flex h-10 w-10 items-center justify-center text-slate-700 transition hover:bg-slate-50"
-                  onClick={resetMapView}
-                  aria-label="Recentralizar mapa"
-                >
-                  <LocateFixed size={18} />
-                </button>
-              </div>
-              <div className="flex min-h-[420px] items-center justify-center sm:min-h-[560px] lg:min-h-[700px]">
-                {loading ? (
-                  <div className="flex min-h-[420px] items-center justify-center p-6 text-sm font-semibold text-slate-500 sm:min-h-[560px] lg:min-h-[700px]">Carregando território...</div>
-                ) : geoJsonError ? (
-                  <div className="flex min-h-[420px] flex-col items-center justify-center gap-2 p-6 text-center text-sm text-slate-500 sm:min-h-[560px] lg:min-h-[700px]">
-                    <AlertCircle className="text-amber-500" size={22} />
-                    <span>{geoJsonError}</span>
+            <div ref={mapAreaRef} className="relative overflow-hidden rounded-3xl border border-slate-200 bg-gradient-to-br from-slate-50 via-white to-emerald-50/30 shadow-[0_24px_70px_rgba(15,23,42,0.12)] ring-1 ring-white">
+              {loading ? (
+                <div className="flex min-h-[420px] items-center justify-center p-6 text-sm font-semibold text-slate-500 sm:min-h-[560px] lg:min-h-[700px]">Carregando território...</div>
+              ) : geoJsonError ? (
+                <div className="flex min-h-[420px] flex-col items-center justify-center gap-2 p-6 text-center text-sm text-slate-500 sm:min-h-[560px] lg:min-h-[700px]">
+                  <AlertCircle className="text-amber-500" size={22} />
+                  <span>{geoJsonError}</span>
+                </div>
+              ) : territoryGeoJson ? (
+                <Suspense fallback={<div className="flex min-h-[420px] items-center justify-center p-6 text-sm font-semibold text-slate-500 sm:min-h-[560px] lg:min-h-[700px]">Carregando mapa de PR, SC e MS...</div>}>
+                <TerritoryLeafletMap
+                  features={territoryGeoJson.features}
+                  resolveCity={resolveMapCity}
+                  selectedCity={selectedCity}
+                  onSelectCity={setSelectedCity}
+                  canInspect={canInspectMunicipalities}
+                  focusBounds={geoBounds}
+                  viewKey={`${selectedSellerId}|${month}|${hasTerritoryCities ? "territory" : "empty"}`}
+                  revealSelectedKey={revealSelectedKey}
+                  ariaLabel="Mapa de cobertura comercial dos municípios do Paraná, Santa Catarina e Mato Grosso do Sul"
+                />
+                </Suspense>
+              ) : (
+                <div className="flex min-h-[420px] items-center justify-center p-6 text-sm font-semibold text-slate-500 sm:min-h-[560px] lg:min-h-[700px]">Carregando mapa de PR, SC e MS...</div>
+              )}
+              {/* Celular e tablet: resumo da cidade tocada por cima do mapa (o detalhe completo continua abaixo).
+                  Fica acima da linha de atribuição do OpenStreetMap, que precisa seguir visível. rounded-[1rem] e rounded-[0.75rem]
+                  (e não rounded-2xl/rounded-xl): no celular o shell estica essas classes para 100% da largura. */}
+              {selectedCity && !hasNoTerritory ? (
+                <div className="absolute inset-x-3 bottom-8 z-10 rounded-[1rem] border border-slate-200 bg-white/95 p-3 text-sm shadow-xl backdrop-blur lg:hidden" role="status" aria-live="polite">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="font-bold text-slate-900">{selectedCity.city}/{selectedCity.state}</p>
+                      <span className={`mt-1 inline-flex w-fit rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ${statusStyles[selectedCity.status].badge}`}>{selectedCity.statusLabel}</span>
+                    </div>
+                    <button type="button" className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-[0.75rem] text-slate-500 hover:bg-slate-100" onClick={() => setSelectedCity(null)} aria-label="Fechar resumo da cidade">
+                      <X size={18} />
+                    </button>
                   </div>
-                ) : territoryGeoJson ? (
-                  <svg
-                    className={`h-full min-h-[420px] w-full max-w-[1280px] touch-none select-none sm:min-h-[560px] lg:min-h-[700px] ${canInspectMunicipalities ? "cursor-grab" : "cursor-default"}`}
-                    role="img"
-                    aria-label="Mapa de cobertura comercial dos municípios do Paraná, Santa Catarina e Mato Grosso do Sul"
-                    viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`}
-                    onPointerDown={handleMapPointerDown}
-                    onPointerMove={handleMapPointerMove}
-                    onPointerUp={handleMapPointerEnd}
-                    onPointerCancel={handleMapPointerEnd}
-                  >
-                    <defs>
-                      <filter id="territoryGlow" x="-18%" y="-18%" width="136%" height="136%">
-                        <feDropShadow dx="0" dy="2" stdDeviation="2.2" floodColor="#0f172a" floodOpacity="0.18" />
-                      </filter>
-                      <filter id="selectedGlow" x="-24%" y="-24%" width="148%" height="148%">
-                        <feDropShadow dx="0" dy="4" stdDeviation="3.5" floodColor="#0f172a" floodOpacity="0.32" />
-                      </filter>
-                    </defs>
-                    <rect width={MAP_WIDTH} height={MAP_HEIGHT} fill="#f8fafc" />
-                    <g transform={`translate(${mapTransform.x} ${mapTransform.y}) scale(${mapTransform.scale})`}>
-                      {territoryGeoJson.features.map((feature) => {
-                        const featureCityName = getFeatureCityName(feature);
-                        const featureState = getFeatureState(feature);
-                        const featureIbgeCode = getFeatureIbgeCode(feature);
-                        const city = getCityGeoMatch(feature, citiesByIbgeCode, citiesByStateAndName)
-                          ?? createOutOfTerritoryCity(featureCityName, featureState);
-                        const isTerritoryCity = city.status !== "out_of_territory";
-                        const isSelected = selectedCity
-                          ? normalizeIbgeCode(selectedCity.ibgeCode) === normalizeIbgeCode(featureIbgeCode)
-                            || (normalizeCityKey(selectedCity.city) === normalizeCityKey(featureCityName) && selectedCity.state === featureState)
-                          : false;
-                        const path = featureToPath(feature, geoBounds);
-                        if (!path) return null;
-
-                        return (
-                          <path
-                            key={`${featureIbgeCode || `${featureState}-${featureCityName}`}`}
-                            d={path}
-                            fill={statusFillColors[city.status]}
-                            stroke={isSelected ? "#020617" : statusStrokeColors[city.status]}
-                            strokeWidth={isSelected ? 4 : isTerritoryCity ? 1.65 : 0.45}
-                            vectorEffect="non-scaling-stroke"
-                            opacity={isTerritoryCity ? 0.98 : 0.58}
-                            filter={isSelected ? "url(#selectedGlow)" : isTerritoryCity ? "url(#territoryGlow)" : undefined}
-                            className={`${canInspectMunicipalities ? "cursor-pointer hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-brand-500" : "cursor-default"} transition-[opacity,stroke-width,filter] duration-150`}
-                            data-municipality="true"
-                            pointerEvents="auto"
-                            tabIndex={canInspectMunicipalities ? 0 : -1}
-                            role={canInspectMunicipalities ? "button" : "img"}
-                            aria-label={`${city.city}, ${city.state}: ${city.statusLabel}`}
-                            onPointerDown={() => {
-                              pendingMapSelection.current = canInspectMunicipalities ? city : null;
-                            }}
-                            onClick={() => {
-                              if (suppressNextMapClick.current) {
-                                suppressNextMapClick.current = false;
-                                return;
-                              }
-                              if (canInspectMunicipalities) setSelectedCity(city);
-                            }}
-                            onKeyDown={(event) => {
-                              if (canInspectMunicipalities && (event.key === "Enter" || event.key === " ")) {
-                                event.preventDefault();
-                                setSelectedCity(city);
-                              }
-                            }}
-                          >
-                            <title>{getTooltipText(city, coverage?.seller.name)}</title>
-                          </path>
-                        );
-                      })}
-                      {stateBoundaryPath ? (
-                        <path
-                          d={stateBoundaryPath}
-                          fill="none"
-                          stroke="#0f172a"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeOpacity={0.78}
-                          strokeWidth={2.6}
-                          vectorEffect="non-scaling-stroke"
-                          pointerEvents="none"
-                        />
-                      ) : null}
-                      {stateLabels.map((label) => (
-                        <text
-                          key={label.state}
-                          x={label.x}
-                          y={label.y}
-                          className="fill-slate-700 text-[34px] font-black tracking-[0.28em]"
-                          opacity={0.34}
-                          textAnchor="middle"
-                          pointerEvents="none"
-                        >
-                          {label.state}
-                        </text>
-                      ))}
-                    </g>
-                  </svg>
-                ) : (
-                  <div className="flex min-h-[420px] items-center justify-center p-6 text-sm font-semibold text-slate-500 sm:min-h-[560px] lg:min-h-[700px]">Carregando mapa de PR, SC e MS...</div>
-                )}
-              </div>
+                  <dl className="mt-2 grid grid-cols-3 gap-2 text-xs text-slate-600">
+                    <div><dt>Pedidos ERP</dt><dd className="font-bold text-slate-900">{selectedCity.orderCount}</dd></div>
+                    <div><dt>Vendido</dt><dd className="whitespace-nowrap font-bold text-slate-900 [overflow-wrap:normal]">{formatCurrencyBRL(selectedCity.soldValue)}</dd></div>
+                    <div><dt>Oportunidades</dt><dd className="font-bold text-slate-900">{selectedCity.openOpportunityCount}</dd></div>
+                  </dl>
+                </div>
+              ) : null}
               {hasNoTerritory ? (
-                <div className="pointer-events-auto absolute inset-x-4 bottom-4 z-10 rounded-2xl border border-amber-200 bg-white/95 p-4 text-sm text-slate-700 shadow-xl backdrop-blur sm:inset-x-auto sm:left-4 sm:max-w-md">
+                <div className="pointer-events-auto absolute inset-x-4 bottom-8 z-10 rounded-[1rem] border border-amber-200 bg-white/95 p-4 text-sm text-slate-700 shadow-xl backdrop-blur sm:inset-x-auto sm:left-4 sm:max-w-md">
                   <div className="flex items-start gap-3">
                     <Info className="mt-0.5 shrink-0 text-amber-600" size={20} />
                     <div>
@@ -924,7 +482,9 @@ export default function TerritoriosPage() {
               <CityDetailPanel city={selectedCity} sellerName={coverage?.seller.name} compact />
             </aside>
 
-            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:hidden">
+            {/* Abaixo do mapa só no tablet (640–1023px). No celular o resumo sobre o mapa já mostra pedidos, vendido e
+                oportunidades, então o painel e o cartão vazio "Selecione uma cidade" ficam escondidos. */}
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm max-sm:hidden lg:hidden">
               <CityDetailPanel city={selectedCity} sellerName={coverage?.seller.name} />
             </div>
           </div>
@@ -966,7 +526,60 @@ export default function TerritoriosPage() {
             </table>
           </div>
 
-          <div className="grid gap-3 p-4 md:hidden">
+          {/* Celular (abaixo de 640px): lista compacta, uma linha por cidade, com filtro por status. */}
+          <div className="p-3 sm:hidden">
+            <div className="flex flex-wrap gap-2" role="group" aria-label="Filtrar cidades por status">
+              {([
+                ["all", "Todas"],
+                ["positive", "Verde"],
+                ["opportunity", "Amarelo"],
+                ["no_sale", "Vermelho"]
+              ] as Array<[TerritoryListFilter, string]>).map(([filter, label]) => (
+                <button
+                  key={filter}
+                  type="button"
+                  aria-pressed={listFilter === filter}
+                  onClick={() => setListFilter(filter)}
+                  className={`min-h-9 rounded-full px-3 text-xs font-semibold ring-1 transition ${listFilter === filter ? "bg-slate-900 text-white ring-slate-900" : "bg-white text-slate-700 ring-slate-200"}`}
+                >
+                  {label} ({listCounts[filter]})
+                </button>
+              ))}
+            </div>
+            {loading ? (
+              <p className="mt-3 rounded-xl bg-slate-50 p-4 text-sm text-slate-500">Carregando cidades...</p>
+            ) : (coverage?.cities ?? []).length === 0 ? (
+              <p className="mt-3 rounded-xl bg-slate-50 p-4 text-sm text-slate-500">Nenhuma cidade vinculada ao território deste vendedor.</p>
+            ) : mobileListCities.length === 0 ? (
+              <p className="mt-3 rounded-xl bg-slate-50 p-4 text-sm text-slate-500">Nenhuma cidade com esse status no mês.</p>
+            ) : (
+              <ul className="mt-3 divide-y divide-slate-100" aria-label="Cidades do território">
+                {mobileListCities.map((city) => {
+                  const metrics = territoryCityListMetrics(city, formatCurrencyBRL);
+                  const isSelected = selectedCity?.id !== undefined ? selectedCity.id === city.id : selectedCity?.city === city.city && selectedCity?.state === city.state;
+                  return (
+                    <li key={city.id ?? `${city.state}-${city.city}`}>
+                      <button
+                        type="button"
+                        onClick={() => selectCityFromList(city)}
+                        aria-current={isSelected ? "true" : undefined}
+                        className={`flex min-h-11 w-full items-center justify-between gap-3 px-1 py-2 text-left ${isSelected ? "bg-slate-100" : ""}`}
+                      >
+                        <span className="min-w-0">
+                          <span className="block truncate text-sm font-semibold text-slate-900">{city.city}/{city.state}</span>
+                          <span className={`mt-0.5 inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ${statusStyles[city.status].badge}`}>{city.statusLabel}</span>
+                        </span>
+                        {metrics ? <span className="max-w-[55%] shrink-0 text-right text-[11px] leading-tight text-slate-500">{metrics}</span> : null}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+
+          {/* 640–767px: cartões como antes. */}
+          <div className="hidden gap-3 p-4 sm:grid md:hidden">
             {loading ? (
               <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">Carregando cidades...</p>
             ) : (coverage?.cities ?? []).length === 0 ? (
