@@ -1591,3 +1591,18 @@ real no repositório e pode sair desatualizado no PDF. Decidir em PR próprio: t
 como já faz o PDF do pedido. Se o tempo de resposta crescer, guardar a lista já interpretada em memória
 pela data de atualização do cache. O cache é cumulativo: um parceiro que sumiu do ERP continua com a última
 linha recebida. Cards, lista de oportunidades, Central do Dia e planejamento ainda não mostram telefone.
+
+### TD-USER-PHONE — celular / WhatsApp do usuário
+
+**Aberto, médio.** `User.phone` (migration `20261105120000_user_phone`) é cadastrado em Configurações → Usuários por
+diretor e gerente. Pendente:
+
+- Registrar a migration no ferramental de schema de produção antes do apply, como feito para
+  `20261103120000_opportunity_origin_agenda_stop_client_index`: manifesto (`scripts/production-schema-migrations.mjs`,
+  com sha256), `production-schema-apply.sh`, `schema-diff-filter.mjs`, `schema-evidence-validation.sh`, smokes de
+  migration e o workflow **Production Schema PR827** (lista de migrations e allowlist). Exige alterar `.github`, fora
+  do escopo deste PR.
+- `/salesmen` do ERP: não se sabe pelo código se traz telefone do vendedor (schema não comprovado); o cadastro é manual.
+- Vendedor editar o próprio celular: decidido não fazer agora (exigiria rota própria).
+- `GET /users` continua devolvendo `erpRawPayload` (usado pela tela de vínculo ERP) a diretor e gerente.
+- O envio do resumo diário por WhatsApp é tarefa futura; só o cadastro existe.

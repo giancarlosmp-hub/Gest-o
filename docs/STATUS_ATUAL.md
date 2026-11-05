@@ -1,3 +1,15 @@
+# Celular / WhatsApp do usuário: cadastro em Usuários — código pronto, aguardando merge — 05/11/2026
+
+- Migration `20261105120000_user_phone`: `User.phone` (`TEXT` opcional), só
+  `ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "phone" TEXT;`. **Não aplicada em produção** e **ainda não registrada**
+  no ferramental de schema de produção (ver `TECH_DEBT.md`, “TD-USER-PHONE”). Depois do merge, o cutover fica
+  bloqueado até a evidência de schema nova.
+- Configurações → Usuários: campo opcional "Celular / WhatsApp". `POST`/`PUT /users` aceitam só celular brasileiro
+  válido (`normalizeBrazilPhone`) e gravam `55DDDNÚMERO`; vazio limpa, ausente mantém. Só diretor e gerente listam e
+  editam (`GET /users`); vendedor não edita nem o próprio. Sem envio de mensagens.
+- `PUT /users/:id`: a trava de cadastro próprio vale só para o papel (o gerente salva o próprio cadastro).
+  `PATCH /users/:id/region` deixa de devolver `passwordHash`, `erpLoginPasswordEncrypted` e `erpRawPayload`.
+
 # Origem da oportunidade, índice das paradas e trava do seed.js: migration aditiva cadastrada, não aplicada — 03/11/2026
 
 - Migration `20261103120000_opportunity_origin_agenda_stop_client_index`: `Opportunity.origin` (`TEXT` opcional) e
