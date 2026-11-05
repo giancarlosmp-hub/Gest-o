@@ -105,6 +105,7 @@ model User {
   erpLoginPasswordEncrypted  String?
   erpLoginLastTestStatus     String?
   erpLoginLastTestAt         DateTime?
+  phone                      String?
   isActive                   Boolean                     @default(true)
   createdAt                  DateTime                    @default(now())
   clients                    Client[]
