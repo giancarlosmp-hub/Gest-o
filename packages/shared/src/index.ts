@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { normalizeBrazilPhone } from "./brazilPhone.js";
 
 export * from "./portfolioStatus.js";
 export * from "./abcCurve.js";
@@ -276,6 +277,26 @@ const optionalErpLoginPasswordSchema = z.preprocess(
   z.string().trim().min(1).max(256).optional().nullable()
 );
 
+// Celular/WhatsApp do usuário: só celular brasileiro válido com DDD, gravado como 55 + DDD + número.
+// Vazio limpa o campo (null); ausente não altera.
+export const optionalUserPhoneSchema = z.preprocess(
+  (value) => (typeof value === "string" && value.trim() === "" ? null : value),
+  z
+    .string()
+    .max(40)
+    .nullable()
+    .optional()
+    .transform((value, ctx) => {
+      if (value === null || value === undefined) return value;
+      const phone = normalizeBrazilPhone(value);
+      if (!phone.valid || phone.kind !== "mobile") {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Informe um celular brasileiro válido com DDD." });
+        return z.NEVER;
+      }
+      return phone.e164;
+    })
+);
+
 export const userCreateSchema = z.object({
   name: z.string().min(2),
   email: z.string().email(),
@@ -286,7 +307,8 @@ export const userCreateSchema = z.object({
   erpOperatorCode: optionalErpLinkCodeSchema,
   erpRawPayload: z.unknown().optional().nullable(),
   erpLoginUsername: optionalErpLoginUsernameSchema,
-  erpLoginPassword: optionalErpLoginPasswordSchema
+  erpLoginPassword: optionalErpLoginPasswordSchema,
+  phone: optionalUserPhoneSchema
 });
 
 export const userUpdateSchema = z.object({
@@ -299,7 +321,8 @@ export const userUpdateSchema = z.object({
   erpOperatorCode: optionalErpLinkCodeSchema,
   erpRawPayload: z.unknown().optional().nullable(),
   erpLoginUsername: optionalErpLoginUsernameSchema,
-  erpLoginPassword: optionalErpLoginPasswordSchema
+  erpLoginPassword: optionalErpLoginPasswordSchema,
+  phone: optionalUserPhoneSchema
 });
 
 export const userResetPasswordSchema = z.object({

@@ -11715,7 +11715,7 @@ router.get("/territories/coverage", async (req, res) => {
   });
 });
 
-const userListSelect = { id: true, name: true, email: true, role: true, region: true, erpCode: true, erpOperatorCode: true, erpRawPayload: true, erpLoginUsername: true, erpLoginPasswordEncrypted: true, erpLoginLastTestStatus: true, erpLoginLastTestAt: true, isActive: true, createdAt: true } as const;
+const userListSelect = { id: true, name: true, email: true, role: true, region: true, erpCode: true, erpOperatorCode: true, erpRawPayload: true, erpLoginUsername: true, erpLoginPasswordEncrypted: true, erpLoginLastTestStatus: true, erpLoginLastTestAt: true, phone: true, isActive: true, createdAt: true } as const;
 
 const sanitizeUserForList = (user: Prisma.UserGetPayload<{ select: typeof userListSelect }>) => {
   const { erpLoginPasswordEncrypted, ...safeUser } = user;
@@ -11873,7 +11873,7 @@ router.get("/users/:id/erp-diagnostics", authorize("diretor", "gerente"), async 
 
 
 router.post("/users", authorize("diretor", "gerente"), validateBody(userCreateSchema), async (req, res) => {
-  const { name, email, password, role, region, erpCode, erpOperatorCode, erpLoginUsername, erpLoginPassword } = req.body;
+  const { name, email, password, role, region, erpCode, erpOperatorCode, erpLoginUsername, erpLoginPassword, phone } = req.body;
   if (req.user!.role === "gerente" && role === "diretor") {
     return res.status(403).json({ success: false, message: "Gerentes não podem criar usuários diretores." });
   }
@@ -11889,7 +11889,7 @@ router.post("/users", authorize("diretor", "gerente"), validateBody(userCreateSc
     : null;
   const tenantId = await getTerritoryTenantId(req.user!.id);
   const user = await prisma.user.create({
-    data: { name, email, passwordHash, role, region, erpCode: erpOption?.code ?? erpCode ?? null, erpOperatorCode: erpOperatorCode ?? erpOption?.erpOperatorCode ?? null, erpRawPayload: erpOption?.raw ? sanitizeErpRawPayload(erpOption.raw) as Prisma.InputJsonValue : undefined, erpLoginUsername: erpLoginUsername ?? null, erpLoginPasswordEncrypted,
+    data: { name, email, passwordHash, role, region, erpCode: erpOption?.code ?? erpCode ?? null, erpOperatorCode: erpOperatorCode ?? erpOption?.erpOperatorCode ?? null, erpRawPayload: erpOption?.raw ? sanitizeErpRawPayload(erpOption.raw) as Prisma.InputJsonValue : undefined, erpLoginUsername: erpLoginUsername ?? null, erpLoginPasswordEncrypted, phone: phone ?? null,
       tenantMemberships: { create: { id: randomUUID(), tenantId, role, status: "active", version: 1, acceptedAt: new Date() } }
     },
     select: userListSelect
@@ -11898,10 +11898,11 @@ router.post("/users", authorize("diretor", "gerente"), validateBody(userCreateSc
 });
 router.put("/users/:id", authorize("diretor", "gerente"), validateBody(userUpdateSchema), async (req, res) => {
   const { id } = req.params;
-  const { name, email, password, role, region, erpCode, erpOperatorCode, erpLoginUsername, erpLoginPassword } = req.body;
+  const { name, email, password, role, region, erpCode, erpOperatorCode, erpLoginUsername, erpLoginPassword, phone } = req.body;
 
-  if (req.user!.id === id && role !== "diretor") {
-    return res.status(400).json({ success: false, message: "Você não pode remover seu próprio papel de diretor." });
+  // A trava vale só para o próprio papel: os demais campos do próprio cadastro (ex.: celular) podem ser editados.
+  if (req.user!.id === id && role !== req.user!.role) {
+    return res.status(400).json({ success: false, message: "Você não pode alterar o seu próprio papel." });
   }
 
   try {
@@ -11956,6 +11957,9 @@ router.put("/users/:id", authorize("diretor", "gerente"), validateBody(userUpdat
       erpLoginUsername: erpLoginUsername ?? null
     };
 
+    // Celular já validado e normalizado pelo schema; ausente mantém o atual, null limpa.
+    if (phone !== undefined) data.phone = phone;
+
     if (hasCrmPasswordChange) {
       data.passwordHash = await hashPassword(password);
     }
@@ -11983,7 +11987,12 @@ router.put("/users/:id", authorize("diretor", "gerente"), validateBody(userUpdat
     return res.status(500).json({ success: false, message: "Não foi possível atualizar o usuário.", details: message });
   }
 });
-router.patch("/users/:id/region", authorize("diretor", "gerente"), async (req, res) => res.json(await prisma.user.update({ where: { id: req.params.id }, data: { region: req.body.region } })));
+// Devolve só os campos da listagem de usuários: nunca passwordHash, erpLoginPasswordEncrypted nem erpRawPayload.
+router.patch("/users/:id/region", authorize("diretor", "gerente"), async (req, res) => {
+  const updated = await prisma.user.update({ where: { id: req.params.id }, data: { region: req.body.region }, select: userListSelect });
+  const { erpRawPayload: _erpRawPayload, ...safeUser } = sanitizeUserForList(updated);
+  return res.json(safeUser);
+});
 router.patch("/users/:id/active", authorize("diretor", "gerente"), validateBody(userActivationSchema), async (req, res) => {
   if (req.user!.id === req.params.id && !req.body.isActive) {
     return res.status(400).json({ message: "Você não pode desativar seu próprio usuário" });

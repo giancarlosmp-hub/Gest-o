@@ -1591,3 +1591,15 @@ real no repositório e pode sair desatualizado no PDF. Decidir em PR próprio: t
 como já faz o PDF do pedido. Se o tempo de resposta crescer, guardar a lista já interpretada em memória
 pela data de atualização do cache. O cache é cumulativo: um parceiro que sumiu do ERP continua com a última
 linha recebida. Cards, lista de oportunidades, Central do Dia e planejamento ainda não mostram telefone.
+
+### TD-USER-PHONE — celular / WhatsApp do usuário
+
+**Aberto, médio.** `User.phone` (migration `20261105120000_user_phone`) é cadastrado em Configurações → Usuários por
+diretor e gerente. Pendente:
+
+- Apply em produção pelo **Production Schema PR827** (migration já registrada no ferramental, no mesmo PR); o cutover
+  fica bloqueado até lá.
+- `/salesmen` do ERP: não se sabe pelo código se traz telefone do vendedor (schema não comprovado); o cadastro é manual.
+- Vendedor editar o próprio celular: decidido não fazer agora (exigiria rota própria).
+- `GET /users` continua devolvendo `erpRawPayload` (usado pela tela de vínculo ERP) a diretor e gerente.
+- O envio do resumo diário por WhatsApp é tarefa futura; só o cadastro existe.

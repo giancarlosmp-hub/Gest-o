@@ -126,6 +126,11 @@ if [[ "$MIGRATION_ID_REQUESTED" == 20261103120000_opportunity_origin_agenda_stop
   opportunity_origin_state="$(admin_psql -Atc "$opportunity_origin_column_sql"):$(admin_psql -Atc "$agenda_stop_client_index_sql")"
   [[ "$opportunity_origin_state" == 0:0 || "$opportunity_origin_state" == 1:1 ]] || die "migration origem da oportunidade/índice de paradas parcialmente aplicada"
 fi
+user_phone_column_sql="SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='User' AND column_name='phone'"
+if [[ "$MIGRATION_ID_REQUESTED" == 20261105120000_user_phone ]]; then
+  user_phone_state="$(admin_psql -Atc "$user_phone_column_sql")"
+  [[ "$user_phone_state" == 0 || "$user_phone_state" == 1 ]] || die "migration celular do usuário em estado inesperado"
+fi
 
 # Repeat every mutable safety gate immediately before granting the migration its short-lived
 # administrative authority. The runtime URL remains in use for Prisma and incident reads.
@@ -146,6 +151,8 @@ elif [[ "$MIGRATION_ID_REQUESTED" == 20261023120000_agenda_activity_planning_spl
   log "migration Agenda/Atividades já presente; DDL ignorado e pós-condições serão revalidadas"
 elif [[ "$MIGRATION_ID_REQUESTED" == 20261103120000_opportunity_origin_agenda_stop_client_index && "$opportunity_origin_state" == 1:1 ]]; then
   log "migration origem da oportunidade/índice de paradas já presente; DDL ignorado e pós-condições serão revalidadas"
+elif [[ "$MIGRATION_ID_REQUESTED" == 20261105120000_user_phone && "$user_phone_state" == 1 ]]; then
+  log "migration celular do usuário já presente; DDL ignorado e pós-condições serão revalidadas"
 else
   log "aplicando migration versionada isoladamente; containers da aplicação não serão iniciados"
   admin_psql --single-transaction -f - < "$MIGRATION"
@@ -213,6 +220,14 @@ case "$MIGRATION_ID_REQUESTED" in
     touched_rows=$(admin_psql -Atc 'SELECT count(*) FROM "Opportunity" WHERE "origin" IS NOT NULL')
     [[ "$columns:$index:$touched_rows" == 1:1:0 ]] || die "pós-condições da migration origem da oportunidade/índice de paradas divergentes"
     printf 'columns_nullable\t%s\nagenda_stop_client_index\t%s\nrows_using_new_objects\t%s\nexisting_rows_preserved\tPASS\nold_api_compatible\tPASS\n' "$columns" "$index" "$touched_rows" >"$evidence/post-validation.tsv"
+    ;;
+  20261105120000_user_phone)
+    columns=$(admin_psql -Atc "$user_phone_column_sql AND is_nullable='YES' AND data_type='text' AND column_default IS NULL")
+    # The running (old) API does not know the column, so any filled row would mean the
+    # migration itself wrote data. Race-free, unlike row counts.
+    touched_rows=$(admin_psql -Atc 'SELECT count(*) FROM "User" WHERE "phone" IS NOT NULL')
+    [[ "$columns:$touched_rows" == 1:0 ]] || die "pós-condições da migration celular do usuário divergentes"
+    printf 'columns_nullable\t%s\nrows_using_new_objects\t%s\nexisting_rows_preserved\tPASS\nold_api_compatible\tPASS\n' "$columns" "$touched_rows" >"$evidence/post-validation.tsv"
     ;;
   *) die "migration sem pós-condições cadastradas" ;;
 esac
