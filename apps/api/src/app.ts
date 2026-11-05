@@ -19,6 +19,7 @@ import { logApiEvent, sanitizePayload } from "./utils/logger.js";
 import { buildControlledErpOrderFailurePayload, isErpOrderEndpointPath, safeJsonStringify } from "./utils/erpOrderFailureResponse.js";
 import { buildUltraFv3TimeoutPayload, isUltraFv3TimeoutError, ULTRAFV3_REQUEST_TIMEOUT_MS } from "./services/ultraFv3Client.js";
 import { appUsageRateLimit, authLoginRateLimit, authRefreshRateLimit } from "./middlewares/rateLimit.js";
+import { resolveApiErrorResponse } from "./utils/apiErrorResponse.js";
 
 export const app = express();
 
@@ -290,9 +291,12 @@ app.use((err: any, req: any, res: any, next: any) => {
       : sanitizePayload({ body: req.body, params: req.params, query: req.query }),
     user: req.user ? { id: req.user.id, email: req.user.email, role: req.user.role } : null,
     stack: err instanceof Error ? err.stack : String(err),
+    ...(res.headersSent ? { responseAlreadySent: true } : {}),
   });
 
-  if (res.headersSent) return next(err);
+  // Erro depois de a resposta sair (handler que responde e segue trabalhando): já está no log acima.
+  // Resposta completa fica como está; só a parcial vai ao handler padrão, que encerra a conexão.
+  if (res.headersSent) return res.writableEnded ? undefined : next(err);
 
   const erpOrderRequest = isErpOrderRequest(req);
   if (erpOrderRequest) {
@@ -324,5 +328,6 @@ app.use((err: any, req: any, res: any, next: any) => {
     return;
   }
 
-  sendControlledJson(res, 500, { message: "Internal server error" });
+  const { status, body } = resolveApiErrorResponse(err, req.requestId);
+  sendControlledJson(res, status, body);
 });
