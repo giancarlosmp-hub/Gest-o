@@ -11987,7 +11987,12 @@ router.put("/users/:id", authorize("diretor", "gerente"), validateBody(userUpdat
     return res.status(500).json({ success: false, message: "Não foi possível atualizar o usuário.", details: message });
   }
 });
-router.patch("/users/:id/region", authorize("diretor", "gerente"), async (req, res) => res.json(await prisma.user.update({ where: { id: req.params.id }, data: { region: req.body.region } })));
+// Devolve só os campos da listagem de usuários: nunca passwordHash, erpLoginPasswordEncrypted nem erpRawPayload.
+router.patch("/users/:id/region", authorize("diretor", "gerente"), async (req, res) => {
+  const updated = await prisma.user.update({ where: { id: req.params.id }, data: { region: req.body.region }, select: userListSelect });
+  const { erpRawPayload: _erpRawPayload, ...safeUser } = sanitizeUserForList(updated);
+  return res.json(safeUser);
+});
 router.patch("/users/:id/active", authorize("diretor", "gerente"), validateBody(userActivationSchema), async (req, res) => {
   if (req.user!.id === req.params.id && !req.body.isActive) {
     return res.status(400).json({ message: "Você não pode desativar seu próprio usuário" });

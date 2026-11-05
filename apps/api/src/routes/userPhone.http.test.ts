@@ -126,6 +126,15 @@ try {
   assert.equal((await call("PUT", "/users/director-a", "director-a", editBody(director, { role: "gerente" }))).status, 400);
   assert.equal(director.role, "diretor");
 
+  // PATCH /users/:id/region: só campos da listagem, sem hash de senha, senha FV3 cifrada nem payload bruto do ERP.
+  const region = await call("PATCH", "/users/seller-a/region", "director-a", { region: "Regiao Ficticia" });
+  assert.equal(region.status, 200);
+  assert.equal(region.json.region, "Regiao Ficticia");
+  assert.equal(region.json.phone, "5541900000004");
+  for (const field of ["passwordHash", "erpLoginPasswordEncrypted", "erpRawPayload"]) assert.equal(field in region.json, false, `${field} não sai`);
+  assert.doesNotMatch(JSON.stringify(region.json), /hash-ficticio|cifra-ficticia|CAMPO_FICTICIO/);
+  assert.equal((await call("PATCH", "/users/seller-a/region", "seller-a", { region: "Outra" })).status, 403);
+
   console.log("user phone tests passed");
 } finally {
   console.info = originalInfo;
