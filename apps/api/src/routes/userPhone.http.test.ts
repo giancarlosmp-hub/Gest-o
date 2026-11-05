@@ -112,6 +112,20 @@ try {
   assert.equal((await call("PUT", "/users/seller-a", "seller-a", editBody(seller, { phone: "41 90000-0005" }))).status, 403, "vendedor não edita nem o próprio");
   assert.equal(seller.phone, "5541900000004");
 
+  // Próprio cadastro: o gerente edita o próprio celular, mas não o próprio papel; o diretor também não.
+  const manager = byId("manager-a");
+  const ownPhone = await call("PUT", "/users/manager-a", "manager-a", editBody(manager, { phone: "(51) 90000-0006" }));
+  assert.equal(ownPhone.status, 200, JSON.stringify(ownPhone.json));
+  assert.equal(manager.phone, "5551900000006");
+  assert.equal((await call("PUT", "/users/manager-a", "manager-a", editBody(manager, { role: "vendedor" }))).status, 400);
+  assert.equal((await call("PUT", "/users/manager-a", "manager-a", editBody(manager, { role: "diretor" }))).status, 400);
+  assert.equal(manager.role, "gerente");
+  const director = byId("director-a");
+  assert.equal((await call("PUT", "/users/director-a", "director-a", editBody(director, { phone: "(51) 90000-0007" }))).status, 200);
+  assert.equal(director.phone, "5551900000007");
+  assert.equal((await call("PUT", "/users/director-a", "director-a", editBody(director, { role: "gerente" }))).status, 400);
+  assert.equal(director.role, "diretor");
+
   console.log("user phone tests passed");
 } finally {
   console.info = originalInfo;

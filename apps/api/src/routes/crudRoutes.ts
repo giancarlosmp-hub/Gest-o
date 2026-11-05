@@ -11900,8 +11900,9 @@ router.put("/users/:id", authorize("diretor", "gerente"), validateBody(userUpdat
   const { id } = req.params;
   const { name, email, password, role, region, erpCode, erpOperatorCode, erpLoginUsername, erpLoginPassword, phone } = req.body;
 
-  if (req.user!.id === id && role !== "diretor") {
-    return res.status(400).json({ success: false, message: "Você não pode remover seu próprio papel de diretor." });
+  // A trava vale só para o próprio papel: os demais campos do próprio cadastro (ex.: celular) podem ser editados.
+  if (req.user!.id === id && role !== req.user!.role) {
+    return res.status(400).json({ success: false, message: "Você não pode alterar o seu próprio papel." });
   }
 
   try {
