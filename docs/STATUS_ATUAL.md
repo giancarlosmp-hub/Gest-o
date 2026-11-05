@@ -1,3 +1,14 @@
+# Celular / WhatsApp na tela real de Usuários — correção pronta, aguardando merge — 05/11/2026
+
+- Depois do #1021 em produção, Configurações → Usuários não mostrava o campo: a tela é montada pela `SettingsPage`
+  com a própria lista de campos, e o #1021 pôs o celular no `UsersAdminPanel`, que nenhum arquivo importava.
+- A lista passa a sair de `buildUserAdminFields` (`apps/web/src/components/settings/userAdminFields.ts`), usada pela
+  `SettingsPage`; "Celular / WhatsApp" vem logo depois de "Região de atuação", no formulário e na tabela. O
+  `UsersAdminPanel` órfão foi removido. Coluna "Status" inalterada (a tela real não a mostra).
+- Teste `apps/web/tests/usersSettingsPage.test.ts` renderiza a `SettingsPage` com `react-dom/server` pelo Vite,
+  com diretor e gerente fictícios. A tabela só aparece depois do `GET /users`, que não roda no servidor; as colunas
+  são conferidas pelas props que a tela passa ao `CrudSimplePage`. Só web; sem migration nem mudança de API.
+
 # Celular / WhatsApp do usuário: cadastro em Usuários — código pronto, aguardando merge — 05/11/2026
 
 - Migration `20261105120000_user_phone`: `User.phone` (`TEXT` opcional), só
