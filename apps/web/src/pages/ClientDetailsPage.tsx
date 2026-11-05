@@ -7,6 +7,7 @@ import TimelineEventList, { TimelineEventItem } from "../components/TimelineEven
 import TimelineIntelligenceCard from "../components/TimelineIntelligenceCard";
 import ClientAutoSummaryCard from "../components/clients/ClientAutoSummaryCard";
 import ClientCreditAlertBanner, { ClientCreditAlert } from "../components/clients/ClientCreditAlertBanner";
+import ClientErpPhones, { type ClientErpEmail, type ClientErpPhone } from "../components/clients/ClientErpPhones";
 import { useAuth } from "../context/AuthContext";
 import { canReactivateClient, clientArchiveBadgeLabel, isPortfolioCleanupArchivedClient } from "../lib/clientArchiveStatus";
 import { PORTFOLIO_STATUS_LABELS, type PortfolioStatus } from "@salesforce-pro/shared";
@@ -42,6 +43,8 @@ type Client = {
   creditAlert?: ClientCreditAlert | null;
   isArchived?: boolean;
   archiveReason?: string | null;
+  erpPhones?: ClientErpPhone[];
+  erpEmails?: ClientErpEmail[];
 };
 
 // Atraso calculado pela API a partir dos títulos em aberto (partnerTitles).
@@ -377,7 +380,8 @@ export default function ClientDetailsPage() {
     erpUpdatedAt: client.commercialSummary?.erpUpdatedAt
   };
 
-  const hasErpData = Object.values(erpData).some((value) => value !== null && value !== undefined && value !== "");
+  const hasErpContacts = Boolean(client.erpPhones?.length || client.erpEmails?.length);
+  const hasErpData = hasErpContacts || Object.values(erpData).some((value) => value !== null && value !== undefined && value !== "");
   const financial = client.financialProfile || {};
   // Campo ausente ou vazio vira "—" na tela, não 0.
   const rawAverageDelay = financial.DIAS_MEDIAATRASO;
@@ -604,6 +608,7 @@ export default function ClientDetailsPage() {
       {hasErpData ? (
         <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           <h3 className="mb-3 text-lg font-semibold">Dados ERP</h3>
+          <ClientErpPhones phones={client.erpPhones} emails={client.erpEmails} className="mb-4 border-b border-slate-100 pb-4" />
           <div className="grid gap-2 text-sm md:grid-cols-2 lg:grid-cols-3">
             <p><strong>Código:</strong> {erpData.clientCode || "-"}</p>
             <p><strong>Nome fantasia:</strong> {erpData.fantasyName || "-"}</p>

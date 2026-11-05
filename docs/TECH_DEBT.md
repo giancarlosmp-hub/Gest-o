@@ -1576,3 +1576,18 @@ Pendente:
 Pendente: a marca continua na descrição do evento de linha do tempo da automação (é o que o `DELETE /events/:id` e a
 reserva das antigas reconhecem). Leitura das notas como reserva pode sair quando não houver oportunidade da automação
 sem `origin` criada há menos de 90 dias (script rodado e 90 dias depois do deploy).
+
+### TD-PDF-COMPANY-PHONE-FALLBACK — telefone fixo real no cabeçalho do PDF do pedido
+
+**Aberto, baixo.** `toPdfCompany` (`apps/api/src/services/erpOrderPdfService.ts`, campo `phone`) usa um
+telefone real escrito no código quando a filial do ERP (`erp.ultrafv3.branches`) vem sem telefone. É dado
+real no repositório e pode sair desatualizado no PDF. Decidir em PR próprio: tirar o valor padrão (mostrar
+"-") ou levá-lo para configuração. Não alterado no PR dos telefones do ERP no CRM.
+
+### TD-CLIENT-ERP-PHONES-CACHE-READ — telefones do ERP lidos do cache inteiro do `/partners`
+
+**Aberto, baixo.** `GET /clients/:id` devolve `erpPhones`/`erpEmails` lendo e interpretando o JSON inteiro de
+`erp.ultrafv3.partners` (`AppConfig`) a cada abertura do detalhe do cliente, da oportunidade e da gaveta,
+como já faz o PDF do pedido. Se o tempo de resposta crescer, guardar a lista já interpretada em memória
+pela data de atualização do cache. O cache é cumulativo: um parceiro que sumiu do ERP continua com a última
+linha recebida. Cards, lista de oportunidades, Central do Dia e planejamento ainda não mostram telefone.
