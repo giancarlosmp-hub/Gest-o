@@ -139,6 +139,12 @@ import { MANUAL_RESOLUTION_CONFIRMATION_PHRASE, resolveAmbiguousErpOrderManually
 import { buildErpHealthcheckResponse } from "../services/erpOrderOperationalSummary.js";
 import { COMMERCIAL_AUTOMATIONS_CONFIG_KEY, DEFAULT_COMMERCIAL_AUTOMATIONS_CONFIG, getCommercialAutomationsStatus, loadCommercialAutomationsHistory, parseCommercialAutomationsConfig, runCommercialAutomations, simulateCommercialAutomations, WORKFLOW_INACTIVE_CLIENT_ORIGIN } from "../services/commercialAutomationsService.js";
 import { recordClientCodeChange } from "../services/clientCodeAuditService.js";
+import {
+  buildClientDeleteBlockedMessage,
+  CLIENT_DELETE_LINK_COUNT_SELECT,
+  CLIENT_DELETE_LINKED_FALLBACK_MESSAGE,
+  getClientDeleteBlockingReasons
+} from "../services/clientDeletion.js";
 import { buildClientCreditAlert, projectClientForResponse } from "../services/clientErpProjection.js";
 import { loadClientErpContacts } from "../services/clientErpContacts.js";
 import { findBrazilMunicipality, invalidClientAddressMessage, listBrazilMunicipalities, BRAZIL_STATES } from "../services/brazilMunicipalities.js";
@@ -5133,46 +5139,34 @@ router.put("/clients/:id", rejectClientCodeInBody, validateBody(clientSchema.par
   }
 });
 
+// Só exclui cliente sem nenhum vínculo (código ERP, histórico, agenda, contatos, conversas). Com vínculo: 409 legível
+// apontando para "Mesclar duplicado". Nada é apagado em cascata; o erro de banco vira 409, nunca 500/408.
 router.delete("/clients/:id", async (req, res) => {
-  const old = await prisma.client.findUnique({ where: { id: req.params.id } });
+  const tenantId = await resolveRequestTenantId(req, res);
+  if (!tenantId) return;
+  const old = await prisma.client.findFirst({
+    where: { id: req.params.id, tenantId },
+    select: { id: true, code: true, ownerSellerId: true, _count: { select: CLIENT_DELETE_LINK_COUNT_SELECT } }
+  });
   if (!old) return res.status(404).json({ message: "Não encontrado" });
   if (req.user!.role === "vendedor" && old.ownerSellerId !== req.user!.id) {
     return res.status(403).json({ message: "Sem permissão" });
   }
 
-  await prisma.$transaction(async (tx) => {
-    await tx.activity.deleteMany({
-      where: {
-        OR: [
-          { clientId: req.params.id },
-          { opportunity: { clientId: req.params.id } }
-        ]
-      }
-    });
+  const blockingReasons = getClientDeleteBlockingReasons(old);
+  if (blockingReasons.length > 0) {
+    return res.status(409).json({ message: buildClientDeleteBlockedMessage(blockingReasons), blockingReasons });
+  }
 
-    await tx.timelineEvent.deleteMany({
-      where: {
-        OR: [
-          { clientId: req.params.id },
-          { opportunity: { clientId: req.params.id } }
-        ]
-      }
-    });
-
-    await tx.contact.deleteMany({ where: { clientId: req.params.id } });
-    await tx.agendaStop.deleteMany({ where: { clientId: req.params.id } });
-    await tx.agendaEvent.deleteMany({
-      where: {
-        OR: [
-          { clientId: req.params.id },
-          { opportunity: { clientId: req.params.id } }
-        ]
-      }
-    });
-    await tx.opportunityChangeLog.deleteMany({ where: { opportunity: { clientId: req.params.id } } });
-    await tx.opportunity.deleteMany({ where: { clientId: req.params.id } });
-    await tx.client.delete({ where: { id: req.params.id } });
-  });
+  try {
+    await prisma.client.delete({ where: { id: old.id } });
+  } catch (error) {
+    if (isDatabaseForeignKeyViolation(error)) {
+      return res.status(409).json({ message: CLIENT_DELETE_LINKED_FALLBACK_MESSAGE, blockingReasons: [] });
+    }
+    console.error("[clients:delete]", error);
+    return res.status(500).json({ message: "Não foi possível excluir o cliente." });
+  }
 
   res.status(204).send();
 });
