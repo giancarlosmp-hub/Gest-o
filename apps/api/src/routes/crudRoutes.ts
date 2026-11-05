@@ -1,4 +1,5 @@
-import express, { Router, type Request } from "express";
+import express, { type Request } from "express";
+import { createAsyncRouter } from "../utils/asyncRouter.js";
 import { inflateRawSync } from "node:zlib";
 import { prisma } from "../config/prisma.js";
 import { env } from "../config/env.js";
@@ -168,7 +169,7 @@ import {
   portfolioCleanupManualReactivationDescription,
 } from "../services/portfolioCleanupArchive.js";
 
-const router = Router();
+const router = createAsyncRouter();
 
 const isErpInvestigationHttpEnabled = () =>
   env.nodeEnv !== "production" || process.env.FEATURE_ERP_INVESTIGATION === "true";

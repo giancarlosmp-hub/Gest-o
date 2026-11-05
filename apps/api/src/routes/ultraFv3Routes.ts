@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { createAsyncRouter } from "../utils/asyncRouter.js";
 import { buildUltraFv3TimeoutPayload, isUltraFv3TimeoutError, ULTRAFV3_REQUEST_TIMEOUT_MS, ultraFv3Client } from "../services/ultraFv3Client.js";
 import { prisma } from "../config/prisma.js";
 import { logApiEvent } from "../utils/logger.js";
@@ -7,7 +7,7 @@ import { authorize } from "../middlewares/authorize.js";
 import { normalizeErpParameterCode } from "@salesforce-pro/shared";
 import { ERP_ELIGIBILITY_FILTERED_SCOPES, isErpReferenceEligible } from "../utils/erpReferenceValidation.js";
 
-const router = Router();
+const router = createAsyncRouter();
 
 const erpAccess = [authMiddleware, authorize("diretor", "gerente")];
 const erpReferenceAccess = [authMiddleware, authorize("diretor", "gerente", "vendedor")];

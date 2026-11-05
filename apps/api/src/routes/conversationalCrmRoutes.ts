@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { createAsyncRouter } from "../utils/asyncRouter.js";
 import { z } from "zod";
 import { authMiddleware } from "../middlewares/auth.js";
 import { appUsageRateLimit } from "../middlewares/rateLimit.js";
@@ -9,7 +9,7 @@ import { runAiFlow } from "../services/ai/aiTimeBudget.js";
 import { sellerWhere } from "../utils/access.js";
 import { logApiEvent } from "../utils/logger.js";
 
-const router = Router();
+const router = createAsyncRouter();
 router.use(authMiddleware);
 router.use(appUsageRateLimit);
 
