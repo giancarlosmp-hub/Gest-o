@@ -19,6 +19,7 @@ import { canConfirmErpManualResolution } from "../lib/erpManualResolution";
 import { getPaymentMethodNotAllowedReason } from "../lib/erpPaymentMethodEligibility";
 import ClientAutoSummaryCard from "../components/clients/ClientAutoSummaryCard";
 import ClientCreditAlertBanner, { ClientCreditAlert } from "../components/clients/ClientCreditAlertBanner";
+import ClientErpPhones, { type ClientErpEmail, type ClientErpPhone } from "../components/clients/ClientErpPhones";
 import TimelineIntelligenceCard from "../components/TimelineIntelligenceCard";
 import AccessibleCheckbox from "../components/AccessibleCheckbox";
 import DeleteOpportunityConfirmModal from "../components/opportunities/DeleteOpportunityConfirmModal";
@@ -116,6 +117,8 @@ type ClientErpSummary = {
   city?: string | null;
   state?: string | null;
   cnpj?: string | null;
+  erpPhones?: ClientErpPhone[];
+  erpEmails?: ClientErpEmail[];
 };
 
 type OpportunityItem = {
@@ -1360,6 +1363,12 @@ export default function OpportunityDetailsPage() {
           <strong>Gerar pedido ERP indisponível:</strong>{" "}
           {erpOrderDisabledReason?.replace("Pedido ERP indisponível: ", "")}
         </div>
+      ) : null}
+
+      {item.clientId && clientErpSummary ? (
+        <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm md:p-4">
+          <ClientErpPhones phones={clientErpSummary?.erpPhones} emails={clientErpSummary?.erpEmails} />
+        </section>
       ) : null}
 
       <ClientAutoSummaryCard clientId={item.clientId} />

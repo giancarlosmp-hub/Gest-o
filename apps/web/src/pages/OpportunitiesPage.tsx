@@ -20,6 +20,7 @@ import { countActiveOpportunityFilters } from "../lib/opportunityFilters";
 import { getApiErrorMessage } from "../lib/apiError";
 import ClientSearchSelect from "../components/clients/ClientSearchSelect";
 import ClientCreditAlertBanner, { ClientCreditAlert } from "../components/clients/ClientCreditAlertBanner";
+import ClientErpPhones, { type ClientErpEmail, type ClientErpPhone } from "../components/clients/ClientErpPhones";
 import { consumeOpportunityCreateRequest } from "../lib/opportunityQuickAction";
 import { brazilMonthKey } from "../lib/brazilDate";
 import { CLIENT_WITHOUT_ERP_CODE_ORDER_MESSAGE } from "@salesforce-pro/shared";
@@ -445,6 +446,8 @@ export default function OpportunitiesPage() {
   });
   const [selectedOpportunity, setSelectedOpportunity] = useState<Opportunity | null>(null);
   const [isPipelineDrawerOpen, setIsPipelineDrawerOpen] = useState(false);
+  // Telefones do ERP do cliente da oportunidade aberta na gaveta (GET /clients/:id).
+  const [drawerErpContacts, setDrawerErpContacts] = useState<{ clientId: string; phones: ClientErpPhone[]; emails: ClientErpEmail[] } | null>(null);
   const [pipelineInteraction, setPipelineInteraction] = useState("");
   const [isSavingPipelineInteraction, setIsSavingPipelineInteraction] = useState(false);
   const [pipelineEvents, setPipelineEvents] = useState<TimelineEventItem[]>([]);
@@ -1532,6 +1535,22 @@ export default function OpportunitiesPage() {
     loadPipelineEvents(selectedOpportunity.id).catch((error) => toast.error(getApiErrorMessage(error, "Erro ao carregar timeline da oportunidade")));
   }, [isPipelineDrawerOpen, selectedOpportunity?.id]);
 
+  useEffect(() => {
+    const clientId = isPipelineDrawerOpen ? selectedOpportunity?.clientId : undefined;
+    if (!clientId) return;
+    let active = true;
+    api
+      .get(`/clients/${clientId}`)
+      .then((response) => {
+        if (!active) return;
+        setDrawerErpContacts({ clientId, phones: response.data?.erpPhones || [], emails: response.data?.erpEmails || [] });
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [isPipelineDrawerOpen, selectedOpportunity?.clientId]);
+
   const updateOpportunityInState = (nextOpportunity: Opportunity) => {
     setItems((currentItems) => currentItems.map((item) => (item.id === nextOpportunity.id ? { ...item, ...nextOpportunity } : item)));
     setSelectedOpportunity((current) => (current?.id === nextOpportunity.id ? { ...current, ...nextOpportunity } : current));
@@ -2430,6 +2449,14 @@ export default function OpportunitiesPage() {
               alert={clients.find((client) => client.id === selectedOpportunity.clientId)?.creditAlert}
               className="mb-4"
             />
+
+            {drawerErpContacts && drawerErpContacts.clientId === selectedOpportunity.clientId ? (
+              <ClientErpPhones
+                phones={drawerErpContacts.phones}
+                emails={drawerErpContacts.emails}
+                className="mb-4 rounded-lg border border-slate-200 p-4"
+              />
+            ) : null}
 
             <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm">
               <div className="flex items-center justify-between gap-3">
