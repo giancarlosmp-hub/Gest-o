@@ -1597,11 +1597,8 @@ linha recebida. Cards, lista de oportunidades, Central do Dia e planejamento ain
 **Aberto, médio.** `User.phone` (migration `20261105120000_user_phone`) é cadastrado em Configurações → Usuários por
 diretor e gerente. Pendente:
 
-- Registrar a migration no ferramental de schema de produção antes do apply, como feito para
-  `20261103120000_opportunity_origin_agenda_stop_client_index`: manifesto (`scripts/production-schema-migrations.mjs`,
-  com sha256), `production-schema-apply.sh`, `schema-diff-filter.mjs`, `schema-evidence-validation.sh`, smokes de
-  migration e o workflow **Production Schema PR827** (lista de migrations e allowlist). Exige alterar `.github`, fora
-  do escopo deste PR.
+- Apply em produção pelo **Production Schema PR827** (migration já registrada no ferramental, no mesmo PR); o cutover
+  fica bloqueado até lá.
 - `/salesmen` do ERP: não se sabe pelo código se traz telefone do vendedor (schema não comprovado); o cadastro é manual.
 - Vendedor editar o próprio celular: decidido não fazer agora (exigiria rota própria).
 - `GET /users` continua devolvendo `erpRawPayload` (usado pela tela de vínculo ERP) a diretor e gerente.
