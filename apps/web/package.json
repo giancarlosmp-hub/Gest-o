@@ -15,7 +15,7 @@
     "test:orders": "npx tsx tests/orderPresentation.test.ts && npx tsx tests/ordersErpMobileLayout.test.ts && npx tsx tests/erpIntegrationPanelSellerDiagnostics.test.ts",
     "test:orders-erp-mobile": "npx tsx tests/ordersErpMobileLayout.test.ts",
     "test:client-code-erp-only": "npx tsx tests/clientCodeErpOnly.test.ts",
-    "test:client-archive-status": "npx tsx tests/clientArchiveStatus.test.ts && npx tsx tests/territorySellerSelection.test.ts",
+    "test:client-archive-status": "npx tsx tests/clientArchiveStatus.test.ts && npx tsx tests/territorySellerSelection.test.ts && npx tsx tests/clientMerge.test.ts",
     "test:client-address-label": "npx tsx tests/clientAddressLabel.test.ts && npx tsx tests/clientFormTitle.test.ts",
     "test:crm-assistant-evidence": "npx tsx tests/crmAssistantEvidence.test.ts && npx tsx tests/opportunityDraft.test.ts && npx tsx tests/assistantMobileLayout.test.ts",
     "test:opportunity-draft": "npx tsx tests/opportunityDraft.test.ts",

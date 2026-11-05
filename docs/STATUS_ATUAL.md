@@ -1,3 +1,24 @@
+# Exclusão de cliente com histórico e "Mesclar duplicado" — código pronto, aguardando merge — 05/11/2026
+
+- Excluir cliente falhava com mensagem genérica ou 408: `DELETE /clients/:id` apagava o histórico em cascata e o
+  `client.delete` esbarrava em `ClientCodeAudit` (`onDelete: Restrict`, P2003). A rejeição escapava do handler
+  async (Express 4 sem repasse de erro), a resposta nunca saía e o timeout de 15 s respondia 408.
+- `DELETE /clients/:id` agora conta os vínculos (código ERP/auditoria, oportunidades, linha do tempo, atividades,
+  agenda, paradas, contatos, conversas) e devolve **409** com a lista e a indicação de "Mesclar duplicado". Só
+  exclui cliente sem nenhum vínculo; nada é apagado em cascata. P2003 também vira 409. A busca filtra o tenant.
+- "Mesclar duplicado" (gerente e diretor), na tela do cliente: sugere candidatos (mesmo documento ou mesmo nome +
+  cidade/UF) via `GET /clients/:id/merge-candidates`, com busca manual; mostra os dois lado a lado e pede qual fica
+  ("Fica o cadastro cujo código continua no ERP."). `POST /clients/diagnostics/merge-duplicates` (serviço
+  `clientDuplicateMerge`) move oportunidades, atividades, linha do tempo, contatos, agenda, paradas e conversas,
+  grava evento na linha do tempo do que fica e arquiva o duplicado no formato da fusão da sincronização
+  (`MERGED_INTO:<id>`, prefixo `[ARQUIVADO ERP DUP]`, código com sufixo, documento liberado). A auditoria de código
+  fica no duplicado. Tenant obrigatório; cadastro arquivado não entra.
+- Efeito na sincronização (sem mudança nela): enquanto o duplicado tem o documento, o código antigo é pulado como
+  ambíguo (`same_document_conflicting_erp_code`). Depois de mesclar, a próxima sincronização grava o documento e os
+  dados atuais no código antigo (teste `clientDuplicateMergeSync.test.ts`).
+- Sem migration. Testes com dados fictícios ligados a scripts já rodados no CI (`test:client-reactivation`,
+  `test:ultrafv3-partners-customer-flag`, web `test:client-archive-status`).
+
 # Celular / WhatsApp na tela real de Usuários — correção pronta, aguardando merge — 05/11/2026
 
 - Depois do #1021 em produção, Configurações → Usuários não mostrava o campo: a tela é montada pela `SettingsPage`

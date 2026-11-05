@@ -139,6 +139,18 @@ import { MANUAL_RESOLUTION_CONFIRMATION_PHRASE, resolveAmbiguousErpOrderManually
 import { buildErpHealthcheckResponse } from "../services/erpOrderOperationalSummary.js";
 import { COMMERCIAL_AUTOMATIONS_CONFIG_KEY, DEFAULT_COMMERCIAL_AUTOMATIONS_CONFIG, getCommercialAutomationsStatus, loadCommercialAutomationsHistory, parseCommercialAutomationsConfig, runCommercialAutomations, simulateCommercialAutomations, WORKFLOW_INACTIVE_CLIENT_ORIGIN } from "../services/commercialAutomationsService.js";
 import { recordClientCodeChange } from "../services/clientCodeAuditService.js";
+import {
+  buildClientDeleteBlockedMessage,
+  CLIENT_DELETE_LINK_COUNT_SELECT,
+  CLIENT_DELETE_LINKED_FALLBACK_MESSAGE,
+  getClientDeleteBlockingReasons
+} from "../services/clientDeletion.js";
+import {
+  buildMergeCandidateWhere,
+  classifyMergeCandidate,
+  ClientMergeConflictError,
+  mergeClientDuplicate
+} from "../services/clientDuplicateMerge.js";
 import { buildClientCreditAlert, projectClientForResponse } from "../services/clientErpProjection.js";
 import { loadClientErpContacts } from "../services/clientErpContacts.js";
 import { findBrazilMunicipality, invalidClientAddressMessage, listBrazilMunicipalities, BRAZIL_STATES } from "../services/brazilMunicipalities.js";
@@ -5133,46 +5145,34 @@ router.put("/clients/:id", rejectClientCodeInBody, validateBody(clientSchema.par
   }
 });
 
+// Só exclui cliente sem nenhum vínculo (código ERP, histórico, agenda, contatos, conversas). Com vínculo: 409 legível
+// apontando para "Mesclar duplicado". Nada é apagado em cascata; o erro de banco vira 409, nunca 500/408.
 router.delete("/clients/:id", async (req, res) => {
-  const old = await prisma.client.findUnique({ where: { id: req.params.id } });
+  const tenantId = await resolveRequestTenantId(req, res);
+  if (!tenantId) return;
+  const old = await prisma.client.findFirst({
+    where: { id: req.params.id, tenantId },
+    select: { id: true, code: true, ownerSellerId: true, _count: { select: CLIENT_DELETE_LINK_COUNT_SELECT } }
+  });
   if (!old) return res.status(404).json({ message: "Não encontrado" });
   if (req.user!.role === "vendedor" && old.ownerSellerId !== req.user!.id) {
     return res.status(403).json({ message: "Sem permissão" });
   }
 
-  await prisma.$transaction(async (tx) => {
-    await tx.activity.deleteMany({
-      where: {
-        OR: [
-          { clientId: req.params.id },
-          { opportunity: { clientId: req.params.id } }
-        ]
-      }
-    });
+  const blockingReasons = getClientDeleteBlockingReasons(old);
+  if (blockingReasons.length > 0) {
+    return res.status(409).json({ message: buildClientDeleteBlockedMessage(blockingReasons), blockingReasons });
+  }
 
-    await tx.timelineEvent.deleteMany({
-      where: {
-        OR: [
-          { clientId: req.params.id },
-          { opportunity: { clientId: req.params.id } }
-        ]
-      }
-    });
-
-    await tx.contact.deleteMany({ where: { clientId: req.params.id } });
-    await tx.agendaStop.deleteMany({ where: { clientId: req.params.id } });
-    await tx.agendaEvent.deleteMany({
-      where: {
-        OR: [
-          { clientId: req.params.id },
-          { opportunity: { clientId: req.params.id } }
-        ]
-      }
-    });
-    await tx.opportunityChangeLog.deleteMany({ where: { opportunity: { clientId: req.params.id } } });
-    await tx.opportunity.deleteMany({ where: { clientId: req.params.id } });
-    await tx.client.delete({ where: { id: req.params.id } });
-  });
+  try {
+    await prisma.client.delete({ where: { id: old.id } });
+  } catch (error) {
+    if (isDatabaseForeignKeyViolation(error)) {
+      return res.status(409).json({ message: CLIENT_DELETE_LINKED_FALLBACK_MESSAGE, blockingReasons: [] });
+    }
+    console.error("[clients:delete]", error);
+    return res.status(500).json({ message: "Não foi possível excluir o cliente." });
+  }
 
   res.status(204).send();
 });
@@ -6728,56 +6728,122 @@ const mergeDuplicatesSchema = z.object({
   reason: z.string().trim().optional()
 });
 
+// Candidatos de "Mesclar duplicado" para a tela do cliente: sugestão automática (documento ou nome + cidade/UF) ou busca
+// manual (?q=). Devolve o resumo lado a lado (código, documento, cidade, última compra, contagens).
+const MERGE_CANDIDATE_SELECT = {
+  id: true,
+  code: true,
+  name: true,
+  nameNormalized: true,
+  fantasyName: true,
+  cnpj: true,
+  cnpjNormalized: true,
+  city: true,
+  cityNormalized: true,
+  state: true,
+  lastPurchaseDate: true,
+  createdAt: true,
+  isArchived: true,
+  ownerSeller: { select: { name: true } },
+  _count: {
+    select: {
+      opportunities: true,
+      timelineEvents: true,
+      activities: true,
+      contacts: true,
+      agendaEvents: true,
+      agendaStops: true,
+      communicationConversations: true
+    }
+  }
+} satisfies Prisma.ClientSelect;
+type MergeCandidateRow = Prisma.ClientGetPayload<{ select: typeof MERGE_CANDIDATE_SELECT }>;
+const projectMergeCandidate = (row: MergeCandidateRow) => ({
+  id: row.id,
+  code: row.code,
+  name: row.name,
+  fantasyName: row.fantasyName,
+  document: row.cnpj,
+  city: row.city,
+  state: row.state,
+  lastPurchaseDate: row.lastPurchaseDate,
+  createdAt: row.createdAt,
+  ownerSellerName: row.ownerSeller?.name ?? null,
+  counts: row._count
+});
+
+router.get("/clients/:id/merge-candidates", authorize("diretor", "gerente"), async (req, res) => {
+  const tenantId = await resolveRequestTenantId(req, res);
+  if (!tenantId) return;
+  const current = await prisma.client.findFirst({ where: { id: req.params.id, tenantId }, select: MERGE_CANDIDATE_SELECT });
+  if (!current) return res.status(404).json({ message: "Não encontrado" });
+  if (current.isArchived) return res.status(409).json({ message: "Cliente arquivado não pode ser mesclado." });
+
+  const search = String(req.query.q || "").trim();
+  if (search && search.length < 2) return res.json({ current: projectMergeCandidate(current), candidates: [] });
+  const where = buildMergeCandidateWhere(current, tenantId, search);
+  const rows = where
+    ? await prisma.client.findMany({ where, select: MERGE_CANDIDATE_SELECT, orderBy: [{ createdAt: "asc" }], take: 10 })
+    : [];
+  const candidates = rows
+    .map((row) => ({ ...projectMergeCandidate(row), matchReasons: classifyMergeCandidate(current, row, search) }))
+    .filter((row) => row.matchReasons.length > 0);
+  return res.json({ current: projectMergeCandidate(current), candidates });
+});
+
+// "Mesclar duplicado": tudo no tenant do usuário; o cadastro que fica e os duplicados precisam estar ativos.
+// Regras de o que move e o que fica em services/clientDuplicateMerge.ts.
 router.post("/clients/diagnostics/merge-duplicates", authorize("diretor", "gerente"), validateBody(mergeDuplicatesSchema), async (req, res) => {
   const { primaryClientId, duplicateClientIds, reason } = req.body as z.infer<typeof mergeDuplicatesSchema>;
   const uniqueDuplicateIds = Array.from(new Set<string>(duplicateClientIds.filter((id: string) => id !== primaryClientId)));
   if (uniqueDuplicateIds.length === 0) return res.status(400).json({ message: "Informe ao menos um cliente duplicado diferente do principal." });
+  const tenantId = await resolveRequestTenantId(req, res);
+  if (!tenantId) return;
 
-  const [primary, duplicates] = await Promise.all([
-    prisma.client.findUnique({ where: { id: primaryClientId } }),
-    prisma.client.findMany({ where: { id: { in: uniqueDuplicateIds } } })
+  const mergeSelect = { id: true, code: true, name: true, cnpj: true, ownerSellerId: true, isArchived: true } as const;
+  const [primary, duplicates, actor] = await Promise.all([
+    prisma.client.findFirst({ where: { id: primaryClientId, tenantId }, select: mergeSelect }),
+    prisma.client.findMany({ where: { id: { in: uniqueDuplicateIds }, tenantId }, select: mergeSelect }),
+    prisma.user.findUnique({ where: { id: req.user!.id }, select: { name: true } })
   ]);
   if (!primary) return res.status(404).json({ message: "Cliente principal não encontrado." });
   if (duplicates.length !== uniqueDuplicateIds.length) return res.status(404).json({ message: "Um ou mais clientes duplicados não foram encontrados." });
+  if (primary.isArchived) return res.status(409).json({ message: "O cadastro que fica está arquivado. Escolha um cadastro ativo." });
+  if (duplicates.some((duplicate) => duplicate.isArchived)) {
+    return res.status(409).json({ message: "Cadastro duplicado já arquivado não pode ser mesclado de novo." });
+  }
 
-  const now = new Date();
-  const archivedIds = await prisma.$transaction(async (tx) => {
-    for (const duplicate of duplicates) {
-      await tx.opportunity.updateMany({ where: { clientId: duplicate.id }, data: { clientId: primary.id } });
-      await tx.activity.updateMany({ where: { clientId: duplicate.id }, data: { clientId: primary.id } });
-      await tx.timelineEvent.updateMany({ where: { clientId: duplicate.id }, data: { clientId: primary.id } });
-      await tx.contact.updateMany({ where: { clientId: duplicate.id }, data: { clientId: primary.id } });
-      await tx.agendaEvent.updateMany({ where: { clientId: duplicate.id }, data: { clientId: primary.id } });
-      await tx.agendaStop.updateMany({ where: { clientId: duplicate.id }, data: { clientId: primary.id } });
+  const mergedAt = new Date();
+  try {
+    const merged = await prisma.$transaction(async (tx) => {
+      const results = [];
+      for (const duplicate of duplicates) {
+        const moved = await mergeClientDuplicate(tx, {
+          primary,
+          duplicate,
+          actor: { id: req.user!.id, email: req.user?.email, name: actor?.name },
+          requestIp: req.ip,
+          requestId: req.requestId || "request-id-unavailable",
+          reason,
+          mergedAt
+        });
+        results.push({ duplicateClientId: duplicate.id, moved });
+      }
+      return results;
+    });
 
-      await tx.client.update({
-        where: { id: duplicate.id },
-        data: {
-          code: duplicate.code ? `${duplicate.code}__MERGED__${now.getTime()}` : null,
-          cnpjNormalized: null,
-          cnpj: duplicate.cnpj ? `${duplicate.cnpj} [MERGED INTO ${primary.id}]` : null,
-          name: `[ARQUIVADO] ${duplicate.name}`,
-          isArchived: true,
-          archiveReason: reason || "manual_duplicate_merge"
-        }
-      });
-      await recordClientCodeChange(tx, {
-        clientId: duplicate.id, oldValue: duplicate.code,
-        newValue: duplicate.code ? `${duplicate.code}__MERGED__${now.getTime()}` : null,
-        origin: "Interface Administrativa", actorUserId: req.user?.id, actorEmail: req.user?.email,
-        requestIp: req.ip, requestId: req.requestId || "request-id-unavailable",
-        metadata: { operation: "manual_duplicate_merge", primaryClientId: primary.id },
-      });
-    }
-    return duplicates.map((item) => item.id);
-  });
-
-  return res.json({
-    message: "Mesclagem concluída com sucesso.",
-    primaryClientId,
-    archivedDuplicateIds: archivedIds,
-    reason: reason || null
-  });
+    return res.json({
+      message: "Mesclagem concluída com sucesso.",
+      primaryClientId,
+      archivedDuplicateIds: merged.map((item) => item.duplicateClientId),
+      moved: merged,
+      reason: reason || null
+    });
+  } catch (error) {
+    if (error instanceof ClientMergeConflictError) return res.status(error.statusCode).json({ message: error.message });
+    console.error("[clients:merge-duplicates]", error);
+    return res.status(500).json({ message: "Não foi possível mesclar os cadastros." });
+  }
 });
 
 router.get("/products/:id", async (req, res) => {

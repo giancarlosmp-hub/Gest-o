@@ -9,7 +9,8 @@ import ClientAutoSummaryCard from "../components/clients/ClientAutoSummaryCard";
 import ClientCreditAlertBanner, { ClientCreditAlert } from "../components/clients/ClientCreditAlertBanner";
 import ClientErpPhones, { type ClientErpEmail, type ClientErpPhone } from "../components/clients/ClientErpPhones";
 import { useAuth } from "../context/AuthContext";
-import { canReactivateClient, clientArchiveBadgeLabel, isPortfolioCleanupArchivedClient } from "../lib/clientArchiveStatus";
+import { canManageArchivedClients, canReactivateClient, clientArchiveBadgeLabel, isPortfolioCleanupArchivedClient } from "../lib/clientArchiveStatus";
+import ClientMergeDuplicateDialog from "../components/clients/ClientMergeDuplicateDialog";
 import { PORTFOLIO_STATUS_LABELS, type PortfolioStatus } from "@salesforce-pro/shared";
 import { portfolioStatusBadgeClass } from "../lib/portfolioStatusBadge";
 
@@ -191,6 +192,7 @@ export default function ClientDetailsPage() {
   const { user } = useAuth();
   const [client, setClient] = useState<Client | null>(null);
   const [reactivating, setReactivating] = useState(false);
+  const [isMergeOpen, setIsMergeOpen] = useState(false);
   const [events, setEvents] = useState<TimelineEventItem[]>([]);
   const [eventsCursor, setEventsCursor] = useState<string | null>(null);
   const [loadingMoreEvents, setLoadingMoreEvents] = useState(false);
@@ -460,6 +462,15 @@ export default function ClientDetailsPage() {
 
   const archiveBadgeLabel = clientArchiveBadgeLabel(client);
   const showReactivateButton = canReactivateClient(user?.role, client);
+  // "Mesclar duplicado": gerente e diretor, só em cadastro ativo.
+  const showMergeButton = canManageArchivedClients(user?.role) && !client.isArchived;
+
+  const handleMerged = (keptClientId: string) => {
+    setIsMergeOpen(false);
+    // Ficou o outro cadastro: abre ele. Ficou este: recarrega para trazer o histórico mesclado.
+    if (keptClientId !== id) navigate(`/clientes/${keptClientId}`);
+    else window.location.reload();
+  };
   // Carteira = clientes não arquivados; o arquivado já mostra o próprio selo.
   const portfolioStatus = client.isArchived ? null : client.commercialSummary?.portfolioStatus ?? null;
 
@@ -509,13 +520,24 @@ export default function ClientDetailsPage() {
             </span>
           ) : null}
         </div>
-        <button
-          type="button"
-          className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
-          onClick={() => navigate("/clientes")}
-        >
-          Voltar
-        </button>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {showMergeButton ? (
+            <button
+              type="button"
+              className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              onClick={() => setIsMergeOpen(true)}
+            >
+              Mesclar duplicado
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            onClick={() => navigate("/clientes")}
+          >
+            Voltar
+          </button>
+        </div>
       </div>
 
       {archiveBadgeLabel ? (
@@ -970,6 +992,10 @@ export default function ClientDetailsPage() {
           </div>
         </div>
       )}
+
+      {isMergeOpen && id ? (
+        <ClientMergeDuplicateDialog clientId={id} onClose={() => setIsMergeOpen(false)} onMerged={handleMerged} />
+      ) : null}
     </div>
   );
 }
