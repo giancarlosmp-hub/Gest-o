@@ -12,6 +12,7 @@ import ErpIntegrationPanel from "../components/settings/ErpIntegrationPanel";
 import SellerTerritoriesPanel from "../components/settings/SellerTerritoriesPanel";
 import CommercialAutomationsPanel from "../components/settings/CommercialAutomationsPanel";
 import KnowledgeBasePanel from "../components/settings/KnowledgeBasePanel";
+import { buildUserAdminFields } from "../components/settings/userAdminFields";
 
 type SettingsSection = "kpis" | "discipline" | "users" | "technical-cultures" | "knowledge-base" | "erp-integration" | "seller-territories" | "commercial-automations";
 
@@ -186,46 +187,7 @@ export default function SettingsPage() {
           <CrudSimplePage
             endpoint="/users"
             title="Usuários"
-            fields={[
-              { key: "name", label: "Nome completo", placeholder: "Informe o nome completo" },
-              { key: "email", label: "E-mail corporativo", placeholder: "Informe o e-mail corporativo" },
-              {
-                key: "role",
-                label: "Perfil de acesso",
-                type: "select",
-                options: [
-                  ...(user.role === "diretor" ? [{ value: "diretor", label: "Diretor" }] : []),
-                  { value: "gerente", label: "Gerente" },
-                  { value: "vendedor", label: "Vendedor" }
-                ]
-              },
-              { key: "region", label: "Região de atuação", placeholder: "Informe a região de atuação" },
-              {
-                key: "erpCode",
-                label: "Vendedor/operador ERP",
-                tableLabel: "Vínculo ERP",
-                type: "erpSalesman",
-                placeholder: "Pesquise pelo nome ou código ERP"
-              },
-              {
-                key: "erpLoginUsername",
-                label: "Login FV3 / CPF-CNPJ",
-                placeholder: "Documento ou usuário do FV3"
-              },
-              {
-                key: "erpLoginPassword",
-                label: "Senha FV3",
-                type: "password",
-                formOnly: true,
-                placeholder: "Preencha apenas para cadastrar/alterar"
-              },
-              {
-                key: "erpLoginConfigured",
-                label: "Login FV3 configurado",
-                tableOnly: true
-              },
-              { key: "password", label: "Senha de acesso", placeholder: "Defina uma senha de acesso" }
-            ]}
+            fields={buildUserAdminFields(user.role)}
             readOnly={user.role !== "diretor" && user.role !== "gerente"}
           />
         </div>
