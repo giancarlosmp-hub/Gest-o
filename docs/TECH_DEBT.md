@@ -1446,9 +1446,18 @@ tela troca a tabela por cartões no celular.
 
 Pendente (fora da série):
 
-- Próximo PR: `apps/web/src/components/settings/ErpIntegrationPanel.tsx` tem fixos no código o nome real de um vendedor e
-  códigos de vendedor/operador do ERP, no bloco "Diagnóstico ERP do vendedor" (marcado como tela temporária) e nos
-  parâmetros da consulta de diagnóstico. Fere a regra de não ter dados reais no código; sair num PR próprio.
+- Resolvido: o bloco temporário "Diagnóstico ERP do vendedor" de `ErpIntegrationPanel.tsx`, que tinha fixos no código o
+  nome real de um vendedor e códigos de vendedor/operador do ERP, foi removido junto com a rota
+  `GET /erp/ultrafv3/seller-diagnostics` (que usava os mesmos valores como padrão e só era chamada por esse bloco). O
+  diagnóstico por vendedor continua em Configurações → Usuários (`GET /users/:id/erp-diagnostics`), com o vendedor
+  escolhido na lista. Testes: `apps/web/tests/erpIntegrationPanelSellerDiagnostics.test.ts` (em `test:orders`) e
+  `apps/api/src/routes/sellerDiagnosticsRemoved.http.test.ts` (404, em `test:route-authorization`). Os valores
+  continuam no histórico do git, que não foi reescrito.
+- Próximo PR (dados reais fora do código da aplicação, encontrados na mesma busca): `docs/ultrafv3-production-validation.md`
+  cita nome de vendedor e nomes/códigos ERP de clientes; os smokes `apps/api/src/scripts/ultraFv3OrderFlowMockSmoke.ts` e
+  `ultraFv3OrderNumberParserSmoke.ts` usam como fixture números de vendedor/operador que coincidem com os do bloco removido
+  (não dá para afirmar pelo código se são os reais); `apps/api/src/scripts/erpPartnerDedupRulesSmoke.ts` usa o primeiro
+  nome de um vendedor como identificador. Trocar por dados fictícios.
 - Oportunidades de reativação da automação (`origin = "automation:inactive_recent"`, valor 0, etapa inicial
   prospecção, `proposalDate` no dia da criação) contam como "oportunidade aberta" no mapa de Territórios: a cidade fica
   amarela e entra em "Oportunidade aberta". A rota não filtra por `origin` nem por valor. Não alterado; a decisão de
