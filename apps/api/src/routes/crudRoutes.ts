@@ -140,6 +140,7 @@ import { buildErpHealthcheckResponse } from "../services/erpOrderOperationalSumm
 import { COMMERCIAL_AUTOMATIONS_CONFIG_KEY, DEFAULT_COMMERCIAL_AUTOMATIONS_CONFIG, getCommercialAutomationsStatus, loadCommercialAutomationsHistory, parseCommercialAutomationsConfig, runCommercialAutomations, simulateCommercialAutomations, WORKFLOW_INACTIVE_CLIENT_ORIGIN } from "../services/commercialAutomationsService.js";
 import { recordClientCodeChange } from "../services/clientCodeAuditService.js";
 import { buildClientCreditAlert, projectClientForResponse } from "../services/clientErpProjection.js";
+import { loadClientErpContacts } from "../services/clientErpContacts.js";
 import { findBrazilMunicipality, invalidClientAddressMessage, listBrazilMunicipalities, BRAZIL_STATES } from "../services/brazilMunicipalities.js";
 import { findOfficialTerritoryCity, isTerritoryAllowedState, listOfficialTerritoryCities, normalizeTerritoryCityKey, resolvePlacemarkCities, type OfficialTerritoryCity, type TerritoryAllowedState } from "../services/territoryOfficialCities.js";
 import { ensureInitialKnowledgeDocuments, getKnowledgeContextForAi, searchKnowledgeDocuments } from "../services/knowledgeBaseService.js";
@@ -4378,9 +4379,17 @@ router.get("/clients/:id", async (req, res) => {
     portfolioStatus: portfolioStatusOf(data, lastSentCrmOrderByClient, new Date())
   };
 
+  // Telefones/e-mails cadastrais do ERP (cache do /partners), só para exibição: falha na leitura não derruba o detalhe.
+  const erpContacts = await loadClientErpContacts(prisma, data).catch((error: unknown) => {
+    logApiEvent("WARN", "[clients/:id] erp contacts unavailable", { errorCode: error instanceof Error ? error.name : "unknown" });
+    return { erpPhones: [], erpEmails: [] };
+  });
+
   res.json({
     ...projectClientForResponse(data),
-    commercialSummary
+    commercialSummary,
+    erpPhones: erpContacts.erpPhones,
+    erpEmails: erpContacts.erpEmails
   });
 });
 
