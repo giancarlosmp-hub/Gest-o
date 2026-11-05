@@ -12,7 +12,7 @@
     "test:territory-map": "npx tsx tests/territoryMapRules.test.ts && npx tsx tests/territoriesMobileLayout.test.ts",
     "test:opportunity-quick-action": "npx tsx tests/opportunityQuickAction.test.ts && npx tsx tests/opportunitiesMobileLayout.test.ts",
     "test:opportunities-mobile": "npx tsx tests/opportunitiesMobileLayout.test.ts",
-    "test:orders": "npx tsx tests/orderPresentation.test.ts && npx tsx tests/ordersErpMobileLayout.test.ts",
+    "test:orders": "npx tsx tests/orderPresentation.test.ts && npx tsx tests/ordersErpMobileLayout.test.ts && npx tsx tests/erpIntegrationPanelSellerDiagnostics.test.ts",
     "test:orders-erp-mobile": "npx tsx tests/ordersErpMobileLayout.test.ts",
     "test:client-code-erp-only": "npx tsx tests/clientCodeErpOnly.test.ts",
     "test:client-archive-status": "npx tsx tests/clientArchiveStatus.test.ts && npx tsx tests/territorySellerSelection.test.ts",
