@@ -145,6 +145,7 @@ import {
   CLIENT_DELETE_LINKED_FALLBACK_MESSAGE,
   getClientDeleteBlockingReasons
 } from "../services/clientDeletion.js";
+import { ClientMergeConflictError, mergeClientDuplicate } from "../services/clientDuplicateMerge.js";
 import { buildClientCreditAlert, projectClientForResponse } from "../services/clientErpProjection.js";
 import { loadClientErpContacts } from "../services/clientErpContacts.js";
 import { findBrazilMunicipality, invalidClientAddressMessage, listBrazilMunicipalities, BRAZIL_STATES } from "../services/brazilMunicipalities.js";
@@ -6722,56 +6723,59 @@ const mergeDuplicatesSchema = z.object({
   reason: z.string().trim().optional()
 });
 
+// "Mesclar duplicado": tudo no tenant do usuário; o cadastro que fica e os duplicados precisam estar ativos.
+// Regras de o que move e o que fica em services/clientDuplicateMerge.ts.
 router.post("/clients/diagnostics/merge-duplicates", authorize("diretor", "gerente"), validateBody(mergeDuplicatesSchema), async (req, res) => {
   const { primaryClientId, duplicateClientIds, reason } = req.body as z.infer<typeof mergeDuplicatesSchema>;
   const uniqueDuplicateIds = Array.from(new Set<string>(duplicateClientIds.filter((id: string) => id !== primaryClientId)));
   if (uniqueDuplicateIds.length === 0) return res.status(400).json({ message: "Informe ao menos um cliente duplicado diferente do principal." });
+  const tenantId = await resolveRequestTenantId(req, res);
+  if (!tenantId) return;
 
-  const [primary, duplicates] = await Promise.all([
-    prisma.client.findUnique({ where: { id: primaryClientId } }),
-    prisma.client.findMany({ where: { id: { in: uniqueDuplicateIds } } })
+  const mergeSelect = { id: true, code: true, name: true, cnpj: true, ownerSellerId: true, isArchived: true } as const;
+  const [primary, duplicates, actor] = await Promise.all([
+    prisma.client.findFirst({ where: { id: primaryClientId, tenantId }, select: mergeSelect }),
+    prisma.client.findMany({ where: { id: { in: uniqueDuplicateIds }, tenantId }, select: mergeSelect }),
+    prisma.user.findUnique({ where: { id: req.user!.id }, select: { name: true } })
   ]);
   if (!primary) return res.status(404).json({ message: "Cliente principal não encontrado." });
   if (duplicates.length !== uniqueDuplicateIds.length) return res.status(404).json({ message: "Um ou mais clientes duplicados não foram encontrados." });
+  if (primary.isArchived) return res.status(409).json({ message: "O cadastro que fica está arquivado. Escolha um cadastro ativo." });
+  if (duplicates.some((duplicate) => duplicate.isArchived)) {
+    return res.status(409).json({ message: "Cadastro duplicado já arquivado não pode ser mesclado de novo." });
+  }
 
-  const now = new Date();
-  const archivedIds = await prisma.$transaction(async (tx) => {
-    for (const duplicate of duplicates) {
-      await tx.opportunity.updateMany({ where: { clientId: duplicate.id }, data: { clientId: primary.id } });
-      await tx.activity.updateMany({ where: { clientId: duplicate.id }, data: { clientId: primary.id } });
-      await tx.timelineEvent.updateMany({ where: { clientId: duplicate.id }, data: { clientId: primary.id } });
-      await tx.contact.updateMany({ where: { clientId: duplicate.id }, data: { clientId: primary.id } });
-      await tx.agendaEvent.updateMany({ where: { clientId: duplicate.id }, data: { clientId: primary.id } });
-      await tx.agendaStop.updateMany({ where: { clientId: duplicate.id }, data: { clientId: primary.id } });
+  const mergedAt = new Date();
+  try {
+    const merged = await prisma.$transaction(async (tx) => {
+      const results = [];
+      for (const duplicate of duplicates) {
+        const moved = await mergeClientDuplicate(tx, {
+          primary,
+          duplicate,
+          actor: { id: req.user!.id, email: req.user?.email, name: actor?.name },
+          requestIp: req.ip,
+          requestId: req.requestId || "request-id-unavailable",
+          reason,
+          mergedAt
+        });
+        results.push({ duplicateClientId: duplicate.id, moved });
+      }
+      return results;
+    });
 
-      await tx.client.update({
-        where: { id: duplicate.id },
-        data: {
-          code: duplicate.code ? `${duplicate.code}__MERGED__${now.getTime()}` : null,
-          cnpjNormalized: null,
-          cnpj: duplicate.cnpj ? `${duplicate.cnpj} [MERGED INTO ${primary.id}]` : null,
-          name: `[ARQUIVADO] ${duplicate.name}`,
-          isArchived: true,
-          archiveReason: reason || "manual_duplicate_merge"
-        }
-      });
-      await recordClientCodeChange(tx, {
-        clientId: duplicate.id, oldValue: duplicate.code,
-        newValue: duplicate.code ? `${duplicate.code}__MERGED__${now.getTime()}` : null,
-        origin: "Interface Administrativa", actorUserId: req.user?.id, actorEmail: req.user?.email,
-        requestIp: req.ip, requestId: req.requestId || "request-id-unavailable",
-        metadata: { operation: "manual_duplicate_merge", primaryClientId: primary.id },
-      });
-    }
-    return duplicates.map((item) => item.id);
-  });
-
-  return res.json({
-    message: "Mesclagem concluída com sucesso.",
-    primaryClientId,
-    archivedDuplicateIds: archivedIds,
-    reason: reason || null
-  });
+    return res.json({
+      message: "Mesclagem concluída com sucesso.",
+      primaryClientId,
+      archivedDuplicateIds: merged.map((item) => item.duplicateClientId),
+      moved: merged,
+      reason: reason || null
+    });
+  } catch (error) {
+    if (error instanceof ClientMergeConflictError) return res.status(error.statusCode).json({ message: error.message });
+    console.error("[clients:merge-duplicates]", error);
+    return res.status(500).json({ message: "Não foi possível mesclar os cadastros." });
+  }
 });
 
 router.get("/products/:id", async (req, res) => {
