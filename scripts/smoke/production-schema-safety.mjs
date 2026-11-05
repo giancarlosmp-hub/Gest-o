@@ -83,6 +83,10 @@ const opportunityOriginSql = readFileSync(resolve(root, "apps/api/prisma/migrati
 const opportunityOriginPreview = runPreview(opportunityOriginSql);
 assert.equal(opportunityOriginPreview.status, 0, `Opportunity origin migration must pass the preview validator: ${opportunityOriginPreview.stdout}${opportunityOriginPreview.stderr}`);
 assert.match(opportunityOriginPreview.stdout, /RESUMO aditivas=2 destrutivas=0 bloqueadas=0/);
+const userPhoneSql = readFileSync(resolve(root, "apps/api/prisma/migrations/20261105120000_user_phone/migration.sql"), "utf8");
+const userPhonePreview = runPreview(userPhoneSql);
+assert.equal(userPhonePreview.status, 0, `User phone migration must pass the preview validator: ${userPhonePreview.stdout}${userPhonePreview.stderr}`);
+assert.match(userPhonePreview.stdout, /RESUMO aditivas=1 destrutivas=0 bloqueadas=0/);
 for (const [name, sql] of [
   ["enum value rename", `ALTER TYPE "AgendaEventStatus" RENAME VALUE 'vencido' TO 'cancelado';\n`],
   ["enum value drop", `ALTER TYPE "AgendaEventStatus" DROP VALUE 'vencido';\n`],
@@ -251,6 +255,11 @@ assert.equal(opportunityOriginEntry.status, 0, opportunityOriginEntry.stderr);
 assert.equal(JSON.parse(opportunityOriginEntry.stdout).sha256, "ac1dc481223a01f1b6137ddd72c121f62ce57f275616a85c0f0b5e4677d9db90");
 assert.doesNotMatch(opportunityOriginSql, /\b(UPDATE|DELETE|INSERT|DROP|RENAME|TRUNCATE|CONCURRENTLY|UNIQUE)\b|NOT NULL|DEFAULT/i, "Opportunity origin migration must only add a nullable column and a plain index");
 assert.equal(opportunityOriginSql.match(/IF NOT EXISTS/g)?.length, 2, "Opportunity origin migration must be idempotent");
+const userPhoneEntry = spawnSync("node", [registry, "20261105120000_user_phone"], { cwd: root, encoding: "utf8" });
+assert.equal(userPhoneEntry.status, 0, userPhoneEntry.stderr);
+assert.equal(JSON.parse(userPhoneEntry.stdout).sha256, "23b6386426c7def0eae9705a057a1692356b616b9494457afb067e821fc399bb");
+assert.doesNotMatch(userPhoneSql, /\b(UPDATE|DELETE|INSERT|DROP|RENAME|TRUNCATE|CONCURRENTLY|UNIQUE|INDEX)\b|NOT NULL|DEFAULT/i, "User phone migration must only add a nullable column");
+assert.equal(userPhoneSql.match(/IF NOT EXISTS/g)?.length, 1, "User phone migration must be idempotent");
 
 const apply = readFileSync(resolve(root, "scripts/production-schema-apply.sh"), "utf8");
 const productPricePostgres = readFileSync(resolve(root, "scripts/smoke/product-price-authority-migration-postgres.sh"), "utf8");
@@ -263,6 +272,8 @@ for (const agendaSplitPostcondition of ["migration Agenda/Atividades parcialment
 assert.match(apply, /agenda_split_state" == 8:2 \]\]; then\n  log "migration Agenda\/Atividades já presente; DDL ignorado[\s\S]*else[\s\S]*admin_psql --single-transaction/, "already-applied Agenda/Activity path must not repeat DDL");
 for (const opportunityOriginPostcondition of ["migration origem da oportunidade/índice de paradas parcialmente aplicada", "opportunity_origin_state\" == 0:0", "opportunity_origin_state\" == 1:1", "migration origem da oportunidade/índice de paradas já presente; DDL ignorado", "indexname='AgendaStop_clientId_checkOutAt_idx'", "column_default IS NULL", "WHERE \"origin\" IS NOT NULL", "1:1:0"]) assert.ok(apply.includes(opportunityOriginPostcondition), `missing Opportunity origin postcondition ${opportunityOriginPostcondition}`);
 assert.match(apply, /opportunity_origin_state" == 1:1 \]\]; then\n  log "migration origem da oportunidade\/índice de paradas já presente; DDL ignorado[\s\S]*else[\s\S]*admin_psql --single-transaction/, "already-applied Opportunity origin path must not repeat DDL");
+for (const userPhonePostcondition of ["migration celular do usuário em estado inesperado", "user_phone_state\" == 0 ||", "user_phone_state\" == 1 ]]", "migration celular do usuário já presente; DDL ignorado", "table_name='User' AND column_name='phone'", "WHERE \"phone\" IS NOT NULL", "1:0 ]]"]) assert.ok(apply.includes(userPhonePostcondition), `missing User phone postcondition ${userPhonePostcondition}`);
+assert.match(apply, /user_phone_state" == 1 \]\]; then\n  log "migration celular do usuário já presente; DDL ignorado[\s\S]*else[\s\S]*admin_psql --single-transaction/, "already-applied User phone path must not repeat DDL");
 assert.match(apply, /production-schema-migrations\.mjs "\$MIGRATION_ID_REQUESTED"/);
 for (const ordersPostcondition of ["orders-counts.before.tsv", "tenant_not_null", "tenant_nulls", "ErpOperationalOrderStatus", "ErpRequestAuthorizationStatus", "ErpOrderSync_tenantId_fkey", "ErpOrderSync_tenantId_createdAt_idx", "ErpOrderSync_tenantId_sellerId_createdAt_idx", "ErpOrderStatusHistory", "ErpOrderStatusHistory_erpOrderSyncId_fkey", "ErpOrderStatusHistory_opportunityId_fkey", "ErpOrderStatusHistory_erpOrderSyncId_occurredAt_idx", "ErpOrderStatusHistory_opportunityId_occurredAt_idx", "migration-backfill"]) assert.ok(apply.includes(ordersPostcondition), `missing Orders postcondition ${ordersPostcondition}`);
 assert.match(apply, /20260731150000_safe_production_schema_transition\)[\s\S]*required_tables/, "the historical migration must retain its dedicated postconditions");
@@ -561,6 +572,28 @@ assertOpportunityOriginDiff("unique index", opportunityOriginFullDiff.replace("C
 assertOpportunityOriginDiff("unexpected extra column", `${opportunityOriginFullDiff}ALTER TABLE "Opportunity" ADD COLUMN "unexpected" TEXT;\n`, false);
 assertOpportunityOriginDiff("column type change", `${opportunityOriginFullDiff}ALTER TABLE "Opportunity" ALTER COLUMN "notes" SET DATA TYPE VARCHAR(10);\n`, false);
 assertOpportunityOriginDiff("duplicated column", `${opportunityOriginFullDiff}${opportunityOriginColumnLine}\n`, false);
+
+function assertUserPhoneDiff(name, sql, accepted) {
+  const testDir = mkdtempSync(resolve(tmpdir(), "gesto-user-phone-diff-"));
+  const input = resolve(testDir, "input.sql");
+  const output = resolve(testDir, "output.sql");
+  writeFileSync(input, sql);
+  const result = spawnSync("node", [resolve(root, "scripts/schema-diff-filter.mjs"), input, output, "pre", "20261105120000_user_phone"], { encoding: "utf8" });
+  rmSync(testDir, { recursive: true });
+  assert.equal(result.status === 0, accepted, `${name}: ${result.stdout}${result.stderr}`);
+}
+// Exactly what `prisma migrate diff` emits for this migration against the previous schema.
+const userPhoneColumnLine = `-- AlterTable\nALTER TABLE "User" ADD COLUMN     "phone" TEXT;`;
+const userPhoneFullDiff = `${userPhoneColumnLine}\n`;
+assertUserPhoneDiff("complete User phone diff", userPhoneFullDiff, true);
+assertUserPhoneDiff("already applied (empty diff)", "", true);
+assertUserPhoneDiff("non-null phone column", userPhoneFullDiff.replace(`"phone" TEXT`, `"phone" TEXT NOT NULL`), false);
+assertUserPhoneDiff("defaulted phone column", userPhoneFullDiff.replace(`"phone" TEXT`, `"phone" TEXT DEFAULT ''`), false);
+assertUserPhoneDiff("phone column on another table", userPhoneFullDiff.replace(`"User"`, `"Client"`), false);
+assertUserPhoneDiff("unexpected extra column", `${userPhoneFullDiff}ALTER TABLE "User" ADD COLUMN "unexpected" TEXT;\n`, false);
+assertUserPhoneDiff("unexpected index", `${userPhoneFullDiff}CREATE INDEX "User_phone_idx" ON "User"("phone");\n`, false);
+assertUserPhoneDiff("column type change", `${userPhoneFullDiff}ALTER TABLE "User" ALTER COLUMN "region" SET DATA TYPE VARCHAR(10);\n`, false);
+assertUserPhoneDiff("duplicated column", `${userPhoneFullDiff}${userPhoneColumnLine}\n`, false);
 const bootstrap = readFileSync(resolve(root, "apps/api/src/scripts/bootstrap.ts"), "utf8");
 assert.match(bootstrap, /type DatabaseSchemaMode = "external" \| "ephemeral-push"/);
 assert.match(bootstrap, /if \(value === "external" \|\| value === "ephemeral-push"\) return value/);
