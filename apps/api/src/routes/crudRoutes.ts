@@ -145,7 +145,12 @@ import {
   CLIENT_DELETE_LINKED_FALLBACK_MESSAGE,
   getClientDeleteBlockingReasons
 } from "../services/clientDeletion.js";
-import { ClientMergeConflictError, mergeClientDuplicate } from "../services/clientDuplicateMerge.js";
+import {
+  buildMergeCandidateWhere,
+  classifyMergeCandidate,
+  ClientMergeConflictError,
+  mergeClientDuplicate
+} from "../services/clientDuplicateMerge.js";
 import { buildClientCreditAlert, projectClientForResponse } from "../services/clientErpProjection.js";
 import { loadClientErpContacts } from "../services/clientErpContacts.js";
 import { findBrazilMunicipality, invalidClientAddressMessage, listBrazilMunicipalities, BRAZIL_STATES } from "../services/brazilMunicipalities.js";
@@ -6721,6 +6726,69 @@ const mergeDuplicatesSchema = z.object({
   primaryClientId: z.string().min(1),
   duplicateClientIds: z.array(z.string().min(1)).min(1),
   reason: z.string().trim().optional()
+});
+
+// Candidatos de "Mesclar duplicado" para a tela do cliente: sugestão automática (documento ou nome + cidade/UF) ou busca
+// manual (?q=). Devolve o resumo lado a lado (código, documento, cidade, última compra, contagens).
+const MERGE_CANDIDATE_SELECT = {
+  id: true,
+  code: true,
+  name: true,
+  nameNormalized: true,
+  fantasyName: true,
+  cnpj: true,
+  cnpjNormalized: true,
+  city: true,
+  cityNormalized: true,
+  state: true,
+  lastPurchaseDate: true,
+  createdAt: true,
+  isArchived: true,
+  ownerSeller: { select: { name: true } },
+  _count: {
+    select: {
+      opportunities: true,
+      timelineEvents: true,
+      activities: true,
+      contacts: true,
+      agendaEvents: true,
+      agendaStops: true,
+      communicationConversations: true
+    }
+  }
+} satisfies Prisma.ClientSelect;
+type MergeCandidateRow = Prisma.ClientGetPayload<{ select: typeof MERGE_CANDIDATE_SELECT }>;
+const projectMergeCandidate = (row: MergeCandidateRow) => ({
+  id: row.id,
+  code: row.code,
+  name: row.name,
+  fantasyName: row.fantasyName,
+  document: row.cnpj,
+  city: row.city,
+  state: row.state,
+  lastPurchaseDate: row.lastPurchaseDate,
+  createdAt: row.createdAt,
+  ownerSellerName: row.ownerSeller?.name ?? null,
+  counts: row._count
+});
+
+router.get("/clients/:id/merge-candidates", authorize("diretor", "gerente"), async (req, res) => {
+  const tenantId = await resolveRequestTenantId(req, res);
+  if (!tenantId) return;
+  const current = await prisma.client.findFirst({ where: { id: req.params.id, tenantId }, select: MERGE_CANDIDATE_SELECT });
+  if (!current) return res.status(404).json({ message: "Não encontrado" });
+  if (current.isArchived) return res.status(409).json({ message: "Cliente arquivado não pode ser mesclado." });
+
+  const search = String(req.query.q || "").trim();
+  if (search && search.length < 2) return res.json({ current: projectMergeCandidate(current), candidates: [] });
+  const where = buildMergeCandidateWhere(current, tenantId, search);
+  const rows = where
+    ? await prisma.client.findMany({ where, select: MERGE_CANDIDATE_SELECT, orderBy: [{ createdAt: "asc" }], take: 10 })
+    : [];
+  const candidates = rows
+    .map((row) => ({ ...projectMergeCandidate(row), matchReasons: classifyMergeCandidate(current, row, search) }))
+    .filter((row) => row.matchReasons.length > 0);
+  return res.json({ current: projectMergeCandidate(current), candidates });
 });
 
 // "Mesclar duplicado": tudo no tenant do usuário; o cadastro que fica e os duplicados precisam estar ativos.

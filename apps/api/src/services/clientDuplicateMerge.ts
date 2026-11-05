@@ -1,6 +1,6 @@
 import { EventType, type Prisma } from "@prisma/client";
 import { normalizeAuditedCode } from "./clientCodeAuditService.js";
-import { normalizeText } from "../utils/normalize.js";
+import { normalizeCnpj, normalizeText } from "../utils/normalize.js";
 
 // "Mesclar duplicado" (diretor/gerente): leva o histórico do cadastro duplicado para o cadastro que fica e arquiva o
 // duplicado no mesmo formato da fusão da sincronização UltraFV3, o que libera o documento e o código para o ERP.
@@ -110,3 +110,69 @@ export async function mergeClientDuplicate(
 
   return moved;
 }
+
+// --- Candidatos para "Mesclar duplicado" -------------------------------------------------------------------------
+// Sugestão automática: mesmo documento (normalizado ou gravado com/sem máscara) ou mesmo nome + cidade/UF.
+// Busca manual (q): nome, fantasia, código ou documento. Sempre no tenant, só ativos, nunca o próprio cadastro.
+
+export type MergeCandidateMatch = "documento" | "nome e cidade" | "busca";
+
+type CandidateIdentity = {
+  id: string;
+  name: string;
+  nameNormalized: string | null;
+  city: string;
+  cityNormalized: string | null;
+  state: string;
+  cnpj: string | null;
+  cnpjNormalized: string | null;
+};
+
+const validDocument = (digits: string) => ((digits.length === 11 || digits.length === 14) && !/^(\d)\1+$/.test(digits) ? digits : "");
+export const clientDocumentDigits = (client: Pick<CandidateIdentity, "cnpj" | "cnpjNormalized">) =>
+  validDocument(normalizeCnpj(client.cnpjNormalized || client.cnpj));
+
+const maskedDocument = (digits: string) =>
+  digits.length === 11
+    ? `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6, 9)}-${digits.slice(9)}`
+    : `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8, 12)}-${digits.slice(12)}`;
+
+export const buildMergeCandidateWhere = (current: CandidateIdentity, tenantId: string, search?: string): Prisma.ClientWhereInput | null => {
+  const base: Prisma.ClientWhereInput = { tenantId, isArchived: false, id: { not: current.id } };
+  const q = search?.trim();
+  if (q) {
+    return {
+      ...base,
+      OR: [
+        { name: { contains: q, mode: "insensitive" } },
+        { fantasyName: { contains: q, mode: "insensitive" } },
+        { code: { contains: q, mode: "insensitive" } },
+        { cnpj: { contains: q, mode: "insensitive" } },
+      ],
+    };
+  }
+  const document = clientDocumentDigits(current);
+  const nameKey = current.nameNormalized || normalizeText(current.name);
+  const cityKey = current.cityNormalized || normalizeText(current.city);
+  const or: Prisma.ClientWhereInput[] = [
+    ...(document ? [{ cnpjNormalized: document }, { cnpj: { in: [document, maskedDocument(document)] } }] : []),
+    ...(nameKey && cityKey && current.state
+      ? [
+          { nameNormalized: nameKey, cityNormalized: cityKey, state: current.state },
+          { name: { equals: current.name.trim(), mode: "insensitive" as const }, city: { equals: current.city.trim(), mode: "insensitive" as const }, state: current.state },
+        ]
+      : []),
+  ];
+  return or.length ? { ...base, OR: or } : null;
+};
+
+export const classifyMergeCandidate = (current: CandidateIdentity, candidate: CandidateIdentity, search?: string): MergeCandidateMatch[] => {
+  const reasons: MergeCandidateMatch[] = [];
+  const document = clientDocumentDigits(current);
+  if (document && clientDocumentDigits(candidate) === document) reasons.push("documento");
+  const sameName = (current.nameNormalized || normalizeText(current.name)) === (candidate.nameNormalized || normalizeText(candidate.name));
+  const sameCity = (current.cityNormalized || normalizeText(current.city)) === (candidate.cityNormalized || normalizeText(candidate.city));
+  if (sameName && sameCity && current.state === candidate.state) reasons.push("nome e cidade");
+  if (!reasons.length && search?.trim()) reasons.push("busca");
+  return reasons;
+};

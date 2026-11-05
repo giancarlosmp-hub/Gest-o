@@ -165,9 +165,68 @@ try {
 
   // O duplicado mesclado não pode ser reativado (regra existente).
   assert.match(ARCHIVED_DUPLICATE_REACTIVATION_MESSAGE, /duplicado/);
+
+  // --- GET /clients/:id/merge-candidates ---------------------------------------------------------------------
+  const lower = (value: unknown) => String(value ?? "").toLowerCase();
+  const fieldMatches = (value: unknown, condition: any): boolean => {
+    if (condition && typeof condition === "object") {
+      if ("not" in condition) return value !== condition.not;
+      if ("in" in condition) return condition.in.includes(value);
+      if ("equals" in condition) return lower(value) === lower(condition.equals);
+      if ("contains" in condition) return lower(value).includes(lower(condition.contains));
+    }
+    return value === condition;
+  };
+  const matches = (row: Row, where: Row): boolean => Object.entries(where).every(([key, condition]) =>
+    key === "OR" ? (condition as Row[]).some((part) => matches(row, part)) : fieldMatches(row[key], condition));
+  const summary = (row: Row) => ({ ...row, ownerSeller: { name: "Vendedor Ficticio" },
+    _count: { opportunities: row.id === "cand-doc" ? 3 : 0, timelineEvents: 0, activities: 0, contacts: 0, agendaEvents: 0, agendaStops: 0, communicationConversations: 0 } });
+  clients = [
+    client({ id: "atual", code: "82001", name: "Sitio Ficticio", nameNormalized: "sitio ficticio", city: "Cidade Ficticia", cityNormalized: "cidade ficticia", state: "PR",
+      cnpj: "202.303.404-50", cnpjNormalized: "20230340450", lastPurchaseDate: new Date("2026-08-01T00:00:00Z"), createdAt: new Date("2026-09-01T00:00:00Z") }),
+    // Documento gravado com máscara e sem cnpjNormalized (o índice único impede dois iguais normalizados).
+    client({ id: "cand-doc", code: "82002", name: "Outro Nome Ficticio", nameNormalized: "outro nome ficticio", city: "Outra Cidade", cityNormalized: "outra cidade", state: "SC",
+      cnpj: "202.303.404-50", cnpjNormalized: null, createdAt: new Date("2025-01-01T00:00:00Z") }),
+    client({ id: "cand-nome", code: "82003", name: "SITIO  FICTICIO", nameNormalized: "sitio ficticio", city: "Cidade Ficticia", cityNormalized: "cidade ficticia", state: "PR",
+      createdAt: new Date("2025-02-01T00:00:00Z") }),
+    client({ id: "mesmo-nome-outra-uf", code: "82004", name: "Sitio Ficticio", nameNormalized: "sitio ficticio", city: "Cidade Ficticia", cityNormalized: "cidade ficticia", state: "SC" }),
+    client({ id: "arquivado-doc", code: "82005__MERGED__1", cnpj: "20230340450", isArchived: true, archiveReason: "MERGED_INTO:x" }),
+    client({ id: "outro-tenant-doc", tenantId: "tenant-b", code: "82006", cnpj: "20230340450" }),
+    client({ id: "busca", code: "82007", name: "Chacara Ficticia", nameNormalized: "chacara ficticia", city: "Longe", cityNormalized: "longe", state: "MT" }),
+  ];
+  (prisma as any).client.findFirst = async ({ where }: any) => { const row = clients.find((c) => matches(c, where)); return row ? summary(row) : null; };
+  const findManyWheres: Row[] = [];
+  (prisma as any).client.findMany = async ({ where, take }: any) => {
+    findManyWheres.push(where);
+    return clients.filter((c) => matches(c, where)).sort((a, b) => (a.createdAt?.getTime?.() ?? 0) - (b.createdAt?.getTime?.() ?? 0)).slice(0, take).map(summary);
+  };
+
+  assert.equal((await call("seller-a", "GET", "/clients/atual/merge-candidates")).status, 403, "vendedor não vê candidatos");
+  assert.equal((await call("manager-a", "GET", "/clients/outro-tenant-doc/merge-candidates")).status, 404);
+  assert.equal((await call("manager-a", "GET", "/clients/arquivado-doc/merge-candidates")).status, 409);
+
+  const auto = await call("manager-a", "GET", "/clients/atual/merge-candidates");
+  assert.equal(auto.status, 200);
+  assert.equal(auto.json.current.id, "atual");
+  assert.equal(auto.json.current.code, "82001");
+  assert.equal(auto.json.current.document, "202.303.404-50");
+  assert.equal(auto.json.current.lastPurchaseDate, "2026-08-01T00:00:00.000Z");
+  assert.deepEqual(auto.json.candidates.map((c: Row) => c.id), ["cand-doc", "cand-nome"], "documento (com máscara) e nome + cidade/UF; sem arquivado, outro tenant ou outra UF");
+  assert.deepEqual(auto.json.candidates[0].matchReasons, ["documento"]);
+  assert.deepEqual(auto.json.candidates[1].matchReasons, ["nome e cidade"]);
+  assert.equal(auto.json.candidates[0].counts.opportunities, 3);
+  assert.equal(auto.json.candidates[0].city, "Outra Cidade");
+  assert.ok(findManyWheres.at(-1)!.tenantId === "tenant-a" && findManyWheres.at(-1)!.isArchived === false);
+
+  const manual = await call("director-a", "GET", "/clients/atual/merge-candidates?q=chacara");
+  assert.equal(manual.status, 200);
+  assert.deepEqual(manual.json.candidates.map((c: Row) => c.id), ["busca"]);
+  assert.deepEqual(manual.json.candidates[0].matchReasons, ["busca"]);
+  assert.deepEqual((await call("director-a", "GET", "/clients/atual/merge-candidates?q=82002")).json.candidates.map((c: Row) => c.id), ["cand-doc"], "busca por código");
+  assert.deepEqual((await call("director-a", "GET", "/clients/atual/merge-candidates?q=x")).json.candidates, [], "busca curta não consulta");
 } finally {
   server.close();
   await (prisma as any).$disconnect?.();
 }
 
-console.log("CLIENT_DUPLICATE_MERGE=PASS scope_tenant=PASS archived_409=PASS moves=PASS audit_stays=PASS document_released=PASS race_409=PASS");
+console.log("CLIENT_DUPLICATE_MERGE=PASS scope_tenant=PASS archived_409=PASS moves=PASS audit_stays=PASS document_released=PASS race_409=PASS candidates=PASS");
