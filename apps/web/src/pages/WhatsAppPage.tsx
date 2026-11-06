@@ -5,6 +5,7 @@ import { Copy, ExternalLink, MessageCircle, Search, Sparkles, Check } from "luci
 import api from "../lib/apiClient";
 import { AI_REQUEST_TIMEOUT_MS } from "../lib/aiRequest";
 import { buildWhatsAppUrl } from "../lib/whatsappLink";
+import MyWhatsAppNumberCard from "../components/whatsapp/MyWhatsAppNumberCard";
 
 type Client = {
   id: string;
@@ -123,6 +124,8 @@ export default function WhatsAppPage() {
         <h1 className="text-2xl font-bold text-slate-900">Assistente Comercial WhatsApp</h1>
         <p className="mt-1 text-sm text-slate-600">Gere, edite, copie e abra o WhatsApp. Nenhuma mensagem é enviada automaticamente.</p>
       </header>
+
+      <MyWhatsAppNumberCard />
 
       <div className="grid overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm md:grid-cols-[340px_1fr]">
         <aside className="border-r border-slate-200">
