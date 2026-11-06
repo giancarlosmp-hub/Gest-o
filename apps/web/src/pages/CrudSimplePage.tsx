@@ -21,6 +21,7 @@ import { getApiErrorMessage } from "../lib/apiError";
 import { portfolioStatusBadgeClass } from "../lib/portfolioStatusBadge";
 import { crudModalHeading } from "../lib/crudModalHeading";
 import { COLLECTION_URL_PARAM, EMPTY_CLIENT_QUICK_FILTERS, buildClientListParams, isCollectionFilterInUrl, ownerSellerIdFromUrl, withUrlFilters } from "../lib/clientListFilters";
+import { whatsappCanDisconnect, whatsappColumnLabel, type WhatsAppConnectionListItem } from "../lib/whatsappConnection";
 
 type CrudSimplePageProps = {
   endpoint: string;
@@ -277,6 +278,12 @@ export default function CrudSimplePage({
   const [items, setItems] = useState<ClientListItem[]>([]);
   const [users, setUsers] = useState<Array<{ id: string; name: string; role?: string }>>([]);
   const [erpSalesmen, setErpSalesmen] = useState<ErpSalesmanOption[]>([]);
+  // WhatsApp Fase A: status da conexão de cada usuário. A coluna só aparece com a integração ligada.
+  const [whatsappConnections, setWhatsappConnections] = useState<{ enabled: boolean; byUserId: Map<string, WhatsAppConnectionListItem> }>({
+    enabled: false,
+    byUserId: new Map()
+  });
+  const tableFields = fields.filter((field) => !field.formOnly && (field.key !== "whatsappConnection" || whatsappConnections.enabled));
   const [form, setForm] = useState<any>({});
   const [editing, setEditing] = useState<string | null>(null);
   const modalHeading = crudModalHeading(editing, {
@@ -356,12 +363,25 @@ export default function CrudSimplePage({
   const canChooseOwnerSeller = user?.role === "diretor" || user?.role === "gerente";
   const canShowArchived = isClientsPage && canManageArchivedClients(user?.role);
 
+  const loadWhatsappConnections = async () => {
+    try {
+      const response = await api.get<{ enabled?: boolean; data?: WhatsAppConnectionListItem[] }>("/whatsapp/connections");
+      setWhatsappConnections({
+        enabled: response.data?.enabled === true,
+        byUserId: new Map((response.data?.data ?? []).map((item) => [item.userId, item]))
+      });
+    } catch {
+      setWhatsappConnections({ enabled: false, byUserId: new Map() });
+    }
+  };
+
   const load = async () => {
     setLoading(true);
     setError(null);
     try {
       const response = await api.get(endpoint, isUsersPage ? { params: { status: userStatusFilter, includeLinks: true } } : undefined);
       setItems(Array.isArray(response.data) ? response.data : []);
+      if (isUsersPage) void loadWhatsappConnections();
     } catch (e: any) {
       setItems([]);
       setError(e.response?.data?.message || "Não foi possível carregar os dados.");
@@ -561,6 +581,9 @@ export default function CrudSimplePage({
     }
     if (isUsersPage && fieldKey === "erpLoginConfigured") {
       return item.erpLoginConfigured ? "Senha ERP configurada" : "Login FV3 pendente";
+    }
+    if (isUsersPage && fieldKey === "whatsappConnection") {
+      return whatsappColumnLabel(whatsappConnections.byUserId.get(String(item.id)));
     }
     if (isUsersPage && fieldKey === "phone") {
       return typeof item.phone === "string" && item.phone ? normalizeBrazilPhone(item.phone).display : "—";
@@ -1769,6 +1792,18 @@ export default function CrudSimplePage({
     }
   };
 
+  const disconnectUserWhatsapp = async (item: any) => {
+    if (!window.confirm(`Desconectar o WhatsApp de ${item.name}?`)) return;
+    try {
+      await api.delete(`/whatsapp/connections/${item.id}`);
+      toast.success("WhatsApp desconectado.");
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "Não foi possível desconectar o WhatsApp agora."));
+    } finally {
+      void loadWhatsappConnections();
+    }
+  };
+
   const onToggleUserActive = async (item: any, isActive: boolean) => {
     const message = isActive
       ? "Deseja reativar este usuário e permitir acesso ao CRM?"
@@ -2173,6 +2208,12 @@ export default function CrudSimplePage({
                         <dt className="text-slate-500">Região</dt>
                         <dd className="font-medium text-slate-800">{String(getCellValue(it, "region") || "-")}</dd>
                       </div>
+                      {whatsappConnections.enabled ? (
+                        <div className="col-span-2">
+                          <dt className="text-slate-500">WhatsApp</dt>
+                          <dd className="font-medium text-slate-800">{String(getCellValue(it, "whatsappConnection"))}</dd>
+                        </div>
+                      ) : null}
                     </dl>
                     {!readOnly ? (
                       <div className="mt-4 flex items-center justify-end gap-2" data-row-action-menu="true">
@@ -2190,6 +2231,9 @@ export default function CrudSimplePage({
                             <div className="absolute right-0 z-20 mt-1 min-w-48 rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
                               <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-brand-700 hover:bg-brand-50" onClick={() => { setOpenActionsMenuId(null); void testUserErpLogin(it); }}>Testar login FV3</button>
                               <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-sky-700 hover:bg-sky-50" onClick={() => void openUserErpDiagnostics(it)}>Diagnóstico ERP do vendedor</button>
+                              {whatsappConnections.enabled && whatsappCanDisconnect(whatsappConnections.byUserId.get(String(it.id))?.status) ? (
+                                <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-amber-700 hover:bg-amber-50" onClick={() => { setOpenActionsMenuId(null); void disconnectUserWhatsapp(it); }}>Desconectar WhatsApp</button>
+                              ) : null}
                               <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-100" onClick={() => { setOpenActionsMenuId(null); onEdit(it); }}>Editar</button>
                               {it.isActive === false ? (
                                 <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-emerald-700 hover:bg-emerald-50" onClick={() => { setOpenActionsMenuId(null); void onToggleUserActive(it, true); }} disabled={saving || deletingId === it.id}>Reativar</button>
@@ -2311,7 +2355,7 @@ export default function CrudSimplePage({
               <table className="min-w-[600px] w-full text-sm">
                 <thead>
                   <tr className="border-b border-slate-200 bg-brand-50 text-brand-800">
-                    {fields.filter((field) => !field.formOnly).map((f) => (
+                    {tableFields.map((f) => (
                       <th className="p-2 text-left" key={f.key}>
                         {f.tableLabel ?? f.label}
                       </th>
@@ -2326,7 +2370,7 @@ export default function CrudSimplePage({
                       className={`border-t border-slate-100 ${detailsPath ? "cursor-pointer hover:bg-slate-50" : ""}`}
                       onClick={(event) => onRowClick(event, it.id)}
                     >
-                      {fields.filter((field) => !field.formOnly).map((f) => (
+                      {tableFields.map((f) => (
                         <td key={f.key} className="p-2 text-slate-700">
                           {getCellValue(it, f.key)}
                           {isClientsPage && f.key === "name" ? renderArchiveBadge(it) : null}
@@ -2381,6 +2425,18 @@ export default function CrudSimplePage({
                                         >
                                           Diagnóstico ERP do vendedor
                                         </button>
+                                        {whatsappConnections.enabled && whatsappCanDisconnect(whatsappConnections.byUserId.get(String(it.id))?.status) ? (
+                                          <button
+                                            type="button"
+                                            className="block w-full px-3 py-1.5 text-left text-sm text-amber-700 hover:bg-amber-50"
+                                            onClick={() => {
+                                              setOpenActionsMenuId(null);
+                                              void disconnectUserWhatsapp(it);
+                                            }}
+                                          >
+                                            Desconectar WhatsApp
+                                          </button>
+                                        ) : null}
                                       </>
                                     ) : null}
                                     <button

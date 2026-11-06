@@ -124,6 +124,7 @@ model User {
   territoryCities            SellerTerritoryCity[]
   knowledgeDocuments         KnowledgeDocument[]
   tenantMemberships          TenantMembership[]
+  whatsAppConnection         WhatsAppConnection?
 }
 
 model Tenant {
@@ -959,4 +960,39 @@ model CommunicationWebhookEvent {
   @@index([tenantId])
   @@index([status, createdAt])
   @@index([payloadHash])
+}
+
+// WhatsApp Fase A: o número comercial de cada usuário conectado por QR (Evolution API).
+// Nenhuma mensagem é gravada aqui. O QR nunca é gravado.
+enum WhatsAppConnectionStatus {
+  PENDING_QR
+  CONNECTED
+  DISCONNECTED
+  REJECTED_WRONG_NUMBER
+  ERROR
+}
+
+model WhatsAppConnection {
+  id               String                   @id @default(cuid())
+  userId           String                   @unique
+  user             User                     @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  tenantId         String?                  @db.VarChar(64)
+  provider         String                   @default("evolution") @db.VarChar(32)
+  // Nome opaco da instância no Evolution: nunca telefone nem nome do usuário.
+  instanceName     String                   @unique @db.VarChar(64)
+  // Cópia do User.phone (55 + DDD + número) no início da conexão.
+  expectedPhone    String                   @db.VarChar(13)
+  // Só é gravado quando o número lido no QR é o User.phone.
+  connectedPhone   String?                  @db.VarChar(13)
+  status           WhatsAppConnectionStatus @default(PENDING_QR)
+  statusReason     String?                  @db.VarChar(64)
+  connectedAt      DateTime?
+  disconnectedAt   DateTime?
+  disconnectedById String?
+  lastSeenAt       DateTime?
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
+
+  @@index([status])
+  @@index([connectedPhone])
 }

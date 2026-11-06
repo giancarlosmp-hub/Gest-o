@@ -6,6 +6,19 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 export const migrations = Object.freeze({
+  "20261106120000_whatsapp_connection": Object.freeze({
+    id: "20261106120000_whatsapp_connection",
+    path: "apps/api/prisma/migrations/20261106120000_whatsapp_connection/migration.sql",
+    sha256: "74d424f4b23213bd07308f34a397e0a2b1d6b250e33761f17da6b031e69411fd",
+    objects: Object.freeze({
+      enums: Object.freeze(["WhatsAppConnectionStatus"]),
+      tables: Object.freeze(["WhatsAppConnection"]),
+      indexes: Object.freeze(["WhatsAppConnection_userId_key", "WhatsAppConnection_instanceName_key", "WhatsAppConnection_status_idx", "WhatsAppConnection_connectedPhone_idx"]),
+      foreignKeys: Object.freeze(["WhatsAppConnection_userId_fkey"])
+    }),
+    postconditions: Object.freeze(["existing-rows-preserved", "catalog-exact", "new-table-empty", "managed-diff-empty", "old-api-compatible"]),
+    evidenceVersion: 1
+  }),
   "20261105120000_user_phone": Object.freeze({
     id: "20261105120000_user_phone",
     path: "apps/api/prisma/migrations/20261105120000_user_phone/migration.sql",

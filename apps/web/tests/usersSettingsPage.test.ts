@@ -141,9 +141,11 @@ try {
     assert.deepEqual(props.fields, buildUserAdminFields(role), `${role}: tela usa buildUserAdminFields`);
     const columns = props.fields.filter((field: any) => !field.formOnly).map((field: any) => field.tableLabel ?? field.label);
     assert.deepEqual(columns, [
-      "Nome completo", "E-mail corporativo", "Perfil de acesso", "Região de atuação", "Celular / WhatsApp",
+      "Nome completo", "E-mail corporativo", "Perfil de acesso", "Região de atuação", "Celular / WhatsApp", "WhatsApp",
       "Vínculo ERP", "Login FV3 / CPF-CNPJ", "Login FV3 configurado", "Senha de acesso"
     ], `${role}: colunas da tabela`);
+    // A coluna WhatsApp é só de tabela: nunca vira campo do formulário.
+    assert.doesNotMatch(form, /WhatsApp conectado/, `${role}: status do WhatsApp fora do formulário`);
   }
 
   // 3) Vendedor não acessa Configurações.

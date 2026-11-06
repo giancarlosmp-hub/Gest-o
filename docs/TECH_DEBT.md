@@ -1604,6 +1604,21 @@ diretor e gerente. Pendente:
 - `GET /users` continua devolvendo `erpRawPayload` (usado pela tela de vínculo ERP) a diretor e gerente.
 - O envio do resumo diário por WhatsApp é tarefa futura; só o cadastro existe.
 
+### TD-WHATSAPP-EVOLUTION — WhatsApp Fase A (conexão por QR via Evolution API)
+
+**Aberto, médio.** Código da Fase A pronto e desligado por padrão
+([communications/whatsapp-evolution.md](communications/whatsapp-evolution.md)). Pendente antes de ligar:
+
+- Apply da migration `20261106120000_whatsapp_connection` pelo **Production Schema PR827**; o cutover fica
+  bloqueado até a evidência de schema.
+- Workflow aprovado para subir e consultar `docker-compose.whatsapp.yml` na VPS e checagem opcional no Drift
+  Detection (PR separada; mexe em `.github`). Hoje nada sobe o Evolution.
+- Env protegidos: `WHATSAPP_EVOLUTION_API_KEY` e `WHATSAPP_EVOLUTION_WEBHOOK_SECRET` no env da API e o env
+  próprio do compose do WhatsApp (`EVOLUTION_DB_PASSWORD` só letras e números).
+- Confirmar em execução: header do webhook chegando, healthcheck em `GET /` e caminho do volume de instâncias.
+- Risco aceito: API não oficial, o número pode ser banido. Sessão fora do backup: perdida, reconectar por QR.
+- Fases B (receber e vincular à linha do tempo), C (responder pelo CRM) e D (resumo diário) não começaram.
+
 ### TD-CLIENT-DELETE-MERGE — exclusão de cliente com histórico e duplicados do ERP
 
 **Aberto, médio.** A exclusão passou a bloquear com 409 e há "Mesclar duplicado" na tela do cliente. Pendente:

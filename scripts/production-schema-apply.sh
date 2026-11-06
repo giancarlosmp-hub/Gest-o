@@ -131,6 +131,12 @@ if [[ "$MIGRATION_ID_REQUESTED" == 20261105120000_user_phone ]]; then
   user_phone_state="$(admin_psql -Atc "$user_phone_column_sql")"
   [[ "$user_phone_state" == 0 || "$user_phone_state" == 1 ]] || die "migration celular do usuário em estado inesperado"
 fi
+whatsapp_connection_enum_sql="SELECT count(*) FROM pg_type WHERE typnamespace='public'::regnamespace AND typname='WhatsAppConnectionStatus'"
+whatsapp_connection_table_sql="SELECT count(*) FROM pg_class WHERE relnamespace='public'::regnamespace AND relkind='r' AND relname='WhatsAppConnection'"
+if [[ "$MIGRATION_ID_REQUESTED" == 20261106120000_whatsapp_connection ]]; then
+  whatsapp_connection_state="$(admin_psql -Atc "$whatsapp_connection_enum_sql"):$(admin_psql -Atc "$whatsapp_connection_table_sql")"
+  [[ "$whatsapp_connection_state" == 0:0 || "$whatsapp_connection_state" == 1:1 ]] || die "migration conexão WhatsApp parcialmente aplicada"
+fi
 
 # Repeat every mutable safety gate immediately before granting the migration its short-lived
 # administrative authority. The runtime URL remains in use for Prisma and incident reads.
@@ -153,6 +159,8 @@ elif [[ "$MIGRATION_ID_REQUESTED" == 20261103120000_opportunity_origin_agenda_st
   log "migration origem da oportunidade/índice de paradas já presente; DDL ignorado e pós-condições serão revalidadas"
 elif [[ "$MIGRATION_ID_REQUESTED" == 20261105120000_user_phone && "$user_phone_state" == 1 ]]; then
   log "migration celular do usuário já presente; DDL ignorado e pós-condições serão revalidadas"
+elif [[ "$MIGRATION_ID_REQUESTED" == 20261106120000_whatsapp_connection && "$whatsapp_connection_state" == 1:1 ]]; then
+  log "migration conexão WhatsApp já presente; DDL ignorado e pós-condições serão revalidadas"
 else
   log "aplicando migration versionada isoladamente; containers da aplicação não serão iniciados"
   admin_psql --single-transaction -f - < "$MIGRATION"
@@ -228,6 +236,19 @@ case "$MIGRATION_ID_REQUESTED" in
     touched_rows=$(admin_psql -Atc 'SELECT count(*) FROM "User" WHERE "phone" IS NOT NULL')
     [[ "$columns:$touched_rows" == 1:0 ]] || die "pós-condições da migration celular do usuário divergentes"
     printf 'columns_nullable\t%s\nrows_using_new_objects\t%s\nexisting_rows_preserved\tPASS\nold_api_compatible\tPASS\n' "$columns" "$touched_rows" >"$evidence/post-validation.tsv"
+    ;;
+  20261106120000_whatsapp_connection)
+    enum_labels=$(admin_psql -Atc "SELECT string_agg(e.enumlabel, ',' ORDER BY e.enumsortorder) FROM pg_enum e JOIN pg_type t ON t.oid=e.enumtypid WHERE t.typnamespace='public'::regnamespace AND t.typname='WhatsAppConnectionStatus'")
+    table=$(admin_psql -Atc "$whatsapp_connection_table_sql")
+    columns=$(admin_psql -Atc "SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='WhatsAppConnection'")
+    indexes=$(admin_psql -Atc "SELECT count(*) FROM pg_indexes WHERE schemaname='public' AND tablename='WhatsAppConnection' AND indexname IN ('WhatsAppConnection_pkey','WhatsAppConnection_userId_key','WhatsAppConnection_instanceName_key','WhatsAppConnection_status_idx','WhatsAppConnection_connectedPhone_idx')")
+    foreign_key=$(admin_psql -Atc "SELECT count(*) FROM pg_constraint WHERE connamespace='public'::regnamespace AND conname='WhatsAppConnection_userId_fkey' AND contype='f' AND confdeltype='c'")
+    # The running (old) API does not know the table, so any row would mean the migration
+    # itself wrote data. Race-free, unlike row counts of existing tables.
+    touched_rows=$(admin_psql -Atc 'SELECT count(*) FROM "WhatsAppConnection"')
+    [[ "$enum_labels" == PENDING_QR,CONNECTED,DISCONNECTED,REJECTED_WRONG_NUMBER,ERROR ]] || die "pós-condições da migration conexão WhatsApp divergentes (enum)"
+    [[ "$table:$columns:$indexes:$foreign_key:$touched_rows" == 1:15:5:1:0 ]] || die "pós-condições da migration conexão WhatsApp divergentes"
+    printf 'enum_labels\t%s\ntable\t%s\ncolumns\t%s\nindexes\t%s\nforeign_key\t%s\nrows_using_new_objects\t%s\nexisting_rows_preserved\tPASS\nold_api_compatible\tPASS\n' "$enum_labels" "$table" "$columns" "$indexes" "$foreign_key" "$touched_rows" >"$evidence/post-validation.tsv"
     ;;
   *) die "migration sem pós-condições cadastradas" ;;
 esac

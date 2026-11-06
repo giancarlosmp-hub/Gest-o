@@ -221,6 +221,27 @@ if (migrationId === "20261105120000_user_phone") {
   }
   process.exit(0);
 }
+if (migrationId === "20261106120000_whatsapp_connection") {
+  const migration = resolveMigration(migrationId);
+  // Empty diff means already applied (the runner proves the catalog). Otherwise the diff must
+  // be exactly the statements of the checksummed migration itself: enum, table, four indexes
+  // and the User foreign key. Anything missing, extra or different is drift.
+  if (statements.length === 0) process.exit(0);
+  const normalize = (statement) => statement.replace(/(?:"public"|public)\./g, "").replace(/\s+/g, " ").trim();
+  const migrationSql = readFileSync(migration.absolutePath, "utf8").replace(/^\s*--.*$/gm, "");
+  const expected = migrationSql.split(/;\s*/).map(normalize).filter(Boolean);
+  const remaining = new Set(expected);
+  for (const statement of statements) {
+    const normalized = normalize(statement);
+    if (!remaining.delete(normalized)) {
+      throw new Error(`unapproved or partially-compatible pre-apply drift: ${statement.slice(0, 180)}`);
+    }
+  }
+  if (remaining.size !== 0 || expected.length !== 7) {
+    throw new Error("unapproved or partially-compatible pre-apply drift: authorized WhatsAppConnection operation set is incomplete");
+  }
+  process.exit(0);
+}
 for (const statement of statements) {
   const allowed = new RegExp(`^CREATE TYPE "${enums}" AS ENUM`, "s").test(statement)
     || new RegExp(`^CREATE TABLE "${tables}" \\(`, "s").test(statement)

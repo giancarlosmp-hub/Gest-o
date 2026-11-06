@@ -14,8 +14,9 @@ sourceObs=apps/api/prisma/migrations/20260927160000_product_price_source_observa
 agendaSplit=apps/api/prisma/migrations/20261023120000_agenda_activity_planning_split/migration.sql
 opportunityOrigin=apps/api/prisma/migrations/20261103120000_opportunity_origin_agenda_stop_client_index/migration.sql
 userPhone=apps/api/prisma/migrations/20261105120000_user_phone/migration.sql
-mkdir -p "${legacy%/*}" "${pr827%/*}" "${orders%/*}" "${authority%/*}" "${sourceObs%/*}" "${agendaSplit%/*}" "${opportunityOrigin%/*}" "${userPhone%/*}"
-printf 'legacy\n' >"$legacy"; printf 'pr827\n' >"$pr827"; printf 'orders\n' >"$orders"; printf 'authority\n' >"$authority"; printf 'sourceObs\n' >"$sourceObs"; printf 'agendaSplit\n' >"$agendaSplit"; printf 'opportunityOrigin\n' >"$opportunityOrigin"; printf 'userPhone\n' >"$userPhone"
+whatsappConnection=apps/api/prisma/migrations/20261106120000_whatsapp_connection/migration.sql
+mkdir -p "${legacy%/*}" "${pr827%/*}" "${orders%/*}" "${authority%/*}" "${sourceObs%/*}" "${agendaSplit%/*}" "${opportunityOrigin%/*}" "${userPhone%/*}" "${whatsappConnection%/*}"
+printf 'legacy\n' >"$legacy"; printf 'pr827\n' >"$pr827"; printf 'orders\n' >"$orders"; printf 'authority\n' >"$authority"; printf 'sourceObs\n' >"$sourceObs"; printf 'agendaSplit\n' >"$agendaSplit"; printf 'opportunityOrigin\n' >"$opportunityOrigin"; printf 'userPhone\n' >"$userPhone"; printf 'whatsappConnection\n' >"$whatsappConnection"
 git add .; git commit -qm baseline; BASE=$(git rev-parse HEAD)
 # shellcheck source=scripts/schema-evidence-validation.sh
 source scripts/schema-evidence-validation.sh
@@ -105,6 +106,10 @@ printf 'ALTER TABLE "Opportunity" ADD COLUMN "origin" TEXT;\n' >"$dir/post-apply
 rm -rf "$TMP/evidence"; dir=$(make_bundle "$BASE" "$userPhone"); : >"$dir/post-apply-diff.sql"; chmod 600 "$dir/post-apply-diff.sql"
 validate_schema_evidence "$dir/applied.tsv" # User phone evidence valid
 printf 'ALTER TABLE "User" ADD COLUMN "phone" TEXT;\n' >"$dir/post-apply-diff.sql"; expect_reject "$dir" user_phone_with_post_diff
+
+rm -rf "$TMP/evidence"; dir=$(make_bundle "$BASE" "$whatsappConnection"); : >"$dir/post-apply-diff.sql"; chmod 600 "$dir/post-apply-diff.sql"
+validate_schema_evidence "$dir/applied.tsv" # WhatsApp connection evidence valid
+printf 'CREATE INDEX "WhatsAppConnection_status_idx" ON "WhatsAppConnection"("status");\n' >"$dir/post-apply-diff.sql"; expect_reject "$dir" whatsapp_connection_with_post_diff
 
 rm -rf "$TMP/evidence"; dir=$(make_bundle "$BASE" "$pr827")
 validate_schema_evidence "$dir/applied.tsv" # exact PR827 V1 valid without post-diff

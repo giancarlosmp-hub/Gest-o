@@ -1,0 +1,115 @@
+name: gest-o-whatsapp
+
+# WhatsApp Fase A: Evolution API (conexão por QR do número comercial de cada usuário) e o PostgreSQL
+# próprio dele. Projeto Compose separado de docker-compose.production.yml: deploy, cutover e rollback de
+# api/web nunca tocam este projeto, e este projeto nunca toca api, web nem o PostgreSQL do CRM.
+#
+# - Sem portas publicadas: só a API do CRM fala com o Evolution, pela rede gest-o_default.
+# - O banco do Evolution fica só na rede interna (internal: true), sem acesso de nenhum outro container.
+# - Imagens fixadas por digest. Atualizar = trocar tag e digest aqui, por PR.
+# - Nenhuma mensagem, contato, chat ou histórico é gravado no banco do Evolution; só a instância/sessão.
+# - Sessão fora do backup de propósito: perdê-la só exige ler o QR de novo.
+#
+# Segredos vêm de um arquivo de ambiente protegido (root:root, 600), nunca deste repositório:
+#   WHATSAPP_EVOLUTION_API_KEY  mesma chave configurada na API do CRM
+#   EVOLUTION_DB_PASSWORD       só letras e números (vai dentro da URL de conexão)
+# Subida em produção só pelo workflow aprovado (PR separada); nunca manualmente na VPS.
+
+x-whatsapp-logging: &whatsapp_logging
+  driver: json-file
+  options:
+    max-size: "25m"
+    max-file: "4"
+
+services:
+  evolution-api:
+    logging: *whatsapp_logging
+    # Evolution API v2.3.7 (última estável), digest do manifesto multi-arquitetura.
+    image: evoapicloud/evolution-api:v2.3.7@sha256:1bd8afc4a6cf48822e6cf02469aeae7bd35a12a6b616eacd1291926307f4d339
+    restart: unless-stopped
+    mem_limit: 768m
+    depends_on:
+      evolution-db:
+        condition: service_healthy
+    environment:
+      SERVER_TYPE: http
+      SERVER_PORT: "8080"
+      SERVER_URL: http://crm-evolution-api:8080
+      AUTHENTICATION_API_KEY: "${WHATSAPP_EVOLUTION_API_KEY:?WHATSAPP_EVOLUTION_API_KEY is required}"
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: "postgresql://evolution:${EVOLUTION_DB_PASSWORD:?EVOLUTION_DB_PASSWORD is required}@evolution-db:5432/evolution?schema=evolution_api"
+      DATABASE_CONNECTION_CLIENT_NAME: gest_o_whatsapp
+      # Só a instância (sessão) é gravada; mensagens, contatos, chats, etiquetas e histórico não.
+      DATABASE_SAVE_DATA_INSTANCE: "true"
+      DATABASE_SAVE_DATA_NEW_MESSAGE: "false"
+      DATABASE_SAVE_MESSAGE_UPDATE: "false"
+      DATABASE_SAVE_DATA_CONTACTS: "false"
+      DATABASE_SAVE_DATA_CHATS: "false"
+      DATABASE_SAVE_DATA_LABELS: "false"
+      DATABASE_SAVE_DATA_HISTORIC: "false"
+      DATABASE_SAVE_IS_ON_WHATSAPP: "false"
+      DATABASE_DELETE_MESSAGE: "false"
+      CACHE_REDIS_ENABLED: "false"
+      CACHE_LOCAL_ENABLED: "true"
+      # Webhook só por instância (criada pela API do CRM com eventos de conexão); nada global.
+      WEBHOOK_GLOBAL_ENABLED: "false"
+      WEBSOCKET_ENABLED: "false"
+      RABBITMQ_ENABLED: "false"
+      SQS_ENABLED: "false"
+      PROMETHEUS_METRICS: "false"
+      TELEMETRY_ENABLED: "false"
+      CONFIG_SESSION_PHONE_CLIENT: CRM
+      CONFIG_SESSION_PHONE_NAME: Chrome
+      QRCODE_LIMIT: "30"
+      DEL_INSTANCE: "false"
+      # Sem INFO: o aviso de conexão do Evolution traz o número e é registrado em INFO.
+      LOG_LEVEL: ERROR,WARN
+      LOG_COLOR: "false"
+      LOG_BAILEYS: error
+    volumes:
+      - evolution_instances:/evolution/instances
+    networks:
+      whatsapp_internal: {}
+      production:
+        aliases: [crm-evolution-api]
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:8080/',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 60s
+
+  evolution-db:
+    logging: *whatsapp_logging
+    image: postgres:16.15-alpine@sha256:aa6cb33cf4c19c765cefcf48d96176258800870a9a1e930ad126200f9d825139
+    restart: unless-stopped
+    mem_limit: 256m
+    command: ["postgres", "-c", "shared_buffers=64MB", "-c", "max_connections=30"]
+    environment:
+      POSTGRES_USER: evolution
+      POSTGRES_PASSWORD: "${EVOLUTION_DB_PASSWORD:?EVOLUTION_DB_PASSWORD is required}"
+      POSTGRES_DB: evolution
+    volumes:
+      - evolution_db:/var/lib/postgresql/data
+    networks:
+      whatsapp_internal: {}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U evolution -d evolution"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+networks:
+  # Só Evolution e o banco dele; sem saída para fora e sem nenhum container do CRM.
+  whatsapp_internal:
+    internal: true
+  # Rede do CRM: a API chama o Evolution por crm-evolution-api e o Evolution avisa a API por
+  # crm-api-internal. É também a saída do Evolution para os servidores do WhatsApp.
+  production:
+    external: true
+    name: gest-o_default
+
+volumes:
+  evolution_db:
+  evolution_instances:

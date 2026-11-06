@@ -98,5 +98,11 @@ export const env = {
   whatsappPhoneNumberId: cleanEnvString(process.env.WHATSAPP_PHONE_NUMBER_ID),
   whatsappBusinessAccountId: cleanEnvString(process.env.WHATSAPP_BUSINESS_ACCOUNT_ID),
   whatsappApiVersion: cleanEnvString(process.env.WHATSAPP_API_VERSION, "v20.0"),
-  communicationsWebhookRetentionDays: toNumber(process.env.COMMUNICATIONS_WEBHOOK_RETENTION_DAYS, 30)
+  communicationsWebhookRetentionDays: toNumber(process.env.COMMUNICATIONS_WEBHOOK_RETENTION_DAYS, 30),
+  // WhatsApp Fase A (Evolution API): conexão do número de cada usuário por QR. Ativo só com
+  // COMMUNICATIONS_ENABLED e WHATSAPP_EVOLUTION_ENABLED; sem chave e segredo, as rotas respondem 503.
+  whatsappEvolutionEnabled: toBoolean(process.env.WHATSAPP_EVOLUTION_ENABLED, false),
+  whatsappEvolutionBaseUrl: cleanEnvString(process.env.WHATSAPP_EVOLUTION_BASE_URL, "http://crm-evolution-api:8080"),
+  whatsappEvolutionApiKey: cleanEnvString(process.env.WHATSAPP_EVOLUTION_API_KEY),
+  whatsappEvolutionWebhookSecret: cleanEnvString(process.env.WHATSAPP_EVOLUTION_WEBHOOK_SECRET)
 };
