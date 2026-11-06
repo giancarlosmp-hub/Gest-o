@@ -211,4 +211,16 @@ expect_fail 'up unhealthy' 'não ficou healthy'
 ! grep -qE '(^| )(down|rm|volume|prune|restart|kill)( |$)|(^| )-v( |$)|--volumes|--force-recreate|--remove-orphans' "$FAKE_ALL_CALLS" || fail "comando proibido: $(cat "$FAKE_ALL_CALLS")"
 ! grep -q '^UNEXPECTED' "$FAKE_ALL_CALLS" || fail "chamada inesperada ao docker: $(grep '^UNEXPECTED' "$FAKE_ALL_CALLS")"
 
+# Workflow: só disparo manual na main, aprovação do production-cutover, fila do Deploy Production.
+WF="$ROOT/.github/workflows/whatsapp-evolution.yml"
+grep -qx '  workflow_dispatch:' "$WF" || fail 'workflow: workflow_dispatch'
+! grep -qE '^  (push|pull_request|pull_request_target|schedule|workflow_run|workflow_call):' "$WF" || fail 'workflow: só workflow_dispatch'
+grep -qx '        options: \[status, up, stop\]' "$WF" || fail 'workflow: ações status, up, stop'
+grep -qx "    if: github.ref == 'refs/heads/main'" "$WF" || fail 'workflow: só na main'
+grep -qx '    environment: production-cutover' "$WF" || fail 'workflow: environment production-cutover'
+grep -qx '  group: deploy-production' "$WF" || fail 'workflow: grupo deploy-production'
+grep -qx '  cancel-in-progress: false' "$WF" || fail 'workflow: cancel-in-progress false'
+! grep -q 'script_stop: true' "$WF" || fail 'workflow: sem script_stop'
+grep -q 'source: scripts/whatsapp-evolution-remote.sh,docker-compose.whatsapp.yml$' "$WF" || fail 'workflow: copia script e compose do commit'
+
 printf 'whatsapp-evolution-safety: OK\n'
