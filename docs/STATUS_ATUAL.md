@@ -1,3 +1,18 @@
+# WhatsApp Fase A: conexão dos números por QR (Evolution API) — código pronto, aguardando merge — 06/11/2026
+
+- Cada usuário conecta o número comercial de WhatsApp ao CRM pelo cartão **Meu número** em `/whatsapp`, lendo
+  um QR. Só fica conectado se o número lido for o `User.phone`; senão a instância é apagada e o número lido não
+  é gravado. Diretor e gerente veem o status de todos (coluna **WhatsApp** em Configurações → Usuários) e podem
+  desconectar. Nenhuma mensagem é lida, gravada ou enviada; não existe rota de envio.
+- Evolution API v2.3.7 e PostgreSQL próprio em `docker-compose.whatsapp.yml` (projeto separado, imagens por
+  digest, sem portas, memória limitada, mensagens/contatos/chats/histórico não gravados, sessão fora do backup).
+  `docker-compose.production.yml` ganhou só as 4 variáveis `WHATSAPP_EVOLUTION_*` e o alias `crm-api-internal`.
+- Webhook interno só de eventos de conexão, pelo alias interno, com segredo no header (`timingSafeEqual`) e
+  recusa de requisição que passou pelo proxy; o corpo nunca vai para log.
+- Migration `20261106120000_whatsapp_connection` (só aditiva), registrada no **Production Schema PR827**.
+- Desligado por padrão (`WHATSAPP_EVOLUTION_ENABLED=false`). Detalhes em
+  [communications/whatsapp-evolution.md](communications/whatsapp-evolution.md). Pendências em `TD-WHATSAPP-EVOLUTION`.
+
 # Erros async da API respondem na hora (sem 408) — código pronto, aguardando merge — 05/11/2026
 
 - Express 4 não repassava a rejeição de handler async ao handler de erro: a requisição ficava pendurada até o
