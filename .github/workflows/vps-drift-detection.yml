@@ -101,6 +101,40 @@ jobs:
               printf '\nLimpeza manual: DEPLOY_GUIDE "Limpeza manual de disco na VPS".\n\n' >&2
             fi
 
+            # WhatsApp (Evolution, projeto gest-o-whatsapp): opcional e somente leitura; do env só se testa
+            # a existência. Env ausente = [INFO]; parado ou ausente = [WARN] sem reprovar; rodando sem
+            # healthy ou com porta publicada = [CRITICAL].
+            whatsapp_env=/root/demetra-env/whatsapp.env
+            has_whatsapp_failure=false
+            if [[ ! -e "$whatsapp_env" ]]; then
+              printf '[INFO] WhatsApp (Evolution) não instalado: env protegido ausente.\n'
+            fi
+            if [[ -e "$whatsapp_env" ]]; then
+              for whatsapp_service in evolution-api evolution-db; do
+                whatsapp_cid="$(docker ps -aq --filter label=com.docker.compose.project=gest-o-whatsapp --filter "label=com.docker.compose.service=${whatsapp_service}" 2>/dev/null | head -n 1 || true)"
+                whatsapp_state=ausente
+                whatsapp_health=""
+                whatsapp_ports=""
+                if [[ -n "$whatsapp_cid" ]]; then
+                  whatsapp_state="$(docker inspect -f '{{.State.Status}}' "$whatsapp_cid" 2>/dev/null || echo ausente)"
+                  whatsapp_health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$whatsapp_cid" 2>/dev/null || true)"
+                  whatsapp_ports="$(docker inspect -f '{{range $p, $b := .HostConfig.PortBindings}}{{$p}} {{end}}{{range $p, $b := .NetworkSettings.Ports}}{{range $b}}{{$p}}->{{.HostPort}} {{end}}{{end}}' "$whatsapp_cid" 2>/dev/null || true)"
+                fi
+                printf 'WhatsApp %s: %s %s\n' "$whatsapp_service" "$whatsapp_state" "$whatsapp_health"
+                if [[ -n "$whatsapp_ports" ]]; then
+                  printf '[CRITICAL] WhatsApp %s com porta publicada: %s\n' "$whatsapp_service" "$whatsapp_ports" >&2
+                  has_whatsapp_failure=true
+                fi
+                if [[ "$whatsapp_state" == running && "$whatsapp_health" != healthy ]]; then
+                  printf '[CRITICAL] WhatsApp %s rodando sem healthy (%s).\n' "$whatsapp_service" "${whatsapp_health:-sem healthcheck}" >&2
+                  has_whatsapp_failure=true
+                fi
+                if [[ "$whatsapp_state" != running ]]; then
+                  printf '[WARN] WhatsApp %s não está rodando (%s). Para subir: workflow WhatsApp Evolution com up.\n' "$whatsapp_service" "$whatsapp_state"
+                fi
+              done
+            fi
+
             if [[ "$has_dirty_worktree" == true || "$has_health_failure" == true || "$has_deployed_drift" == true || "$has_unmerged_production" == true ]]; then
               printf '[CRITICAL] Drift detectado na VPS em /apps/gest-o!\n\n' >&2
               if [[ "$has_dirty_worktree" == true ]]; then
@@ -124,6 +158,7 @@ jobs:
               exit 1
             fi
             if [[ "$has_disk_full" == true ]]; then exit 1; fi
+            if [[ "$has_whatsapp_failure" == true ]]; then exit 1; fi
 
             # HEAD igual à produção: main à frente (merges ainda sem deploy) não é drift.
             if [[ "$local_sha" != "$remote_sha" ]]; then
