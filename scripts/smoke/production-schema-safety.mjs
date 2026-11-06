@@ -87,6 +87,10 @@ const userPhoneSql = readFileSync(resolve(root, "apps/api/prisma/migrations/2026
 const userPhonePreview = runPreview(userPhoneSql);
 assert.equal(userPhonePreview.status, 0, `User phone migration must pass the preview validator: ${userPhonePreview.stdout}${userPhonePreview.stderr}`);
 assert.match(userPhonePreview.stdout, /RESUMO aditivas=1 destrutivas=0 bloqueadas=0/);
+const whatsappConnectionSql = readFileSync(resolve(root, "apps/api/prisma/migrations/20261106120000_whatsapp_connection/migration.sql"), "utf8");
+const whatsappConnectionPreview = runPreview(whatsappConnectionSql);
+assert.equal(whatsappConnectionPreview.status, 0, `WhatsApp connection migration must pass the preview validator: ${whatsappConnectionPreview.stdout}${whatsappConnectionPreview.stderr}`);
+assert.match(whatsappConnectionPreview.stdout, /RESUMO aditivas=7 destrutivas=0 bloqueadas=0/);
 for (const [name, sql] of [
   ["enum value rename", `ALTER TYPE "AgendaEventStatus" RENAME VALUE 'vencido' TO 'cancelado';\n`],
   ["enum value drop", `ALTER TYPE "AgendaEventStatus" DROP VALUE 'vencido';\n`],
@@ -260,6 +264,11 @@ assert.equal(userPhoneEntry.status, 0, userPhoneEntry.stderr);
 assert.equal(JSON.parse(userPhoneEntry.stdout).sha256, "23b6386426c7def0eae9705a057a1692356b616b9494457afb067e821fc399bb");
 assert.doesNotMatch(userPhoneSql, /\b(UPDATE|DELETE|INSERT|DROP|RENAME|TRUNCATE|CONCURRENTLY|UNIQUE|INDEX)\b|NOT NULL|DEFAULT/i, "User phone migration must only add a nullable column");
 assert.equal(userPhoneSql.match(/IF NOT EXISTS/g)?.length, 1, "User phone migration must be idempotent");
+const whatsappConnectionEntry = spawnSync("node", [registry, "20261106120000_whatsapp_connection"], { cwd: root, encoding: "utf8" });
+assert.equal(whatsappConnectionEntry.status, 0, whatsappConnectionEntry.stderr);
+assert.equal(JSON.parse(whatsappConnectionEntry.stdout).sha256, "74d424f4b23213bd07308f34a397e0a2b1d6b250e33761f17da6b031e69411fd");
+assert.doesNotMatch(whatsappConnectionSql.replace(/ON (DELETE|UPDATE) CASCADE/g, "ON_FK_ACTION"), /\b(UPDATE|DELETE|INSERT|DROP|RENAME|TRUNCATE|CONCURRENTLY|ALTER TYPE|ALTER COLUMN|ADD COLUMN)\b/i, "WhatsApp connection migration must only create a new enum, table, indexes and its foreign key");
+assert.equal(whatsappConnectionSql.match(/^(CREATE|ALTER) /gm)?.length, 7, "WhatsApp connection migration has exactly seven statements");
 
 const apply = readFileSync(resolve(root, "scripts/production-schema-apply.sh"), "utf8");
 const productPricePostgres = readFileSync(resolve(root, "scripts/smoke/product-price-authority-migration-postgres.sh"), "utf8");
@@ -274,6 +283,8 @@ for (const opportunityOriginPostcondition of ["migration origem da oportunidade/
 assert.match(apply, /opportunity_origin_state" == 1:1 \]\]; then\n  log "migration origem da oportunidade\/índice de paradas já presente; DDL ignorado[\s\S]*else[\s\S]*admin_psql --single-transaction/, "already-applied Opportunity origin path must not repeat DDL");
 for (const userPhonePostcondition of ["migration celular do usuário em estado inesperado", "user_phone_state\" == 0 ||", "user_phone_state\" == 1 ]]", "migration celular do usuário já presente; DDL ignorado", "table_name='User' AND column_name='phone'", "WHERE \"phone\" IS NOT NULL", "1:0 ]]"]) assert.ok(apply.includes(userPhonePostcondition), `missing User phone postcondition ${userPhonePostcondition}`);
 assert.match(apply, /user_phone_state" == 1 \]\]; then\n  log "migration celular do usuário já presente; DDL ignorado[\s\S]*else[\s\S]*admin_psql --single-transaction/, "already-applied User phone path must not repeat DDL");
+for (const whatsappConnectionPostcondition of ["migration conexão WhatsApp parcialmente aplicada", "whatsapp_connection_state\" == 0:0", "whatsapp_connection_state\" == 1:1", "migration conexão WhatsApp já presente; DDL ignorado", "PENDING_QR,CONNECTED,DISCONNECTED,REJECTED_WRONG_NUMBER,ERROR", "confdeltype='c'", "SELECT count(*) FROM \"WhatsAppConnection\"", "1:15:5:1:0"]) assert.ok(apply.includes(whatsappConnectionPostcondition), `missing WhatsApp connection postcondition ${whatsappConnectionPostcondition}`);
+assert.match(apply, /whatsapp_connection_state" == 1:1 \]\]; then\n  log "migration conexão WhatsApp já presente; DDL ignorado[\s\S]*else[\s\S]*admin_psql --single-transaction/, "already-applied WhatsApp connection path must not repeat DDL");
 assert.match(apply, /production-schema-migrations\.mjs "\$MIGRATION_ID_REQUESTED"/);
 for (const ordersPostcondition of ["orders-counts.before.tsv", "tenant_not_null", "tenant_nulls", "ErpOperationalOrderStatus", "ErpRequestAuthorizationStatus", "ErpOrderSync_tenantId_fkey", "ErpOrderSync_tenantId_createdAt_idx", "ErpOrderSync_tenantId_sellerId_createdAt_idx", "ErpOrderStatusHistory", "ErpOrderStatusHistory_erpOrderSyncId_fkey", "ErpOrderStatusHistory_opportunityId_fkey", "ErpOrderStatusHistory_erpOrderSyncId_occurredAt_idx", "ErpOrderStatusHistory_opportunityId_occurredAt_idx", "migration-backfill"]) assert.ok(apply.includes(ordersPostcondition), `missing Orders postcondition ${ordersPostcondition}`);
 assert.match(apply, /20260731150000_safe_production_schema_transition\)[\s\S]*required_tables/, "the historical migration must retain its dedicated postconditions");
@@ -594,6 +605,30 @@ assertUserPhoneDiff("unexpected extra column", `${userPhoneFullDiff}ALTER TABLE 
 assertUserPhoneDiff("unexpected index", `${userPhoneFullDiff}CREATE INDEX "User_phone_idx" ON "User"("phone");\n`, false);
 assertUserPhoneDiff("column type change", `${userPhoneFullDiff}ALTER TABLE "User" ALTER COLUMN "region" SET DATA TYPE VARCHAR(10);\n`, false);
 assertUserPhoneDiff("duplicated column", `${userPhoneFullDiff}${userPhoneColumnLine}\n`, false);
+
+function assertWhatsappConnectionDiff(name, sql, accepted) {
+  const testDir = mkdtempSync(resolve(tmpdir(), "gesto-whatsapp-connection-diff-"));
+  const input = resolve(testDir, "input.sql");
+  const output = resolve(testDir, "output.sql");
+  writeFileSync(input, sql);
+  const result = spawnSync("node", [resolve(root, "scripts/schema-diff-filter.mjs"), input, output, "pre", "20261106120000_whatsapp_connection"], { encoding: "utf8" });
+  rmSync(testDir, { recursive: true });
+  assert.equal(result.status === 0, accepted, `${name}: ${result.stdout}${result.stderr}`);
+}
+// What `prisma migrate diff` emits for this migration against the previous schema is the migration
+// itself (minus its header comment), so the full diff is the checksummed file.
+const whatsappConnectionFullDiff = whatsappConnectionSql;
+const whatsappConnectionIndexLine = `CREATE INDEX "WhatsAppConnection_status_idx" ON "WhatsAppConnection"("status");`;
+assertWhatsappConnectionDiff("complete WhatsApp connection diff", whatsappConnectionFullDiff, true);
+assertWhatsappConnectionDiff("already applied (empty diff)", "", true);
+assertWhatsappConnectionDiff("public-qualified identifiers", whatsappConnectionFullDiff.replace(/ON "WhatsAppConnection"/g, 'ON "public"."WhatsAppConnection"'), true);
+assertWhatsappConnectionDiff("missing index (partial)", whatsappConnectionFullDiff.replace(whatsappConnectionIndexLine, ""), false);
+assertWhatsappConnectionDiff("table only, enum already present (partial)", whatsappConnectionFullDiff.replace(/CREATE TYPE[^;]+;/, ""), false);
+assertWhatsappConnectionDiff("duplicated index", `${whatsappConnectionFullDiff}${whatsappConnectionIndexLine}\n`, false);
+assertWhatsappConnectionDiff("unexpected extra column", `${whatsappConnectionFullDiff}ALTER TABLE "User" ADD COLUMN "unexpected" TEXT;\n`, false);
+assertWhatsappConnectionDiff("changed column type", whatsappConnectionFullDiff.replace('"expectedPhone" VARCHAR(13) NOT NULL', '"expectedPhone" TEXT NOT NULL'), false);
+assertWhatsappConnectionDiff("foreign key without cascade", whatsappConnectionFullDiff.replace("ON DELETE CASCADE", "ON DELETE RESTRICT"), false);
+assertWhatsappConnectionDiff("unrelated drift", `${whatsappConnectionFullDiff}ALTER TABLE "User" ALTER COLUMN "region" SET DATA TYPE VARCHAR(10);\n`, false);
 const bootstrap = readFileSync(resolve(root, "apps/api/src/scripts/bootstrap.ts"), "utf8");
 assert.match(bootstrap, /type DatabaseSchemaMode = "external" \| "ephemeral-push"/);
 assert.match(bootstrap, /if \(value === "external" \|\| value === "ephemeral-push"\) return value/);
