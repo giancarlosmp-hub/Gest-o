@@ -29,6 +29,8 @@ export function buildUserAdminFields(viewerRole: UserRole | undefined): UserAdmi
     },
     { key: "region", label: "Região de atuação", placeholder: "Informe a região de atuação" },
     { key: "phone", label: "Celular / WhatsApp", type: "tel", placeholder: "(DDD) 9XXXX-XXXX" },
+    // Status da conexão do WhatsApp por QR (Fase A); a coluna só aparece com a integração ligada.
+    { key: "whatsappConnection", label: "WhatsApp conectado", tableLabel: "WhatsApp", tableOnly: true },
     {
       key: "erpCode",
       label: "Vendedor/operador ERP",
