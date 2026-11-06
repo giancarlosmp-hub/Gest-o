@@ -1608,8 +1608,10 @@ diretor e gerente. Pendente:
 
 **Aberto, médio.** A exclusão passou a bloquear com 409 e há "Mesclar duplicado" na tela do cliente. Pendente:
 
-- Rotas async da API sem repasse de erro (Express 4 sem wrapper): qualquer erro não tratado vira 408 depois de
-  15 s em vez de 500. Corrigir de forma global em PR próprio.
+- ~~Rotas async da API sem repasse de erro (Express 4 sem wrapper): qualquer erro não tratado vira 408 depois de
+  15 s em vez de 500.~~ Resolvido: `createAsyncRouter` + mapeamento no handler final (ver STATUS_ATUAL).
+  Restante: `router.route(path)` não é embrulhado (nenhuma rota usa hoje); o ramo de pedido ERP do handler final
+  ainda devolve `err.message` no payload controlado.
 - "Arquivar" manual de cliente não existe; o 409 da exclusão cita só "Mesclar duplicado".
 - A sincronização não arquiva parceiro que saiu do ERP: um duplicado que ficou com o documento bloqueia o código
   antigo (ambíguo) até alguém mesclar.

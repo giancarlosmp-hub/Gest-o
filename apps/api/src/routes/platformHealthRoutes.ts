@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { createAsyncRouter } from "../utils/asyncRouter.js";
 import { z } from "zod";
 import { prisma } from "../config/prisma.js";
 import { authMiddleware } from "../middlewares/auth.js";
@@ -7,7 +7,7 @@ import { getPlatformHealthSnapshot, PLATFORM_HEALTH_ROLES } from "../services/pl
 import { collectPlatformHealthHttp, projectAuditDataState } from "../services/platformHealthProjection.js";
 import { brazilDayRange } from "../utils/dateRange.js";
 
-const router = Router(); router.use(authMiddleware, appUsageRateLimit);
+const router = createAsyncRouter(); router.use(authMiddleware, appUsageRateLimit);
 router.use((req, res, next) => PLATFORM_HEALTH_ROLES.has(String(req.user?.role).toLowerCase()) ? next() : res.status(403).json({ message: "Sem permissão para Saúde da Plataforma" }));
 router.get("/snapshot", async (req, res) => { const days = z.coerce.number().pipe(z.union([z.literal(7), z.literal(30), z.literal(90)])).catch(7).parse(req.query.days); const result = await collectPlatformHealthHttp(() => getPlatformHealthSnapshot(days, req.query.refresh === "true")); res.status(result.status).json(result.body); });
 const auditQuery = z.object({ page: z.coerce.number().int().min(1).default(1), pageSize: z.coerce.number().int().min(1).max(100).default(25), client: z.string().trim().optional(), user: z.string().trim().optional(), origin: z.string().trim().optional(), partnerErp: z.string().trim().optional(), requestId: z.string().trim().optional(), from: z.string().trim().max(40).optional().refine((value) => !value || brazilDayRange(value), "Data inválida"), to: z.string().trim().max(40).optional().refine((value) => !value || brazilDayRange(undefined, value), "Data inválida"), export: z.enum(["csv"]).optional() });

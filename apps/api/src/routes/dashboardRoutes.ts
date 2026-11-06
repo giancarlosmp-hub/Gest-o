@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { createAsyncRouter } from "../utils/asyncRouter.js";
 import { isVisibleInRanking, rankingSellerName, type AbcClass, type PortfolioStatus } from "@salesforce-pro/shared";
 import { prisma } from "../config/prisma.js";
 import { authMiddleware } from "../middlewares/auth.js";
@@ -10,7 +10,7 @@ import { loadLastSentCrmOrderByClient, portfolioStatusOf } from "../services/cli
 import { brazilDayKeyOf, brazilDayRange, brazilTodayKey, calendarDayRange, monthDayBounds } from "../utils/dateRange.js";
 import { closedOpportunityPeriodWhere } from "../utils/periodFilters.js";
 
-const router = Router();
+const router = createAsyncRouter();
 router.use(authMiddleware);
 router.use(appUsageRateLimit);
 

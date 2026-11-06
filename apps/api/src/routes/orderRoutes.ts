@@ -1,4 +1,5 @@
-import { Router, type Request } from "express";
+import { type Request } from "express";
+import { createAsyncRouter } from "../utils/asyncRouter.js";
 import { randomUUID } from "node:crypto";
 import { ErpOrderSyncStatus, Prisma } from "@prisma/client";
 import { z } from "zod";
@@ -9,7 +10,7 @@ import { sanitizeErpOrderErrorMessage, syncErpOrderStatuses } from "../services/
 import { array, first, nullableNumber, number, object, responseRoot, serializeOrderAttempt as serialize, summarizeOrders, text } from "../services/orderStatusProjection.js";
 import { brazilDayRange } from "../utils/dateRange.js";
 
-const router = Router();
+const router = createAsyncRouter();
 router.use(authMiddleware, appUsageRateLimit);
 
 const querySchema = z.object({

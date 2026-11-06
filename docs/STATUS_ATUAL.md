@@ -1,3 +1,20 @@
+# Erros async da API respondem na hora (sem 408) — código pronto, aguardando merge — 05/11/2026
+
+- Express 4 não repassava a rejeição de handler async ao handler de erro: a requisição ficava pendurada até o
+  timeout de 15 s e respondia 408. Os 10 routers da API passam a nascer de `createAsyncRouter()`
+  (`apps/api/src/utils/asyncRouter.ts`), que embrulha os handlers de `get/post/.../use` e manda a rejeição para
+  `next(err)`. Aridade 4 dos handlers de erro preservada; sub-routers e retorno síncrono intactos. Sem dependência
+  nova. Teste estático impede `Router()` direto em `routes/`.
+- Ramo genérico do handler final (`resolveApiErrorResponse`, `apps/api/src/utils/apiErrorResponse.ts`): P2002 e
+  P2003 → 409, P2025 → 404, `ZodError` → 400, 4xx do body-parser (JSON malformado, 413, 415) → o próprio status;
+  o resto, inclusive `PrismaClientValidationError`, → 500 "Erro interno. Informe o código <requestId> ao suporte."
+  com `requestId`, sem stack nem detalhe interno. Log completo continua no servidor. Ramos ERP e webhook intactos.
+- Erro depois de a resposta já ter saído só vai para o log (`responseAlreadySent`), sem derrubar a conexão.
+- Timeout inalterado: requisição realmente lenta segue 408 (504 no pedido ERP).
+- O web já mostra `response.data.message` (`getApiErrorMessage`, `CrudSimplePage`), então as mensagens novas
+  aparecem sem mudança no web.
+- Testes com dados fictícios encadeados no `test:route-authorization` (já roda no CI). Sem migration.
+
 # Exclusão de cliente com histórico e "Mesclar duplicado" — código pronto, aguardando merge — 05/11/2026
 
 - Excluir cliente falhava com mensagem genérica ou 408: `DELETE /clients/:id` apagava o histórico em cascata e o

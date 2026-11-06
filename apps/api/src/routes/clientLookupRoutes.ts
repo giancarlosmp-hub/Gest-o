@@ -1,11 +1,11 @@
-import { Router } from "express";
+import { createAsyncRouter } from "../utils/asyncRouter.js";
 import { env } from "../config/env.js";
 import { authMiddleware } from "../middlewares/auth.js";
 import { appUsageRateLimit } from "../middlewares/rateLimit.js";
 import { CnpjLookupError, cnpjLookupService } from "../services/cnpjLookupService.js";
 import { parseCnpj } from "../utils/cnpj.js";
 
-const router = Router();
+const router = createAsyncRouter();
 
 router.use(authMiddleware);
 router.use(appUsageRateLimit);

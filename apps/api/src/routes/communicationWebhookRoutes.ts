@@ -1,9 +1,10 @@
 import express from "express";
+import { createAsyncRouter } from "../utils/asyncRouter.js";
 import { env } from "../config/env.js";
 import { communicationIntegrationService } from "../services/communications/communicationIntegrationService.js";
 import { communicationsWebhookRateLimit } from "../middlewares/rateLimit.js";
 
-export const communicationWebhookRoutes = express.Router();
+export const communicationWebhookRoutes = createAsyncRouter();
 
 communicationWebhookRoutes.get("/meta-whatsapp", communicationsWebhookRateLimit, (req, res) => {
   const result = communicationIntegrationService.getProvider().verifyChallenge(req.query, env.whatsappWebhookVerifyToken);
