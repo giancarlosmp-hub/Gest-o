@@ -121,8 +121,71 @@ Compose do WhatsApp (env protegido próprio): `WHATSAPP_EVOLUTION_API_KEY` (a me
 - **Container fora do ar:** só as rotas `/whatsapp/*` respondem 503 e o cartão avisa; o CRM segue normal.
 - **Sessão perdida** (volume perdido, aparelho removido em "Aparelhos conectados", celular muito tempo
   offline): status `DISCONNECTED`; ler o QR de novo.
-- **Subir em produção:** só por workflow aprovado, em PR separada (ainda não existe). Antes de ligar a flag:
-  migration aplicada com evidência, env protegidos criados, `docker compose -f docker-compose.whatsapp.yml`
-  saudável e um teste de ponta a ponta em homologação.
-- **A confirmar ao subir:** o header do webhook chegando de fato (confirmado no código da v2.3.7, não em
-  execução), o healthcheck em `GET /` respondendo 200 e o caminho do volume `/evolution/instances`.
+- **Rede compartilhada:** o Evolution está na `gest-o_default`, a mesma do PostgreSQL do CRM (sem as
+  credenciais dele). Registrado em `TD-WHATSAPP-EVOLUTION`.
+
+## Subir e ligar em produção
+
+Só pelo workflow **WhatsApp Evolution** (`.github/workflows/whatsapp-evolution.yml`), disparado na `main`, com
+aprovação do environment `production-cutover` e no mesmo grupo de concorrência do Deploy Production (nunca
+roda junto com build ou cutover). O workflow copia `scripts/whatsapp-evolution-remote.sh` e
+`docker-compose.whatsapp.yml` do próprio commit para uma pasta temporária da VPS; a worktree `/apps/gest-o` não
+é usada nem alterada. Nunca subir à mão na VPS.
+
+| Ação | O que faz |
+|---|---|
+| `status` | Só leitura: env protegido (só metadados), estado e health, imagem em execução × digest declarado, redes e alias, portas publicadas (precisa ser nenhuma), limite e uso de memória, volumes e destino, nº de entradas em `/evolution/instances`, código HTTP de `GET http://crm-evolution-api:8080/` visto de dentro da API e contagem por código de `POST /webhooks/communications/evolution` no log da API (7 dias). Parado ou ausente = `NOT_RUNNING` (sucesso); qualquer problema = falha. |
+| `up` | Confere os dois env protegidos (arquivo comum, `root:root`, `600`), os segredos presentes (abaixo) e a chave do Evolution **igual** no `.env` e no `whatsapp.env` (compara hash; imprime só `iguais`/`diferentes`, diferente = falha). Confere que as imagens têm digest exato e que o compose renderizado bate com elas. Faz `pull` e `up -d --no-build --pull never --wait` só do projeto `gest-o-whatsapp`, confere que api, web e db do CRM não mudaram (id, início, imagem, reinícios) e roda as checagens do `status`. |
+| `stop` | `docker stop` dos dois containers (a API do Evolution antes do banco). Não remove container, volume nem rede: a sessão fica e o `up` seguinte volta sem QR. |
+
+Não há `down` nem nada que apague volume.
+
+### Segredos
+
+| Arquivo (`root:root`, `600`) | Variável | Regra |
+|---|---|---|
+| `/root/demetra-env/.env` (API) | `COMMUNICATIONS_ENABLED`, `WHATSAPP_EVOLUTION_ENABLED` | `true` para ligar |
+| | `WHATSAPP_EVOLUTION_API_KEY` | ≥ 32 caracteres; a mesma do `whatsapp.env` |
+| | `WHATSAPP_EVOLUTION_WEBHOOK_SECRET` | ≥ 32 caracteres |
+| `/root/demetra-env/whatsapp.env` | `WHATSAPP_EVOLUTION_API_KEY` | a mesma do `.env` |
+| | `EVOLUTION_DB_PASSWORD` | ≥ 24 caracteres, só letras e números |
+
+`WHATSAPP_INTEGRATION_ENABLED` (Meta) continua `false`: `COMMUNICATIONS_ENABLED=true` sozinho não liga a
+Meta, que exige as duas flags. Valores gerados na VPS (por exemplo `openssl rand -hex 32`; hex atende à regra
+da senha), nunca neste repositório, em PR ou em log. `scripts/backup-production-env.sh` copia o `whatsapp.env`
+junto com o `.env` (`backups/whatsapp-env-<data>.backup`, `600`); `scripts/restore-production-env.sh` recusa
+esse backup no lugar do `.env`. Restaurar o do WhatsApp: `install -m 600 <backup> /root/demetra-env/whatsapp.env`.
+Perder `EVOLUTION_DB_PASSWORD` depois do primeiro `up` impede o Evolution de abrir o próprio banco.
+
+### Ordem de ativação
+
+1. Merge do PR do workflow.
+2. Criar os segredos acima, com as flags já em `true` no `.env` da API (a API só lê o env ao ser recriada, no
+   cutover do passo 5) e o `whatsapp.env` novo. Rodar o backup do env.
+3. Workflow **WhatsApp Evolution** com `up`.
+4. Workflow com `status`: tudo `healthy`, `portas_publicadas=nenhuma`, imagens `CONFERE`, `GET … pela API: 200`.
+5. **Deploy Production** `phase=build` e depois `phase=cutover` do SHA do merge. O cutover recria a API com o
+   `.env` novo (`docker restart` não basta: o env é lido na criação do container). O build recusa um SHA que a
+   produção já roda, por isso a troca de flag vai junto com o deploy de um SHA novo.
+6. Teste de ponta a ponta (abaixo).
+
+### Desligar
+
+- **Rápido:** workflow com `stop`. As rotas `/whatsapp/*` respondem 503 (`evolution_unavailable`), o cartão
+  avisa e o resto do CRM segue normal. O Drift passa a mostrar `[WARN]` (sem reprovar) até o próximo `up`.
+- **Definitivo:** flags em `false` no `.env` da API e deploy (build + cutover) de um SHA novo.
+
+### Confirmar depois da subida
+
+- **Healthcheck em `GET /`:** `status` mostra o health e `GET http://crm-evolution-api:8080/ pela API: <código>`.
+  Se ficar `unhealthy` porque `GET /` não devolve 200, corrigir o healthcheck no compose por PR.
+- **Volume `/evolution/instances`:** `status` mostra o destino da montagem e o nº de entradas (só a contagem).
+  Prova decisiva: com um número de teste conectado, `stop` e depois `up`; o usuário precisa continuar
+  `CONNECTED` sem novo QR. Com `DATABASE_SAVE_DATA_INSTANCE=true` a sessão pode estar no banco do Evolution e
+  não no volume; o teste de reinício cobre os dois casos.
+- **Header do webhook:** depois de conectar, `status` mostra `webhook interno (7 dias, por código)`: `200`/`202`
+  = segredo aceito; `401` = segredo errado ou header ausente; `404` = flag desligada ou requisição pelo proxy.
+  Prova independente: remover o aparelho em "Aparelhos conectados" no celular sem abrir `/whatsapp`; se
+  Configurações → Usuários mostrar `DISCONNECTED`, foi o webhook (essa lista não consulta o Evolution).
+
+Antes do teste de ponta a ponta: migration `20261106120000_whatsapp_connection` aplicada com evidência.

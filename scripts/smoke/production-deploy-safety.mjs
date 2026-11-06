@@ -75,6 +75,8 @@ assert.equal(drift.script.split("\n")[0], "set -Eeuo pipefail");
 const driftCd = "cd /apps/gest-o", driftHealthUrl = "http://127.0.0.1:4000/health/version";
 assert.equal(drift.script.split("\n").filter(line => line === driftCd).length, 1);
 assert.ok(drift.script.includes(`curl -fsS --max-time 5 ${driftHealthUrl}`));
+const driftWhatsAppEnv = "whatsapp_env=/root/demetra-env/whatsapp.env";
+assert.equal(drift.script.split("\n").filter(line => line === driftWhatsAppEnv).length, 1);
 const driftTmp = mkdtempSync(join(tmpdir(), "vps-drift-"));
 try {
   const git = (cwd, ...args) => {
@@ -114,6 +116,9 @@ try {
     "  'system df') printf 'TYPE TOTAL ACTIVE SIZE RECLAIMABLE\\nImages 9 2 9.9GB 7GB (70%%)\\nBuild Cache 3 0 2GB 2GB\\n' ;;",
     "  'system df -v') printf 'Images space usage:\\n\\nREPOSITORY TAG\\n\\nLocal Volumes space usage:\\n\\nVOLUME NAME LINKS SIZE\\nvolume_ficticio_a 1 1.5GB\\nvolume_ficticio_b 0 20MB\\n\\nBuild cache usage: 2GB\\n' ;;",
     "  image\\ ls*) printf '1.1GB\\tsha256:aa\\timagem-ficticia:um\\n1.1GB\\tsha256:aa\\timagem-ficticia:alias\\n300MB\\tsha256:bb\\timagem-ficticia:dois\\n' ;;",
+    // WhatsApp (projeto gest-o-whatsapp): FAKE_WA_STATE (ausente|running|exited), FAKE_WA_HEALTH, FAKE_WA_PORTS.
+    "  ps\\ -aq\\ --filter\\ label=com.docker.compose.project=gest-o-whatsapp\\ *) [[ \"${FAKE_WA_STATE:-ausente}\" == ausente ]] || { s=\"${*: -1}\"; printf 'cid-%s\\n' \"${s##*=}\"; } ;;",
+    "  inspect\\ -f\\ *) [[ \"$4\" == cid-evolution-* ]] || exit 96; case \"$3\" in *'.State.Status}}') printf '%s\\n' \"$FAKE_WA_STATE\" ;; *'.State.Health'*) printf '%s\\n' \"${FAKE_WA_HEALTH:-}\" ;; *PortBindings*) printf '%s\\n' \"${FAKE_WA_PORTS:-}\" ;; *) exit 95 ;; esac ;;",
     "  *) exit 97 ;;",
     "esac",
     "",
@@ -130,14 +135,48 @@ try {
   const production = git(vps, "rev-parse", "HEAD");
   const health = commitSha => ({ FAKE_HEALTH_BODY: JSON.stringify({ commit: commitSha, builtAt: "2026-10-07T00:00:00Z" }) });
   const runDrift = healthEnv => spawnSync("bash", ["-s"], {
-    input: drift.script.replace(driftCd, 'cd "$DRIFT_REPO"'),
-    env: { ...process.env, DRIFT_REPO: vps, PATH: `${fakeBin}${delimiter}${process.env.PATH}`, FAKE_HEALTH_EXIT: "0", FAKE_HEALTH_BODY: "", FAKE_DOCKER_CALLS: dockerCalls, ...healthEnv },
+    input: drift.script.replace(driftCd, 'cd "$DRIFT_REPO"').replace(driftWhatsAppEnv, 'whatsapp_env="$DRIFT_WHATSAPP_ENV"'),
+    env: { ...process.env, DRIFT_REPO: vps, DRIFT_WHATSAPP_ENV: join(driftTmp, "whatsapp.env"), PATH: `${fakeBin}${delimiter}${process.env.PATH}`, FAKE_HEALTH_EXIT: "0", FAKE_HEALTH_BODY: "", FAKE_DOCKER_CALLS: dockerCalls, ...healthEnv },
     encoding: "utf8",
   });
 
   const clean = runDrift(health(production));
   assert.equal(clean.status, 0, `drift limpo: ${clean.stderr}`);
-  assert.doesNotMatch(clean.stdout, /\[INFO\]/);
+  assert.doesNotMatch(clean.stdout, /\[INFO\] main/);
+  assert.match(clean.stdout, /^\[INFO\] WhatsApp \(Evolution\) não instalado: env protegido ausente\.$/m);
+  assert.doesNotMatch(clean.stdout + clean.stderr, /\[WARN\]|\[CRITICAL\]|WhatsApp evolution-/);
+
+  // WhatsApp: env presente (nunca lido); parado ou ausente = [WARN] sem reprovar; rodando sem healthy ou
+  // com porta publicada = [CRITICAL] e reprova.
+  writeFileSync(join(driftTmp, "whatsapp.env"), "conteúdo fictício que o drift nunca lê\n");
+  const whatsapp = extra => { writeFileSync(dockerCalls, ""); return runDrift({ ...health(production), ...extra }); };
+  const waHealthy = whatsapp({ FAKE_WA_STATE: "running", FAKE_WA_HEALTH: "healthy" });
+  assert.equal(waHealthy.status, 0, `whatsapp saudável: ${waHealthy.stderr}`);
+  assert.match(waHealthy.stdout, /^WhatsApp evolution-api: running healthy$/m);
+  assert.match(waHealthy.stdout, /^WhatsApp evolution-db: running healthy$/m);
+  assert.doesNotMatch(waHealthy.stdout + waHealthy.stderr, /\[INFO\] WhatsApp|\[WARN\]|\[CRITICAL\]/);
+  assert.match(waHealthy.stdout, /^\[OK\]/m);
+  assert.deepEqual([...new Set(readFileSync(dockerCalls, "utf8").trim().split("\n").map(line => line.split(" ")[0]))].sort(), ["inspect", "ps"], "drift do WhatsApp só lê");
+  for (const stopped of [{ FAKE_WA_STATE: "exited" }, { FAKE_WA_STATE: "ausente" }]) {
+    const result = whatsapp(stopped);
+    assert.equal(result.status, 0, `whatsapp parado ${JSON.stringify(stopped)}: ${result.stderr}`);
+    assert.match(result.stdout, new RegExp(`^\\[WARN\\] WhatsApp evolution-api não está rodando \\(${stopped.FAKE_WA_STATE}\\)`, "m"));
+    assert.match(result.stdout, /^\[WARN\] WhatsApp evolution-db não está rodando/m);
+    assert.doesNotMatch(result.stderr, /\[CRITICAL\]/);
+    assert.match(result.stdout, /^\[OK\]/m);
+  }
+  for (const [bad, message] of [
+    [{ FAKE_WA_STATE: "running", FAKE_WA_HEALTH: "unhealthy" }, /^\[CRITICAL\] WhatsApp evolution-api rodando sem healthy \(unhealthy\)\.$/m],
+    [{ FAKE_WA_STATE: "running", FAKE_WA_HEALTH: "starting" }, /^\[CRITICAL\] WhatsApp evolution-db rodando sem healthy \(starting\)\.$/m],
+    [{ FAKE_WA_STATE: "running", FAKE_WA_HEALTH: "healthy", FAKE_WA_PORTS: "8080/tcp " }, /^\[CRITICAL\] WhatsApp evolution-api com porta publicada: 8080\/tcp $/m],
+    [{ FAKE_WA_STATE: "exited", FAKE_WA_PORTS: "5432/tcp " }, /^\[CRITICAL\] WhatsApp evolution-db com porta publicada: 5432\/tcp $/m],
+  ]) {
+    const result = whatsapp(bad);
+    assert.equal(result.status, 1, `whatsapp com problema ${JSON.stringify(bad)}: ${result.stdout}`);
+    assert.match(result.stderr, message);
+    assert.doesNotMatch(result.stdout, /\[OK\]/);
+  }
+  rmSync(join(driftTmp, "whatsapp.env"));
   assert.match(clean.stdout, new RegExp(`^\\[OK\\] VPS working tree limpo e HEAD igual ao commit em produção \\(${production}\\)\\.$`, "m"));
   assert.match(clean.stdout, /^\/ \(montado em \/\): 50%$/m);
   assert.match(clean.stdout, /^\/var\/lib\/docker \(montado em \/var\/lib\/docker\): 50%$/m);
@@ -206,7 +245,7 @@ try {
   assert.match(unmerged.stderr, new RegExp(`produção: +${outsideMain}\\n`));
   assert.match(unmerged.stderr, new RegExp(`origin/main: +${mainSha}\\n`));
   assert.doesNotMatch(unmerged.stderr, /Divergência de SHA|não está limpo/);
-  assert.doesNotMatch(unmerged.stdout, /\[OK\]|\[INFO\]/);
+  assert.doesNotMatch(unmerged.stdout, /\[OK\]|\[INFO\] main/);
 } finally {
   rmSync(driftTmp, { recursive: true, force: true });
 }

@@ -1,3 +1,17 @@
+# WhatsApp Fase A3: workflow para subir o Evolution em produção — código pronto, aguardando merge — 06/11/2026
+
+- Workflow **WhatsApp Evolution** (só `workflow_dispatch` na `main`, environment `production-cutover`, mesmo grupo
+  de concorrência do Deploy Production): `status` (só leitura), `up` (valida env protegidos sem imprimir valores,
+  chave igual no `.env` e no `whatsapp.env` por hash, digests exatos, sobe só `gest-o-whatsapp`, espera
+  `healthy`, confere que api/web/db do CRM não mudaram) e `stop` (sem apagar container, volume nem rede).
+  Lógica em `scripts/whatsapp-evolution-remote.sh`, copiada do próprio commit para a VPS a cada run.
+- VPS Drift Detection: env do WhatsApp ausente = `[INFO]`; parado = `[WARN]` sem reprovar; rodando sem
+  `healthy` ou com porta publicada = `[CRITICAL]`.
+- `scripts/backup-production-env.sh` copia também `/root/demetra-env/whatsapp.env` quando existir (`600`); o
+  restore recusa esse backup no lugar do `.env`.
+- Testes com Docker falso e valores fictícios no `test:production-deploy`. Nada foi executado na VPS. Ordem de
+  ativação em [communications/whatsapp-evolution.md](communications/whatsapp-evolution.md#ordem-de-ativação).
+
 # WhatsApp Fase A: conexão dos números por QR (Evolution API) — código pronto, aguardando merge — 06/11/2026
 
 - Cada usuário conecta o número comercial de WhatsApp ao CRM pelo cartão **Meu número** em `/whatsapp`, lendo

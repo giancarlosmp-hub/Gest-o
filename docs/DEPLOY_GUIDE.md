@@ -1,3 +1,12 @@
+## WhatsApp Evolution: workflow de subida e checagem no Drift (06/11/2026)
+
+O projeto `docker-compose.whatsapp.yml` (`gest-o-whatsapp`) sobe, é consultado e é parado só pelo workflow
+**WhatsApp Evolution** (`status`, `up`, `stop`; environment `production-cutover`; grupo de concorrência
+`deploy-production`). Ele nunca toca api, web nem o banco do CRM e nunca apaga container, volume ou rede. Segredos,
+ordem de ativação, como desligar e o que confirmar depois:
+[communications/whatsapp-evolution.md](communications/whatsapp-evolution.md#subir-e-ligar-em-produção).
+O VPS Drift Detection ganhou a checagem do Evolution (tabela em "O que o VPS Drift Detection verifica").
+
 ## Disco da VPS: retenção automática no cutover e alerta acima de 80% (04/11/2026)
 
 Continuação da limpeza manual abaixo (o disco chegou a 92% em 03-04/11/2026). A retenção passa a
@@ -331,6 +340,10 @@ O script continua inline (não depende de arquivos do checkout que ele verifica)
 | `HEAD` igual à produção e a `origin/main` | exit 0, `[OK]` |
 | `HEAD` igual à produção, `origin/main` à frente | exit 0, `[INFO] main N commits à frente da produção` (`git rev-list --count HEAD..origin/main`) e `[OK]` |
 | `/`, `/var/lib/docker` ou `/var/log/gest-o` acima de 80% (`df -P`) | exit 1, `[CRITICAL] Disco acima de 80% na VPS!` com uso, 5 maiores itens de `/var/log/gest-o`, `docker system df` e 5 maiores imagens e volumes (ver "Disco da VPS" no início deste guia) |
+| `/root/demetra-env/whatsapp.env` ausente (só se testa a existência; nada é lido) | `[INFO] WhatsApp (Evolution) não instalado`, não reprova |
+| `whatsapp.env` presente e container `evolution-api` ou `evolution-db` parado ou ausente | `[WARN] … não está rodando`, não reprova |
+| `whatsapp.env` presente e container rodando sem `healthy` | exit 1, `[CRITICAL] WhatsApp … rodando sem healthy` |
+| `whatsapp.env` presente e qualquer porta publicada nos dois containers | exit 1, `[CRITICAL] WhatsApp … com porta publicada` |
 
 O commit é lido como no deploy (`node -pe '…commit'`). O teste executa a lógica inline extraída do workflow em repositórios git temporários, com um `curl` falso no `PATH` no lugar do health (sem rede), cobrindo os seis casos acima e respostas sem JSON ou com commit inválido.
 

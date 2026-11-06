@@ -1611,11 +1611,16 @@ diretor e gerente. Pendente:
 
 - Apply da migration `20261106120000_whatsapp_connection` pelo **Production Schema PR827**; o cutover fica
   bloqueado até a evidência de schema.
-- Workflow aprovado para subir e consultar `docker-compose.whatsapp.yml` na VPS e checagem opcional no Drift
-  Detection (PR separada; mexe em `.github`). Hoje nada sobe o Evolution.
-- Env protegidos: `WHATSAPP_EVOLUTION_API_KEY` e `WHATSAPP_EVOLUTION_WEBHOOK_SECRET` no env da API e o env
-  próprio do compose do WhatsApp (`EVOLUTION_DB_PASSWORD` só letras e números).
-- Confirmar em execução: header do webhook chegando, healthcheck em `GET /` e caminho do volume de instâncias.
+- ~~Workflow aprovado para subir e consultar `docker-compose.whatsapp.yml` na VPS e checagem opcional no Drift
+  Detection.~~ Pronto: workflow **WhatsApp Evolution** (`status`/`up`/`stop`) e checagem no VPS Drift Detection.
+  Falta rodar, na ordem de [communications/whatsapp-evolution.md](communications/whatsapp-evolution.md#ordem-de-ativação).
+- Env protegidos: `WHATSAPP_EVOLUTION_API_KEY` e `WHATSAPP_EVOLUTION_WEBHOOK_SECRET` no env da API e o
+  `/root/demetra-env/whatsapp.env` (`EVOLUTION_DB_PASSWORD` só letras e números). Ainda não criados.
+- Confirmar em execução: header do webhook chegando, healthcheck em `GET /` e caminho do volume de instâncias
+  (plano na seção "Confirmar depois da subida" do doc).
+- O Evolution compartilha a rede `gest-o_default` com o PostgreSQL do CRM. Não tem as credenciais do banco do
+  CRM, mas alcança a porta dele pela rede. Hoje é necessário: é a saída do Evolution para a internet e o
+  caminho até `crm-api-internal`. Alternativa futura: rede dedicada API ↔ Evolution com saída própria.
 - Risco aceito: API não oficial, o número pode ser banido. Sessão fora do backup: perdida, reconectar por QR.
 - Fases B (receber e vincular à linha do tempo), C (responder pelo CRM) e D (resumo diário) não começaram.
 

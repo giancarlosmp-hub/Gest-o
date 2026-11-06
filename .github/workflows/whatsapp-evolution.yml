@@ -1,0 +1,63 @@
+name: WhatsApp Evolution
+
+# WhatsApp Fase A: consulta, sobe ou para o projeto Compose gest-o-whatsapp (docker-compose.whatsapp.yml)
+# na VPS. Nunca toca api, web nem o banco do CRM; nunca apaga container, volume ou rede.
+# O script e o compose vão do próprio commit do run para uma pasta temporária na VPS: a worktree de
+# /apps/gest-o não é usada nem alterada. Procedimento: docs/communications/whatsapp-evolution.md.
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "status (só leitura), up (sobe ou atualiza o Evolution) ou stop (para sem apagar nada)"
+        required: true
+        type: choice
+        options: [status, up, stop]
+
+permissions:
+  contents: read
+
+# Mesmo grupo do Deploy Production: nunca roda junto com build ou cutover.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  whatsapp-evolution:
+    if: github.ref == 'refs/heads/main'
+    environment: production-cutover
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      WHATSAPP_RUN_DIR: /tmp/gest-o-whatsapp-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Copia o script e o compose deste commit para a VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST || secrets.VPS_HOST }}
+          username: ${{ secrets.SSH_USER || secrets.VPS_USER }}
+          key: ${{ secrets.SSH_KEY || secrets.VPS_KEY }}
+          port: ${{ secrets.SSH_PORT || '22022' }}
+          source: scripts/whatsapp-evolution-remote.sh,docker-compose.whatsapp.yml
+          target: ${{ env.WHATSAPP_RUN_DIR }}
+
+      - name: WhatsApp Evolution na VPS (${{ inputs.action }})
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          WHATSAPP_ACTION: ${{ inputs.action }}
+        with:
+          host: ${{ secrets.SSH_HOST || secrets.VPS_HOST }}
+          username: ${{ secrets.SSH_USER || secrets.VPS_USER }}
+          key: ${{ secrets.SSH_KEY || secrets.VPS_KEY }}
+          port: ${{ secrets.SSH_PORT || '22022' }}
+          command_timeout: 15m
+          envs: WHATSAPP_ACTION,WHATSAPP_RUN_DIR
+          # Sem script_stop: o set -Eeuo pipefail cobre a parada em erro (regra no DEPLOY_GUIDE).
+          script: |
+            set -Eeuo pipefail
+            case "$WHATSAPP_RUN_DIR" in /tmp/gest-o-whatsapp-[0-9]*) ;; *) echo "pasta temporária inesperada" >&2; exit 1 ;; esac
+            rc=0
+            WHATSAPP_ACTION="$WHATSAPP_ACTION" WHATSAPP_COMPOSE_FILE="$WHATSAPP_RUN_DIR/docker-compose.whatsapp.yml" bash "$WHATSAPP_RUN_DIR/scripts/whatsapp-evolution-remote.sh" || rc=$?
+            rm -rf -- "$WHATSAPP_RUN_DIR"
+            exit "$rc"

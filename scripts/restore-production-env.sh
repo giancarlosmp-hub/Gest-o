@@ -11,6 +11,13 @@ if [[ -z "${BACKUP_TO_RESTORE}" ]]; then
   exit 2
 fi
 
+# O backup do env do WhatsApp (whatsapp-env-*.backup) nunca vai para o .env da API.
+if [[ "$(basename -- "${BACKUP_TO_RESTORE}")" == whatsapp-env-* ]]; then
+  echo "Erro: ${BACKUP_TO_RESTORE} é backup do env do WhatsApp e não pode substituir ${SOURCE_FILE}." >&2
+  echo "Restaure com: install -m 600 <backup> ${ENV_DIR}/whatsapp.env (root:root). Nenhum arquivo foi alterado." >&2
+  exit 1
+fi
+
 if [[ ! -f "${BACKUP_TO_RESTORE}" ]]; then
   echo "Erro: backup informado não existe: ${BACKUP_TO_RESTORE}." >&2
   exit 1
