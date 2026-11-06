@@ -14,6 +14,7 @@ import conversationalCrmRoutes from "./routes/conversationalCrmRoutes.js";
 import { communicationWebhookRoutes } from "./routes/communicationWebhookRoutes.js";
 import { communicationRoutes } from "./routes/communicationRoutes.js";
 import { whatsappConnectionRoutes } from "./routes/whatsappConnectionRoutes.js";
+import { whatsappEvolutionWebhookRoutes } from "./routes/whatsappEvolutionWebhookRoutes.js";
 import { env } from "./config/env.js";
 import { requestContextMiddleware } from "./middlewares/requestLogging.js";
 import { logApiEvent, sanitizePayload } from "./utils/logger.js";
@@ -180,6 +181,7 @@ app.use((req, res, next) => {
   next();
 });
 
+app.use(["/webhooks/communications/evolution", "/api/webhooks/communications/evolution"], whatsappEvolutionWebhookRoutes);
 app.use(["/webhooks/communications", "/api/webhooks/communications"], communicationWebhookRoutes);
 app.use(express.json());
 app.use(cookieParser());

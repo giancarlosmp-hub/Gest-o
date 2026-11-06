@@ -270,6 +270,24 @@ export class WhatsAppConnectionService {
     return this.view(await this.db.whatsAppConnection.findUnique({ where: { userId } }), await this.userPhone(userId));
   }
 
+  /**
+   * Evento do webhook interno do Evolution. Só "connection.update" muda algo; QR e qualquer outro evento
+   * são ignorados sem gravar nada. Instância desconhecida também não grava nada.
+   */
+  async applyConnectionEvent(payload: unknown): Promise<"ignored" | "unknown_instance" | "applied"> {
+    const body = (payload && typeof payload === "object" ? payload : {}) as { event?: unknown; instance?: unknown; data?: unknown };
+    const event = typeof body.event === "string" ? body.event.toLowerCase().replace(/_/g, ".") : "";
+    if (event !== "connection.update") return "ignored";
+    const instanceName = typeof body.instance === "string" ? body.instance : "";
+    const row = instanceName ? await this.db.whatsAppConnection.findUnique({ where: { instanceName } }) : null;
+    if (!row) return "unknown_instance";
+    const data = (body.data && typeof body.data === "object" ? body.data : {}) as { state?: unknown; wuid?: unknown };
+    const active = row.status === WhatsAppConnectionStatus.PENDING_QR || row.status === WhatsAppConnectionStatus.CONNECTED;
+    if (active && data.state === "open") await this.finalizeOpen(row, typeof data.wuid === "string" ? data.wuid : null);
+    else if (active && data.state === "close") await this.markClosed(row, "session_closed");
+    return "applied";
+  }
+
   /** Status de todos (diretor/gerente): número mascarado, sem consultar o Evolution. */
   async list(): Promise<ConnectionListItem[]> {
     const rows = await this.db.whatsAppConnection.findMany({ orderBy: { updatedAt: "desc" } });
