@@ -99,7 +99,8 @@ export function createWhatsAppConversationsTestDb(prisma: PrismaClient) {
     const orders = orderBy ? (Array.isArray(orderBy) ? orderBy : [orderBy]) : [];
     return [...rows].sort((a, b) => {
       for (const order of orders) {
-        const [field, direction] = Object.entries(order)[0] as [string, "asc" | "desc"];
+        const [field, spec] = Object.entries(order)[0] as [string, "asc" | "desc" | { sort: "asc" | "desc" }];
+        const direction = typeof spec === "string" ? spec : spec.sort;
         const x = comparable(a[field]) as any;
         const y = comparable(b[field]) as any;
         if (x === y) continue;

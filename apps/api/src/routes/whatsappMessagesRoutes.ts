@@ -1,17 +1,26 @@
 import type { Request, Response } from "express";
 import { Role } from "@prisma/client";
+import { z } from "zod";
 import { createAsyncRouter } from "../utils/asyncRouter.js";
 import { authMiddleware } from "../middlewares/auth.js";
+import { validateBody } from "../middlewares/validate.js";
 import { prisma } from "../config/prisma.js";
 import { resolveUniqueActiveTenantForUser } from "../services/ultraFv3SyncService.js";
 import { EVOLUTION_PROVIDER } from "../services/whatsappMessages/whatsappMessageStore.js";
 import { brazilDayStart, readClientDayCards, readConversationDayMessages } from "../services/whatsappMessages/whatsappConversationReads.js";
+import {
+  WhatsAppQueueError,
+  discardUnlinkedConversation,
+  linkUnlinkedConversation,
+  listUnlinkedConversations
+} from "../services/whatsappMessages/whatsappConversationQueue.js";
 
 // WhatsApp Fase B2: leitura das conversas gravadas (Evolution). Não existe envio.
 // Quem vê:
 // - gerente e diretor: tudo do próprio tenant;
 // - vendedor: conversas dos clientes da carteira atual dele (client.ownerSellerId) e, só na rota e na tela
 //   da oportunidade, as do cliente de uma oportunidade dele (desde a criação da oportunidade).
+// Fila "Conversas não vinculadas": só a do próprio usuário (dono do número), inclusive gerente e diretor.
 // A leitura não depende da flag de gravação: o que já foi gravado continua visível dentro da retenção.
 export const whatsappMessagesRoutes = createAsyncRouter();
 
@@ -105,4 +114,33 @@ whatsappMessagesRoutes.get("/conversations/:conversationId/messages", async (req
     return notFound();
   }
   return res.json(await readConversationDayMessages({ conversationId: req.params.conversationId, day, since, cursor: queryText(req.query.cursor) }));
+});
+
+const sendQueueError = (res: Response, error: unknown) => {
+  if (error instanceof WhatsAppQueueError) return res.status(error.status).json({ message: error.message, code: error.code });
+  throw error;
+};
+
+whatsappMessagesRoutes.get("/unlinked", async (req, res) => {
+  return res.json(await listUnlinkedConversations({ ownerUserId: req.user!.id, cursor: queryText(req.query.cursor), take: parseTake(req) }));
+});
+
+const linkBodySchema = z.object({ clientId: z.string().trim().min(1).max(64) });
+
+whatsappMessagesRoutes.post("/unlinked/:conversationId/link", validateBody(linkBodySchema), async (req, res) => {
+  const tenantId = await resolveTenant(req, res);
+  if (!tenantId) return;
+  try {
+    return res.json(await linkUnlinkedConversation({ conversationId: req.params.conversationId, clientId: req.body.clientId, user: req.user!, tenantId }));
+  } catch (error) {
+    return sendQueueError(res, error);
+  }
+});
+
+whatsappMessagesRoutes.post("/unlinked/:conversationId/discard", async (req, res) => {
+  try {
+    return res.json(await discardUnlinkedConversation({ conversationId: req.params.conversationId, ownerUserId: req.user!.id }));
+  } catch (error) {
+    return sendQueueError(res, error);
+  }
 });
