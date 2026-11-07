@@ -154,6 +154,7 @@ import {
 } from "../services/clientDuplicateMerge.js";
 import { buildClientCreditAlert, projectClientForResponse } from "../services/clientErpProjection.js";
 import { loadClientErpContacts } from "../services/clientErpContacts.js";
+import { scheduleClientPhoneIndexRefresh } from "../services/whatsappMessages/clientPhoneIndex.js";
 import { findBrazilMunicipality, invalidClientAddressMessage, listBrazilMunicipalities, BRAZIL_STATES } from "../services/brazilMunicipalities.js";
 import { findOfficialTerritoryCity, isTerritoryAllowedState, listOfficialTerritoryCities, normalizeTerritoryCityKey, resolvePlacemarkCities, type OfficialTerritoryCity, type TerritoryAllowedState } from "../services/territoryOfficialCities.js";
 import { ensureInitialKnowledgeDocuments, getKnowledgeContextForAi, searchKnowledgeDocuments } from "../services/knowledgeBaseService.js";
@@ -5134,6 +5135,7 @@ router.put("/clients/:id", rejectClientCodeInBody, validateBody(clientSchema.par
         requestIp: req.ip, requestId: req.requestId || "request-id-unavailable" });
       return changed;
     });
+    if (data.code !== old.code || data.cnpj !== old.cnpj) scheduleClientPhoneIndexRefresh([data.id], "client_identity_changed");
     res.json(projectClientForResponse(data));
   } catch (error) {
     if (error instanceof DuplicateClientError) {
@@ -5224,6 +5226,7 @@ router.post(
         ownerSellerId: resolveOwnerId(req),
       },
     });
+    scheduleClientPhoneIndexRefresh([req.params.id], "contact_created");
 
     res.status(201).json(data);
   }
@@ -5262,6 +5265,7 @@ router.put(
       where: { id: req.params.contactId },
       data: req.body
     });
+    scheduleClientPhoneIndexRefresh([req.params.id, data.clientId], "contact_updated");
 
     res.json(data);
   }
@@ -5283,6 +5287,7 @@ router.delete("/clients/:id/contacts/:contactId", async (req, res) => {
   if (!existingContact) return res.status(404).json({ message: "Não encontrado" });
 
   await prisma.contact.delete({ where: { id: req.params.contactId } });
+  scheduleClientPhoneIndexRefresh([req.params.id], "contact_deleted");
   res.status(204).send();
 });
 
@@ -5427,13 +5432,15 @@ router.post("/contacts", validateBody(contactSchema), async (req, res) => {
   const tenantId = await resolveRequestTenantId(req, res);
   if (!tenantId) return;
   if (!await findOpportunityClientInScope(req, tenantId, req.body.clientId)) return res.status(403).json({ message: OPPORTUNITY_CLIENT_OUT_OF_SCOPE_MESSAGE });
-  res.status(201).json(await prisma.contact.create({ data: { ...req.body, ownerSellerId: resolveOwnerId(req, req.body.ownerSellerId) } }));
+  const created = await prisma.contact.create({ data: { ...req.body, ownerSellerId: resolveOwnerId(req, req.body.ownerSellerId) } });
+  scheduleClientPhoneIndexRefresh([created.clientId], "contact_created");
+  res.status(201).json(created);
 });
 
 router.put("/contacts/:id", validateBody(contactSchema.partial()), async (req, res) => {
   const tenantId = await resolveRequestTenantId(req, res);
   if (!tenantId) return;
-  const old = await prisma.contact.findFirst({ where: { id: req.params.id, ...sellerWhere(req), ...contactTenantWhere(tenantId) }, select: { id: true } });
+  const old = await prisma.contact.findFirst({ where: { id: req.params.id, ...sellerWhere(req), ...contactTenantWhere(tenantId) }, select: { id: true, clientId: true } });
   if (!old) return res.status(404).json({ message: "Não encontrado" });
 
   if (req.body.clientId !== undefined) {
@@ -5445,16 +5452,19 @@ router.put("/contacts/:id", validateBody(contactSchema.partial()), async (req, r
     ...req.body,
     ...(req.body.ownerSellerId !== undefined ? { ownerSellerId: resolveOwnerId(req, req.body.ownerSellerId) } : {})
   };
-  res.json(await prisma.contact.update({ where: { id: old.id }, data }));
+  const updated = await prisma.contact.update({ where: { id: old.id }, data });
+  scheduleClientPhoneIndexRefresh([old.clientId, updated.clientId], "contact_updated");
+  res.json(updated);
 });
 
 router.delete("/contacts/:id", async (req, res) => {
   const tenantId = await resolveRequestTenantId(req, res);
   if (!tenantId) return;
-  const old = await prisma.contact.findFirst({ where: { id: req.params.id, ...sellerWhere(req), ...contactTenantWhere(tenantId) }, select: { id: true } });
+  const old = await prisma.contact.findFirst({ where: { id: req.params.id, ...sellerWhere(req), ...contactTenantWhere(tenantId) }, select: { id: true, clientId: true } });
   if (!old) return res.status(404).json({ message: "Não encontrado" });
 
   await prisma.contact.delete({ where: { id: old.id } });
+  scheduleClientPhoneIndexRefresh([old.clientId], "contact_deleted");
   res.status(204).send();
 });
 
@@ -6832,6 +6842,7 @@ router.post("/clients/diagnostics/merge-duplicates", authorize("diretor", "geren
       }
       return results;
     });
+    scheduleClientPhoneIndexRefresh([primaryClientId, ...merged.map((item) => item.duplicateClientId)], "clients_merged");
 
     return res.json({
       message: "Mesclagem concluída com sucesso.",
