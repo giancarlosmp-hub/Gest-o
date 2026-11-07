@@ -154,6 +154,25 @@ try {
   assert.equal((await get("seller-a", "/whatsapp/conversations/conv-a-seller-a/messages?day=ontem")).status, 400);
   assert.equal((await get("seller-a", "/whatsapp/conversations/conv-a-seller-a/messages")).status, 400);
 
+  // Áudio transcrito: o texto vem em transcription (o texto da mensagem continua o rótulo); a referência do
+  // arquivo e os detalhes da transcrição não saem.
+  message("conv-a-seller-a", "2026-11-02T13:00:00.000Z", "INBOUND", "[áudio 0:42]");
+  message("conv-a-seller-a", "2026-11-02T13:05:00.000Z", "OUTBOUND", "[áudio 0:05]");
+  const [doneAudio, pendingAudio] = tables.communicationMessage.slice(-2);
+  Object.assign(doneAudio, { type: "AUDIO", mediaMetadata: { kind: "audio", seconds: 42, transcription: { status: "done", text: "Texto ficticio do audio", attempts: 1, model: "whisper-large-v3", at: "2026-11-02T13:00:10.000Z" } } });
+  Object.assign(pendingAudio, { type: "AUDIO", mediaMetadata: { kind: "audio", seconds: 5, transcription: { status: "pending", at: "2026-11-02T13:05:00.000Z" } } });
+  const audioDay = await get("seller-a", "/whatsapp/conversations/conv-a-seller-a/messages?day=2026-11-02");
+  assert.equal(audioDay.status, 200);
+  assert.deepEqual(
+    audioDay.json.items.map((item: any) => [item.type, item.text, item.transcription]),
+    [
+      ["AUDIO", "[áudio 0:42]", { status: "done", text: "Texto ficticio do audio" }],
+      ["AUDIO", "[áudio 0:05]", { status: "pending" }]
+    ]
+  );
+  assert.doesNotMatch(JSON.stringify(audioDay.json), /whisper|attempts|mediaMetadata/);
+  assert.equal(dayMessages.json.items[0].transcription, null, "texto não tem transcrição");
+
   // 5) Sem token: 401.
   const anonymous = await fetch(`http://127.0.0.1:${address.port}/whatsapp/clients/client-a/days`);
   assert.equal(anonymous.status, 401);
