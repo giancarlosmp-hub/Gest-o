@@ -9,6 +9,12 @@ import { contactPhoneFromWhatsAppJid } from "../whatsappConnection/phoneMatch.js
 //   pelo remoteJidAlt antes de enviar; se ainda vier LID, não há número e a mensagem é ignorada.
 // - messages.edited: data = protocolMessage { key (da mensagem original), editedMessage }.
 // - messages.delete: data = { ...key, status: "DELETED" }.
+// - Edição e revogação também podem vir em messages.upsert: o Evolution só desvia para messages.edited o
+//   protocolMessage de primeiro nível (ou em editedMessage.message); dentro de ephemeralMessage (conversa com
+//   mensagens temporárias) ele segue como upsert. protocolMessage type 14 (MESSAGE_EDIT) com editedMessage =
+//   edição; type 0 (REVOKE) = apagada; key.id = id da original. Outro tipo de protocolMessage é ignorado.
+//   secretEncryptedMessage (edição cifrada com o segredo da original, que o Baileys 7.0.0-rc.9 não abre) é
+//   ignorado: não há texto novo para gravar.
 // Grupo, status (stories), lista de transmissão e canal são ignorados. Mídia: só tipo e legenda; URL,
 // chave, miniatura, coordenadas, vCard e nome de arquivo nunca saem daqui.
 
@@ -30,6 +36,8 @@ export type ParsedEvolutionEvent =
       pushName: string | null;
       timestamp: Date | null;
       content: ParsedMessageContent;
+      /** Só em "[mensagem não suportada]": nomes dos campos de primeiro nível de data.message, nunca valores. */
+      unsupportedFields?: string[];
     }
   | { kind: "edit"; instance: string; targetMessageId: string; content: ParsedMessageContent }
   | { kind: "delete"; instance: string; targetMessageId: string }
@@ -46,7 +54,13 @@ export type IgnoredReason =
   | "unsupported_number"
   | "reaction"
   | "protocol"
+  | "secret_encrypted"
   | "empty";
+
+export const UNSUPPORTED_MESSAGE_TEXT = "[mensagem não suportada]";
+
+const PROTOCOL_REVOKE = 0;
+const PROTOCOL_MESSAGE_EDIT = 14;
 
 const MESSAGE_EVENTS: Record<string, "upsert" | "edit" | "delete"> = {
   "messages.upsert": "upsert",
@@ -146,7 +160,29 @@ export function parseMessageContent(rawMessage: unknown): ParsedMessageContent |
     return { type: CommunicationMessageType.UNKNOWN, text: "[enquete]", media: null };
   }
   const keys = Object.keys(message).filter((key) => key !== "messageContextInfo");
-  return keys.length ? { type: CommunicationMessageType.UNKNOWN, text: "[mensagem não suportada]", media: null } : "empty";
+  return keys.length ? { type: CommunicationMessageType.UNKNOWN, text: UNSUPPORTED_MESSAGE_TEXT, media: null } : "empty";
+}
+
+/** Nomes dos campos de primeiro nível (só identificadores, no máximo 20); nunca os valores. */
+export const messageFieldNames = (rawMessage: unknown) =>
+  Object.keys(asRecord(rawMessage) ?? {})
+    .filter((key) => /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(key))
+    .slice(0, 20);
+
+/** O enum chega como número no JSON do Evolution; aceita também o nome. */
+const protocolTypeIs = (value: unknown, code: number, name: string) => value === code || value === name;
+
+/** Edição ou revogação dentro de messages.upsert; qualquer outro protocolMessage é ignorado. */
+function parseUpsertProtocol(instance: string, protocol: Json): ParsedEvolutionEvent {
+  const isEdit = protocolTypeIs(protocol.type, PROTOCOL_MESSAGE_EDIT, "MESSAGE_EDIT");
+  const isRevoke = protocolTypeIs(protocol.type, PROTOCOL_REVOKE, "REVOKE");
+  if (!isEdit && !isRevoke) return { kind: "ignored", reason: "protocol" };
+  const targetId = messageId(asRecord(protocol.key)?.id);
+  if (!targetId) return { kind: "ignored", reason: "invalid_payload" };
+  if (isRevoke) return { kind: "delete", instance, targetMessageId: targetId };
+  const content = parseMessageContent(protocol.editedMessage);
+  if (content === "reaction" || content === "protocol" || content === "empty") return { kind: "ignored", reason: "empty" };
+  return { kind: "edit", instance, targetMessageId: targetId, content };
 }
 
 /** messageTimestamp em segundos (número, texto ou Long { low, high }). */
@@ -182,6 +218,11 @@ export function parseEvolutionMessageEvent(payload: unknown): ParsedEvolutionEve
     if (!key || !id) return { kind: "ignored", reason: "invalid_payload" };
     const destination = classifyRemoteJid(key.remoteJid);
     if (destination.kind === "ignored") return { kind: "ignored", reason: destination.reason };
+    const outer = asRecord(data.message);
+    const unwrapped = outer ? unwrap(outer) : null;
+    const protocol = asRecord(unwrapped?.protocolMessage);
+    if (protocol) return parseUpsertProtocol(instance, protocol);
+    if (unwrapped?.secretEncryptedMessage) return { kind: "ignored", reason: "secret_encrypted" };
     const content = parseMessageContent(data.message);
     if (content === "reaction" || content === "protocol" || content === "empty") return { kind: "ignored", reason: content };
     const fromMe = key.fromMe === true;
@@ -194,7 +235,8 @@ export function parseEvolutionMessageEvent(payload: unknown): ParsedEvolutionEve
       contactPhone: destination.phone,
       pushName,
       timestamp: parseMessageTimestamp(data.messageTimestamp),
-      content
+      content,
+      ...(content.text === UNSUPPORTED_MESSAGE_TEXT ? { unsupportedFields: messageFieldNames(data.message) } : {})
     };
   }
 

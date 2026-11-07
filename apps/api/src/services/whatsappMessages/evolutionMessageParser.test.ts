@@ -120,4 +120,52 @@ assert.deepEqual(
 );
 assert.deepEqual(parseEvolutionMessageEvent({ event: "messages.delete", instance: INSTANCE, data: { status: "DELETED" } }), { kind: "ignored", reason: "invalid_payload" });
 
+// 7) Edição e revogação dentro de messages.upsert (Baileys 7.0.0-rc.9): protocolMessage solto, dentro de
+// editedMessage.message, dentro de ephemeralMessage (conversa temporária) e com o enum por nome.
+const editProtocol = (type: unknown = 14) => ({ key: contactKey("ID-ORIGINAL-1", true), type, editedMessage: { conversation: "Texto editado ficticio" }, timestampMs: "1794000060000" });
+const editedTo = { kind: "edit", instance: INSTANCE, targetMessageId: "ID-ORIGINAL-1", content: { type: "TEXT", text: "Texto editado ficticio", media: null } };
+for (const [name, message] of Object.entries({
+  solto: { protocolMessage: editProtocol(), messageContextInfo: { messageSecret: { 0: 1 } } },
+  editedMessage: { editedMessage: { message: { protocolMessage: editProtocol() } } },
+  temporaria: { ephemeralMessage: { message: { protocolMessage: editProtocol() } } },
+  temporariaEditedMessage: { ephemeralMessage: { message: { editedMessage: { message: { protocolMessage: editProtocol() } } } } },
+  nomeDoEnum: { protocolMessage: editProtocol("MESSAGE_EDIT") }
+})) {
+  assert.deepEqual(parseEvolutionMessageEvent(upsert(contactKey("ID-AVISO-EDICAO"), message, { messageType: "protocolMessage" })), editedTo, name);
+}
+assert.deepEqual(
+  parseEvolutionMessageEvent(upsert(contactKey("ID-AVISO-EDICAO"), { protocolMessage: { ...editProtocol(), editedMessage: { extendedTextMessage: { text: "Legenda ficticia" } } } })),
+  { ...editedTo, content: { type: "TEXT", text: "Legenda ficticia", media: null } }
+);
+const revoked = { kind: "delete", instance: INSTANCE, targetMessageId: "ID-ORIGINAL-1" };
+assert.deepEqual(parseEvolutionMessageEvent(upsert(contactKey("ID-AVISO-REVOGA"), { protocolMessage: { key: contactKey("ID-ORIGINAL-1", true), type: 0 } })), revoked);
+assert.deepEqual(parseEvolutionMessageEvent(upsert(contactKey("ID-AVISO-REVOGA"), { ephemeralMessage: { message: { protocolMessage: { key: contactKey("ID-ORIGINAL-1"), type: "REVOKE" } } } })), revoked);
+// Sem id da original, edição sem conteúdo, tipo ausente ou outro tipo de protocolMessage: ignorado, nunca UNKNOWN.
+assert.deepEqual(parseEvolutionMessageEvent(upsert(contactKey(), { protocolMessage: { type: 14, editedMessage: { conversation: "x" } } })), { kind: "ignored", reason: "invalid_payload" });
+assert.deepEqual(parseEvolutionMessageEvent(upsert(contactKey(), { protocolMessage: { key: contactKey("ID-ORIGINAL-1"), type: 14 } })), { kind: "ignored", reason: "empty" });
+for (const protocolMessage of [
+  { key: contactKey("ID-ORIGINAL-1"), editedMessage: { conversation: "x" } },
+  { type: 3, ephemeralExpiration: 86_400 },
+  { type: "HISTORY_SYNC_NOTIFICATION", historySyncNotification: { chunkOrder: 1 } },
+  { type: 23, lidMigrationMappingSyncMessage: {} },
+  { type: 99, key: contactKey("ID-ORIGINAL-1") }
+]) {
+  assert.deepEqual(parseEvolutionMessageEvent(upsert(contactKey(), { protocolMessage })), { kind: "ignored", reason: "protocol" }, JSON.stringify(protocolMessage.type));
+}
+// Edição cifrada (secretEncryptedMessage): sem texto novo legível, ignorada.
+assert.deepEqual(
+  parseEvolutionMessageEvent(upsert(contactKey(), { secretEncryptedMessage: { targetMessageKey: contactKey("ID-ORIGINAL-1"), encPayload: { 0: 1 }, encIv: { 0: 2 }, secretEncType: 2 }, messageContextInfo: {} })),
+  { kind: "ignored", reason: "secret_encrypted" }
+);
+
+// 8) Tipo realmente desconhecido: grava "[mensagem não suportada]" e devolve só os nomes dos campos de
+// primeiro nível de data.message (para o log), nunca valores.
+const unknown = parseEvolutionMessageEvent(upsert(contactKey(), { tipoNovoFicticioMessage: { texto: "Valor sigiloso ficticio" }, messageContextInfo: { messageSecret: { 0: 1 } }, "chave com espaço": 1 }));
+assert.equal(unknown.kind === "upsert" && unknown.content.text, "[mensagem não suportada]");
+assert.deepEqual(unknown.kind === "upsert" && unknown.unsupportedFields, ["tipoNovoFicticioMessage", "messageContextInfo"]);
+const poll = parseEvolutionMessageEvent(upsert(contactKey(), { pollCreationMessageV3: { name: "Enquete ficticia" } }));
+assert.equal(poll.kind === "upsert" && "unsupportedFields" in poll, false, "enquete é conhecida");
+const text = parseEvolutionMessageEvent(upsert(contactKey(), { conversation: "Oi ficticio" }));
+assert.equal(text.kind === "upsert" && "unsupportedFields" in text, false);
+
 console.log("evolutionMessageParser.test.ts: ok");
