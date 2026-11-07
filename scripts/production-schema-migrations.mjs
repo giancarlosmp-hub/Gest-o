@@ -6,6 +6,29 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 export const migrations = Object.freeze({
+  "20261107120000_whatsapp_messages": Object.freeze({
+    id: "20261107120000_whatsapp_messages",
+    path: "apps/api/prisma/migrations/20261107120000_whatsapp_messages/migration.sql",
+    sha256: "5fd4562e298ad73e3b685e0c92b650dbf776826828fc0df8905ae0229af84a7c",
+    objects: Object.freeze({
+      enumValues: Object.freeze({
+        CommunicationProviderType: Object.freeze(["evolution_whatsapp"])
+      }),
+      columns: Object.freeze({
+        "CommunicationConversation.linkSource": "VARCHAR(16)",
+        "CommunicationConversation.linkStatus": "VARCHAR(16)",
+        "CommunicationConversation.linkedAt": "TIMESTAMP(3)",
+        "CommunicationConversation.linkedById": "TEXT",
+        "CommunicationConversation.numberOwnerUserId": "TEXT",
+        "CommunicationConversation.unlinkedExpiresAt": "TIMESTAMP(3)"
+      }),
+      tables: Object.freeze(["ClientPhoneIndex"]),
+      indexes: Object.freeze(["ClientPhoneIndex_phone_idx", "ClientPhoneIndex_clientId_idx", "ClientPhoneIndex_phone_clientId_source_key", "CommunicationConversation_numberOwnerUserId_linkStatus_idx", "CommunicationConversation_unlinkedExpiresAt_idx", "CommunicationMessage_conversationId_providerTimestamp_idx"]),
+      foreignKeys: Object.freeze(["CommunicationConversation_numberOwnerUserId_fkey", "ClientPhoneIndex_clientId_fkey"])
+    }),
+    postconditions: Object.freeze(["existing-rows-preserved", "enum-values-present", "columns-nullable", "catalog-exact", "new-table-empty", "managed-diff-empty", "old-api-compatible"]),
+    evidenceVersion: 1
+  }),
   "20261106120000_whatsapp_connection": Object.freeze({
     id: "20261106120000_whatsapp_connection",
     path: "apps/api/prisma/migrations/20261106120000_whatsapp_connection/migration.sql",

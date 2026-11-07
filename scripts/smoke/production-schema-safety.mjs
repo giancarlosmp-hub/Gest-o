@@ -24,7 +24,15 @@ assert.doesNotMatch(approved, /"updatedAt" TIMESTAMP\(3\) NOT NULL DEFAULT/);
 const generated = spawnSync(resolve(root, "node_modules/.bin/prisma"), ["migrate", "diff", "--from-empty", "--to-schema-datamodel", "apps/api/prisma/schema.prisma", "--script"], { cwd: root, encoding: "utf8" });
 assert.equal(generated.status, 0, generated.stderr);
 const expectedIndexes = [...generated.stdout.matchAll(/CREATE (?:UNIQUE )?INDEX "([^"]+)" ON "(?:ClientCodeAudit|Contact|Communication[^"]+)"/g)].map((match) => match[1]);
-for (const name of expectedIndexes) assert.match(approved, new RegExp(`CREATE (?:UNIQUE )?INDEX IF NOT EXISTS "${name}"`), `missing Prisma index name ${name}`);
+// The WhatsApp messages expansion (checksummed and gated on its own) is the only later migration that
+// adds Communication* indexes; every other index must still come from the controlled migration.
+const whatsappMessagesIndexSql = readFileSync(resolve(migrationDir, "20261107120000_whatsapp_messages/migration.sql"), "utf8");
+for (const name of expectedIndexes) {
+  const inApproved = new RegExp(`CREATE (?:UNIQUE )?INDEX IF NOT EXISTS "${name}"`).test(approved);
+  const inWhatsappMessages = new RegExp(`^CREATE (?:UNIQUE )?INDEX "${name}" ON "Communication(?:Conversation|Message)"`, "m").test(whatsappMessagesIndexSql);
+  assert.ok(inApproved || inWhatsappMessages, `missing Prisma index name ${name}`);
+}
+assert.equal([...whatsappMessagesIndexSql.matchAll(/^CREATE INDEX "[^"]+" ON "Communication/gm)].length, 3, "WhatsApp messages migration adds exactly three Communication* indexes");
 
 const postgresSmoke = readFileSync(resolve(root, "scripts/smoke/production-schema-postgres.sh"), "utf8");
 assert.match(postgresSmoke, /APP_COMMIT=\$\{APP_COMMIT:-\$\{EXPECTED_SHA:-\}\}/, "disposable test must require the tested SHA");
@@ -91,6 +99,13 @@ const whatsappConnectionSql = readFileSync(resolve(root, "apps/api/prisma/migrat
 const whatsappConnectionPreview = runPreview(whatsappConnectionSql);
 assert.equal(whatsappConnectionPreview.status, 0, `WhatsApp connection migration must pass the preview validator: ${whatsappConnectionPreview.stdout}${whatsappConnectionPreview.stderr}`);
 assert.match(whatsappConnectionPreview.stdout, /RESUMO aditivas=7 destrutivas=0 bloqueadas=0/);
+const whatsappMessagesSql = readFileSync(resolve(root, "apps/api/prisma/migrations/20261107120000_whatsapp_messages/migration.sql"), "utf8");
+const whatsappMessagesPreview = runPreview(whatsappMessagesSql);
+assert.equal(whatsappMessagesPreview.status, 0, `WhatsApp messages migration must pass the preview validator: ${whatsappMessagesPreview.stdout}${whatsappMessagesPreview.stderr}`);
+assert.match(whatsappMessagesPreview.stdout, /RESUMO aditivas=11 destrutivas=0 bloqueadas=0/);
+// The gate only accepts lowercase enum values: the uppercase spelling of the same value stays blocked.
+const whatsappMessagesUpperEnum = runPreview(`ALTER TYPE "CommunicationProviderType" ADD VALUE IF NOT EXISTS 'EVOLUTION_WHATSAPP';\n`);
+assert.notEqual(whatsappMessagesUpperEnum.status, 0, "uppercase enum value must stay blocked by the preview validator");
 for (const [name, sql] of [
   ["enum value rename", `ALTER TYPE "AgendaEventStatus" RENAME VALUE 'vencido' TO 'cancelado';\n`],
   ["enum value drop", `ALTER TYPE "AgendaEventStatus" DROP VALUE 'vencido';\n`],
@@ -269,6 +284,15 @@ assert.equal(whatsappConnectionEntry.status, 0, whatsappConnectionEntry.stderr);
 assert.equal(JSON.parse(whatsappConnectionEntry.stdout).sha256, "74d424f4b23213bd07308f34a397e0a2b1d6b250e33761f17da6b031e69411fd");
 assert.doesNotMatch(whatsappConnectionSql.replace(/ON (DELETE|UPDATE) CASCADE/g, "ON_FK_ACTION"), /\b(UPDATE|DELETE|INSERT|DROP|RENAME|TRUNCATE|CONCURRENTLY|ALTER TYPE|ALTER COLUMN|ADD COLUMN)\b/i, "WhatsApp connection migration must only create a new enum, table, indexes and its foreign key");
 assert.equal(whatsappConnectionSql.match(/^(CREATE|ALTER) /gm)?.length, 7, "WhatsApp connection migration has exactly seven statements");
+const whatsappMessagesEntry = spawnSync("node", [registry, "20261107120000_whatsapp_messages"], { cwd: root, encoding: "utf8" });
+assert.equal(whatsappMessagesEntry.status, 0, whatsappMessagesEntry.stderr);
+assert.equal(JSON.parse(whatsappMessagesEntry.stdout).sha256, "5fd4562e298ad73e3b685e0c92b650dbf776826828fc0df8905ae0229af84a7c");
+assert.doesNotMatch(whatsappMessagesSql.replace(/ON (DELETE|UPDATE) (CASCADE|SET NULL)/g, "ON_FK_ACTION"), /\b(UPDATE|DELETE|INSERT|DROP|RENAME|TRUNCATE|CONCURRENTLY|ALTER COLUMN)\b/i, "WhatsApp messages migration must not touch existing data or columns");
+assert.equal(whatsappMessagesSql.match(/^(CREATE|ALTER) /gm)?.length, 11, "WhatsApp messages migration has exactly eleven statements");
+assert.equal(whatsappMessagesSql.match(/ALTER TYPE/g)?.length, 1, "WhatsApp messages migration adds exactly one enum value");
+assert.match(whatsappMessagesSql, /^ALTER TYPE "CommunicationProviderType" ADD VALUE IF NOT EXISTS 'evolution_whatsapp';$/m, "enum addition must be the exact idempotent one-line form");
+assert.equal(whatsappMessagesSql.match(/evolution_whatsapp/g)?.length, 1, "the new enum value must not be used inside the migration (single-transaction apply)");
+assert.doesNotMatch(whatsappMessagesSql.match(/ALTER TABLE "CommunicationConversation" ADD COLUMN[^;]+;/)[0], /NOT NULL|DEFAULT/, "new conversation columns must be nullable without defaults");
 
 const apply = readFileSync(resolve(root, "scripts/production-schema-apply.sh"), "utf8");
 const productPricePostgres = readFileSync(resolve(root, "scripts/smoke/product-price-authority-migration-postgres.sh"), "utf8");
@@ -285,6 +309,8 @@ for (const userPhonePostcondition of ["migration celular do usuário em estado i
 assert.match(apply, /user_phone_state" == 1 \]\]; then\n  log "migration celular do usuário já presente; DDL ignorado[\s\S]*else[\s\S]*admin_psql --single-transaction/, "already-applied User phone path must not repeat DDL");
 for (const whatsappConnectionPostcondition of ["migration conexão WhatsApp parcialmente aplicada", "whatsapp_connection_state\" == 0:0", "whatsapp_connection_state\" == 1:1", "migration conexão WhatsApp já presente; DDL ignorado", "PENDING_QR,CONNECTED,DISCONNECTED,REJECTED_WRONG_NUMBER,ERROR", "confdeltype='c'", "SELECT count(*) FROM \"WhatsAppConnection\"", "1:15:5:1:0"]) assert.ok(apply.includes(whatsappConnectionPostcondition), `missing WhatsApp connection postcondition ${whatsappConnectionPostcondition}`);
 assert.match(apply, /whatsapp_connection_state" == 1:1 \]\]; then\n  log "migration conexão WhatsApp já presente; DDL ignorado[\s\S]*else[\s\S]*admin_psql --single-transaction/, "already-applied WhatsApp connection path must not repeat DDL");
+for (const whatsappMessagesPostcondition of ["migration mensagens WhatsApp parcialmente aplicada", "whatsapp_messages_state\" == 0:0:0", "whatsapp_messages_state\" == 1:6:1", "migration mensagens WhatsApp já presente; DDL ignorado", "e.enumlabel='evolution_whatsapp'", "confdeltype='n'", "confdeltype='c'", "SELECT count(*) FROM \\\"ClientPhoneIndex\\\"", "1:6:1:6:7:2:0"]) assert.ok(apply.includes(whatsappMessagesPostcondition), `missing WhatsApp messages postcondition ${whatsappMessagesPostcondition}`);
+assert.match(apply, /whatsapp_messages_state" == 1:6:1 \]\]; then\n  log "migration mensagens WhatsApp já presente; DDL ignorado[\s\S]*else[\s\S]*admin_psql --single-transaction/, "already-applied WhatsApp messages path must not repeat DDL");
 assert.match(apply, /production-schema-migrations\.mjs "\$MIGRATION_ID_REQUESTED"/);
 for (const ordersPostcondition of ["orders-counts.before.tsv", "tenant_not_null", "tenant_nulls", "ErpOperationalOrderStatus", "ErpRequestAuthorizationStatus", "ErpOrderSync_tenantId_fkey", "ErpOrderSync_tenantId_createdAt_idx", "ErpOrderSync_tenantId_sellerId_createdAt_idx", "ErpOrderStatusHistory", "ErpOrderStatusHistory_erpOrderSyncId_fkey", "ErpOrderStatusHistory_opportunityId_fkey", "ErpOrderStatusHistory_erpOrderSyncId_occurredAt_idx", "ErpOrderStatusHistory_opportunityId_occurredAt_idx", "migration-backfill"]) assert.ok(apply.includes(ordersPostcondition), `missing Orders postcondition ${ordersPostcondition}`);
 assert.match(apply, /20260731150000_safe_production_schema_transition\)[\s\S]*required_tables/, "the historical migration must retain its dedicated postconditions");
@@ -629,6 +655,34 @@ assertWhatsappConnectionDiff("unexpected extra column", `${whatsappConnectionFul
 assertWhatsappConnectionDiff("changed column type", whatsappConnectionFullDiff.replace('"expectedPhone" VARCHAR(13) NOT NULL', '"expectedPhone" TEXT NOT NULL'), false);
 assertWhatsappConnectionDiff("foreign key without cascade", whatsappConnectionFullDiff.replace("ON DELETE CASCADE", "ON DELETE RESTRICT"), false);
 assertWhatsappConnectionDiff("unrelated drift", `${whatsappConnectionFullDiff}ALTER TABLE "User" ALTER COLUMN "region" SET DATA TYPE VARCHAR(10);\n`, false);
+
+function assertWhatsappMessagesDiff(name, sql, accepted) {
+  const testDir = mkdtempSync(resolve(tmpdir(), "gesto-whatsapp-messages-diff-"));
+  const input = resolve(testDir, "input.sql");
+  const output = resolve(testDir, "output.sql");
+  writeFileSync(input, sql);
+  const result = spawnSync("node", [resolve(root, "scripts/schema-diff-filter.mjs"), input, output, "pre", "20261107120000_whatsapp_messages"], { encoding: "utf8" });
+  rmSync(testDir, { recursive: true });
+  assert.equal(result.status === 0, accepted, `${name}: ${result.stdout}${result.stderr}`);
+}
+// `prisma migrate diff` against the previous schema emits the migration itself, except that the enum
+// value comes without IF NOT EXISTS (the file needs it for the preview gate).
+const whatsappMessagesFullDiff = whatsappMessagesSql.replace("ADD VALUE IF NOT EXISTS", "ADD VALUE");
+const whatsappMessagesIndexLine = `CREATE INDEX "ClientPhoneIndex_phone_idx" ON "ClientPhoneIndex"("phone");`;
+assertWhatsappMessagesDiff("complete WhatsApp messages diff (Prisma form)", whatsappMessagesFullDiff, true);
+assertWhatsappMessagesDiff("complete WhatsApp messages diff (file form)", whatsappMessagesSql, true);
+assertWhatsappMessagesDiff("already applied (empty diff)", "", true);
+assertWhatsappMessagesDiff("public-qualified identifiers", whatsappMessagesFullDiff.replace(/ON "ClientPhoneIndex"/g, 'ON "public"."ClientPhoneIndex"'), true);
+assertWhatsappMessagesDiff("ADD COLUMN clauses in another order", whatsappMessagesFullDiff.replace('ADD COLUMN     "linkSource" VARCHAR(16),\nADD COLUMN     "linkStatus" VARCHAR(16),', 'ADD COLUMN     "linkStatus" VARCHAR(16),\nADD COLUMN     "linkSource" VARCHAR(16),'), true);
+assertWhatsappMessagesDiff("missing index (partial)", whatsappMessagesFullDiff.replace(whatsappMessagesIndexLine, ""), false);
+assertWhatsappMessagesDiff("enum value already present (partial)", whatsappMessagesFullDiff.replace(/ALTER TYPE[^;]+;/, ""), false);
+assertWhatsappMessagesDiff("duplicated index", `${whatsappMessagesFullDiff}${whatsappMessagesIndexLine}\n`, false);
+assertWhatsappMessagesDiff("other enum value", whatsappMessagesFullDiff.replace("'evolution_whatsapp'", "'evolution_other'"), false);
+assertWhatsappMessagesDiff("column made NOT NULL", whatsappMessagesFullDiff.replace('"linkStatus" VARCHAR(16),', '"linkStatus" VARCHAR(16) NOT NULL,'), false);
+assertWhatsappMessagesDiff("unexpected extra column", `${whatsappMessagesFullDiff}ALTER TABLE "User" ADD COLUMN "unexpected" TEXT;\n`, false);
+assertWhatsappMessagesDiff("changed column type", whatsappMessagesFullDiff.replace('"phone" VARCHAR(13) NOT NULL', '"phone" TEXT NOT NULL'), false);
+assertWhatsappMessagesDiff("owner foreign key with cascade", whatsappMessagesFullDiff.replace("ON DELETE SET NULL", "ON DELETE CASCADE"), false);
+assertWhatsappMessagesDiff("unrelated drift", `${whatsappMessagesFullDiff}ALTER TABLE "User" ALTER COLUMN "region" SET DATA TYPE VARCHAR(10);\n`, false);
 const bootstrap = readFileSync(resolve(root, "apps/api/src/scripts/bootstrap.ts"), "utf8");
 assert.match(bootstrap, /type DatabaseSchemaMode = "external" \| "ephemeral-push"/);
 assert.match(bootstrap, /if \(value === "external" \|\| value === "ephemeral-push"\) return value/);

@@ -22,7 +22,7 @@ assert.match(step.with.script, /20260927160000_product_price_source_observation:
 assert.match(step.with.script, /20260927160000_product_price_source_observation:apply:PRODUCTION_SCHEMA_APPLY/, "ProductPrice source observation apply must retain its exact confirmation");
 assert.match(step.with.script, /20261023120000_agenda_activity_planning_split:preview:\*/, "Agenda/Activity split preview must be selectable");
 assert.match(step.with.script, /20261023120000_agenda_activity_planning_split:apply:PRODUCTION_SCHEMA_APPLY/, "Agenda/Activity split apply must retain its exact confirmation");
-assert.match(step.with.script, /\[ "\$SCHEMA_MIGRATION" = 20261023120000_agenda_activity_planning_split \] \|\| \[ "\$SCHEMA_MIGRATION" = 20261103120000_opportunity_origin_agenda_stop_client_index \] \|\| \[ "\$SCHEMA_MIGRATION" = 20261105120000_user_phone \] \|\| \[ "\$SCHEMA_MIGRATION" = 20261106120000_whatsapp_connection \]; then\n\s+MODE="\$SCHEMA_MODE"[\s\S]*bash scripts\/production-schema-apply\.sh/, "Agenda/Activity split and Opportunity origin must run through production-schema-apply.sh");
+assert.match(step.with.script, /\[ "\$SCHEMA_MIGRATION" = 20261023120000_agenda_activity_planning_split \] \|\| \[ "\$SCHEMA_MIGRATION" = 20261103120000_opportunity_origin_agenda_stop_client_index \] \|\| \[ "\$SCHEMA_MIGRATION" = 20261105120000_user_phone \] \|\| \[ "\$SCHEMA_MIGRATION" = 20261106120000_whatsapp_connection \] \|\| \[ "\$SCHEMA_MIGRATION" = 20261107120000_whatsapp_messages \]; then\n\s+MODE="\$SCHEMA_MODE"[\s\S]*bash scripts\/production-schema-apply\.sh/, "Agenda/Activity split and Opportunity origin must run through production-schema-apply.sh");
 assert.match(readFileSync(workflowPath, "utf8"), /options:\n(?:\s+- \S+\n)*\s+- 20261023120000_agenda_activity_planning_split\n/, "Agenda/Activity split must be a dispatch option");
 assert.match(step.with.script, /20261103120000_opportunity_origin_agenda_stop_client_index:preview:\*/, "Opportunity origin preview must be selectable");
 assert.match(step.with.script, /20261103120000_opportunity_origin_agenda_stop_client_index:apply:PRODUCTION_SCHEMA_APPLY/, "Opportunity origin apply must retain its exact confirmation");
@@ -33,6 +33,9 @@ assert.match(readFileSync(workflowPath, "utf8"), /options:\n(?:\s+- \S+\n)*\s+- 
 assert.match(step.with.script, /20261106120000_whatsapp_connection:preview:\*/, "WhatsApp connection preview must be selectable");
 assert.match(step.with.script, /20261106120000_whatsapp_connection:apply:PRODUCTION_SCHEMA_APPLY/, "WhatsApp connection apply must retain its exact confirmation");
 assert.match(readFileSync(workflowPath, "utf8"), /options:\n(?:\s+- \S+\n)*\s+- 20261106120000_whatsapp_connection\n/, "WhatsApp connection must be a dispatch option");
+assert.match(step.with.script, /20261107120000_whatsapp_messages:preview:\*/, "WhatsApp messages preview must be selectable");
+assert.match(step.with.script, /20261107120000_whatsapp_messages:apply:PRODUCTION_SCHEMA_APPLY/, "WhatsApp messages apply must retain its exact confirmation");
+assert.match(readFileSync(workflowPath, "utf8"), /options:\n(?:\s+- \S+\n)*\s+- 20261107120000_whatsapp_messages\n/, "WhatsApp messages must be a dispatch option");
 
 const expression = /\$\{\{ inputs\.mode == 'apply' && format\('API_IMAGE=gest-o-api:\{0\}', github\.sha\) \|\| '' \}\}/g;
 const cases = [

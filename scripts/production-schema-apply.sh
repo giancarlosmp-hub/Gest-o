@@ -137,6 +137,13 @@ if [[ "$MIGRATION_ID_REQUESTED" == 20261106120000_whatsapp_connection ]]; then
   whatsapp_connection_state="$(admin_psql -Atc "$whatsapp_connection_enum_sql"):$(admin_psql -Atc "$whatsapp_connection_table_sql")"
   [[ "$whatsapp_connection_state" == 0:0 || "$whatsapp_connection_state" == 1:1 ]] || die "migration conexão WhatsApp parcialmente aplicada"
 fi
+whatsapp_messages_enum_sql="SELECT count(*) FROM pg_enum e JOIN pg_type t ON t.oid=e.enumtypid WHERE t.typnamespace='public'::regnamespace AND t.typname='CommunicationProviderType' AND e.enumlabel='evolution_whatsapp'"
+whatsapp_messages_columns_sql="SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='CommunicationConversation' AND column_name IN ('linkSource','linkStatus','linkedAt','linkedById','numberOwnerUserId','unlinkedExpiresAt')"
+whatsapp_messages_table_sql="SELECT count(*) FROM pg_class WHERE relnamespace='public'::regnamespace AND relkind='r' AND relname='ClientPhoneIndex'"
+if [[ "$MIGRATION_ID_REQUESTED" == 20261107120000_whatsapp_messages ]]; then
+  whatsapp_messages_state="$(admin_psql -Atc "$whatsapp_messages_enum_sql"):$(admin_psql -Atc "$whatsapp_messages_columns_sql"):$(admin_psql -Atc "$whatsapp_messages_table_sql")"
+  [[ "$whatsapp_messages_state" == 0:0:0 || "$whatsapp_messages_state" == 1:6:1 ]] || die "migration mensagens WhatsApp parcialmente aplicada"
+fi
 
 # Repeat every mutable safety gate immediately before granting the migration its short-lived
 # administrative authority. The runtime URL remains in use for Prisma and incident reads.
@@ -161,6 +168,8 @@ elif [[ "$MIGRATION_ID_REQUESTED" == 20261105120000_user_phone && "$user_phone_s
   log "migration celular do usuário já presente; DDL ignorado e pós-condições serão revalidadas"
 elif [[ "$MIGRATION_ID_REQUESTED" == 20261106120000_whatsapp_connection && "$whatsapp_connection_state" == 1:1 ]]; then
   log "migration conexão WhatsApp já presente; DDL ignorado e pós-condições serão revalidadas"
+elif [[ "$MIGRATION_ID_REQUESTED" == 20261107120000_whatsapp_messages && "$whatsapp_messages_state" == 1:6:1 ]]; then
+  log "migration mensagens WhatsApp já presente; DDL ignorado e pós-condições serão revalidadas"
 else
   log "aplicando migration versionada isoladamente; containers da aplicação não serão iniciados"
   admin_psql --single-transaction -f - < "$MIGRATION"
@@ -249,6 +258,28 @@ case "$MIGRATION_ID_REQUESTED" in
     [[ "$enum_labels" == PENDING_QR,CONNECTED,DISCONNECTED,REJECTED_WRONG_NUMBER,ERROR ]] || die "pós-condições da migration conexão WhatsApp divergentes (enum)"
     [[ "$table:$columns:$indexes:$foreign_key:$touched_rows" == 1:15:5:1:0 ]] || die "pós-condições da migration conexão WhatsApp divergentes"
     printf 'enum_labels\t%s\ntable\t%s\ncolumns\t%s\nindexes\t%s\nforeign_key\t%s\nrows_using_new_objects\t%s\nexisting_rows_preserved\tPASS\nold_api_compatible\tPASS\n' "$enum_labels" "$table" "$columns" "$indexes" "$foreign_key" "$touched_rows" >"$evidence/post-validation.tsv"
+    ;;
+  20261107120000_whatsapp_messages)
+    enum_value=$(admin_psql -Atc "$whatsapp_messages_enum_sql")
+    columns=$(admin_psql -Atc "$whatsapp_messages_columns_sql AND is_nullable='YES' AND column_default IS NULL")
+    table=$(admin_psql -Atc "$whatsapp_messages_table_sql")
+    table_columns=$(admin_psql -Atc "SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='ClientPhoneIndex'")
+    indexes=$(admin_psql -Atc "SELECT count(*) FROM pg_indexes WHERE schemaname='public' AND indexname IN ('ClientPhoneIndex_pkey','ClientPhoneIndex_phone_idx','ClientPhoneIndex_clientId_idx','ClientPhoneIndex_phone_clientId_source_key','CommunicationConversation_numberOwnerUserId_linkStatus_idx','CommunicationConversation_unlinkedExpiresAt_idx','CommunicationMessage_conversationId_providerTimestamp_idx')")
+    foreign_keys=$(admin_psql -Atc "SELECT count(*) FROM pg_constraint WHERE connamespace='public'::regnamespace AND contype='f' AND ((conname='CommunicationConversation_numberOwnerUserId_fkey' AND confdeltype='n') OR (conname='ClientPhoneIndex_clientId_fkey' AND confdeltype='c'))")
+    # The running (old) API knows neither the enum value, the columns nor the table, so any row
+    # using them would mean the migration itself wrote data. Race-free, unlike row counts.
+    touched_rows=$(admin_psql -Atc "SELECT (SELECT count(*) FROM \"ClientPhoneIndex\") + (SELECT count(*) FROM \"CommunicationConversation\" WHERE \"numberOwnerUserId\" IS NOT NULL OR \"linkStatus\" IS NOT NULL OR \"linkSource\" IS NOT NULL OR \"linkedById\" IS NOT NULL OR \"linkedAt\" IS NOT NULL OR \"unlinkedExpiresAt\" IS NOT NULL OR provider::text='evolution_whatsapp') + (SELECT count(*) FROM \"CommunicationMessage\" WHERE provider::text='evolution_whatsapp') + (SELECT count(*) FROM \"CommunicationWebhookEvent\" WHERE provider::text='evolution_whatsapp')")
+    [[ "$enum_value:$columns:$table:$table_columns:$indexes:$foreign_keys:$touched_rows" == 1:6:1:6:7:2:0 ]] || die "pós-condições da migration mensagens WhatsApp divergentes"
+    printf 'enum_value	%s
+columns_nullable	%s
+table	%s
+table_columns	%s
+indexes	%s
+foreign_keys	%s
+rows_using_new_objects	%s
+existing_rows_preserved	PASS
+old_api_compatible	PASS
+' "$enum_value" "$columns" "$table" "$table_columns" "$indexes" "$foreign_keys" "$touched_rows" >"$evidence/post-validation.tsv"
     ;;
   *) die "migration sem pós-condições cadastradas" ;;
 esac
