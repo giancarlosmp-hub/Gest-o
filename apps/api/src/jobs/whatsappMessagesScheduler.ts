@@ -4,12 +4,15 @@ import { rebuildClientPhoneIndex } from "../services/whatsappMessages/clientPhon
 import { runWhatsAppMessagesMaintenance } from "../services/whatsappMessages/whatsappMessagesMaintenance.js";
 import { reconcileWebhookSubscriptions } from "../services/whatsappMessages/whatsappWebhookSubscriptions.js";
 import { syncRecordingState } from "../services/whatsappMessages/whatsappRecordingState.js";
+import { whatsappTranscriptionQueue } from "../services/whatsappMessages/whatsappTranscriptionQueue.js";
 
 // WhatsApp Fase B, de hora em hora:
 // - limpeza: fila "não vinculadas" vencida (7 dias) e retenção das mensagens vinculadas (sempre roda,
 //   mesmo com a gravação desligada, para os dados já gravados respeitarem a retenção);
 // - uma vez por dia (e na subida): eventos do webhook das instâncias conectadas conforme as flags e, com a
-//   gravação ligada, reconstrução completa do índice telefone → cliente.
+//   gravação ligada, reconstrução completa do índice telefone → cliente;
+// - transcrição dos áudios: pendente antigo fora da fila (a API reiniciou) vira failed/interrupted e os
+//   contadores diários antigos saem (sempre roda, mesmo com a transcrição desligada).
 // Logs só com contagens e o nome do erro.
 
 const INTERVAL_MS = 60 * 60 * 1000;
@@ -27,6 +30,10 @@ export const whatsappMessagesTick = async (now = new Date()) => {
   try {
     const counts = await runWhatsAppMessagesMaintenance(now);
     logApiEvent("INFO", "[whatsapp scheduler] maintenance", counts);
+    await whatsappTranscriptionQueue
+      .sweep(now)
+      .then((sweep) => logApiEvent("INFO", "[whatsapp transcription] sweep", sweep))
+      .catch((error) => logApiEvent("WARN", "[whatsapp transcription] sweep failed", { error: errorName(error) }));
     if (now.getTime() - lastDailyAt >= DAILY_MS) {
       lastDailyAt = now.getTime();
       if (isWhatsAppEvolutionEnabled() && isWhatsAppEvolutionConfigured()) {

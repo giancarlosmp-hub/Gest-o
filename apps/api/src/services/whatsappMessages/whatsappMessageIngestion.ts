@@ -1,8 +1,10 @@
 import { CommunicationDirection, CommunicationMessageStatus, CommunicationMessageType } from "@prisma/client";
 import { logApiEvent } from "../../utils/logger.js";
-import { isWhatsAppMessagesEnabled } from "../whatsappConnection/config.js";
+import { env } from "../../config/env.js";
+import { isWhatsAppMessagesEnabled, isWhatsAppTranscriptionEnabled } from "../whatsappConnection/config.js";
 import { parseEvolutionMessageEvent, type ParsedEvolutionEvent } from "./evolutionMessageParser.js";
 import { PrismaWhatsAppMessageStore, type ConversationRow, type ConversationUpdate, type LinkStatus, type WhatsAppMessageStore } from "./whatsappMessageStore.js";
+import { initialTranscription, whatsappTranscriptionQueue, type TranscriptionJob } from "./whatsappTranscriptionQueue.js";
 
 // WhatsApp Fase B: grava as mensagens do número comercial conectado (enviadas pelo app do celular e
 // recebidas) e liga a conversa ao cliente pelo telefone. Não existe envio.
@@ -19,6 +21,8 @@ import { PrismaWhatsAppMessageStore, type ConversationRow, type ConversationUpda
 //   original apagada ou já marcada: nada muda. A apagada pelo contato perde a marca junto com o texto.
 // - Tipo desconhecido ("[mensagem não suportada]"): WARN só com os nomes dos campos de data.message.
 // - Relógio: messageTimestamp do WhatsApp; ausente ou mais de 5 min no futuro, vale a hora de chegada.
+// - Áudio com a transcrição ligada: grava mediaMetadata.transcription (pendente ou pulado) e, se pendente, põe
+//   na fila em memória a referência do arquivo (que não é gravada). A transcrição roda fora do webhook.
 // O resultado nunca traz texto, nome, número, JID ou id da mensagem: só códigos para log.
 
 export const UNLINKED_RETENTION_DAYS = 7;
@@ -32,6 +36,20 @@ export type IngestionResult = {
   userId?: string;
   link?: "linked" | "unlinked" | "ambiguous";
   direction?: "inbound" | "outbound";
+  transcription?: "pending" | "skipped";
+};
+
+/** O que a ingestão precisa da transcrição (os testes trocam por uma versão em memória). */
+export type TranscriptionHook = {
+  enabled: () => boolean;
+  maxSeconds: () => number;
+  enqueue: (job: TranscriptionJob) => void;
+};
+
+const defaultTranscription: TranscriptionHook = {
+  enabled: isWhatsAppTranscriptionEnabled,
+  maxSeconds: () => env.whatsappTranscriptionMaxSeconds,
+  enqueue: (job) => whatsappTranscriptionQueue.enqueue(job)
 };
 
 const addDays = (date: Date, days: number) => new Date(date.getTime() + days * 86_400_000);
@@ -43,7 +61,8 @@ export const maskContactPhone = (e164: string) => `(${e164.slice(2, 4)}) ****-${
 export class WhatsAppMessageIngestion {
   constructor(
     public store: WhatsAppMessageStore = new PrismaWhatsAppMessageStore(),
-    private readonly enabled: () => boolean = isWhatsAppMessagesEnabled
+    private readonly enabled: () => boolean = isWhatsAppMessagesEnabled,
+    private readonly transcription: TranscriptionHook = defaultTranscription
   ) {}
 
   async handle(payload: unknown, now = new Date()): Promise<IngestionResult> {
@@ -132,6 +151,10 @@ export class WhatsAppMessageIngestion {
     const current = await this.relink(conversation, parsed.contactPhone, now);
     const link = current.linkStatus;
     const direction = parsed.fromMe ? CommunicationDirection.OUTBOUND : CommunicationDirection.INBOUND;
+    const audio = parsed.audioSource && parsed.content.media && this.transcription.enabled() ? parsed.audioSource : null;
+    const transcription = audio
+      ? initialTranscription({ seconds: parsed.content.media?.seconds, fileLength: audio.fileLength, maxSeconds: this.transcription.maxSeconds(), now })
+      : null;
 
     const created = await this.store.createMessage({
       conversationId: conversation.id,
@@ -142,13 +165,22 @@ export class WhatsAppMessageIngestion {
       status: parsed.fromMe ? CommunicationMessageStatus.SENT : CommunicationMessageStatus.RECEIVED,
       type: parsed.content.type,
       textContent: parsed.content.text,
-      mediaMetadata: parsed.content.media,
+      mediaMetadata: transcription ? { ...parsed.content.media, transcription } : parsed.content.media,
       providerTimestamp: timestamp,
       // Fase B: tudo o que o vendedor envia sai pelo app do celular ("WhatsApp · via app").
       metadata: { ...(parsed.fromMe ? { origin: "app" } : {}), ...(clock ? { clock } : {}) }
     });
     const directionLabel = parsed.fromMe ? "outbound" : "inbound";
     if (created === "duplicate") return { ...base, status: "duplicate", link, direction: directionLabel };
+    if (audio && transcription?.status === "pending") {
+      this.transcription.enqueue({
+        instance: parsed.instance,
+        account: connection.account,
+        externalMessageId: parsed.externalMessageId,
+        seconds: parsed.content.media?.seconds ?? 0,
+        source: audio
+      });
+    }
 
     await this.store.updateConversation(conversation.id, {
       numberOwnerUserId: connection.userId,
@@ -159,7 +191,13 @@ export class WhatsAppMessageIngestion {
       ...(link !== "linked" && parsed.pushName ? { contactName: parsed.pushName } : {}),
       ...current.update
     });
-    return { ...base, status: "stored", link, direction: directionLabel };
+    return {
+      ...base,
+      status: "stored",
+      link,
+      direction: directionLabel,
+      ...(transcription ? { transcription: transcription.status === "pending" ? ("pending" as const) : ("skipped" as const) } : {})
+    };
   }
 
   private async edit(parsed: Extract<ParsedEvolutionEvent, { kind: "edit" }>, account: string, userId: string, now: Date): Promise<IngestionResult> {
