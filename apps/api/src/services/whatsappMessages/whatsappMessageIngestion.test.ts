@@ -125,7 +125,32 @@ const edit = (id: string, text: string) => ({ event: "messages.edited", instance
 assert.equal((await ingestion.handle(edit("M-1", "Pedido corrigido ficticio"), NOW)).status, "updated");
 assert.equal(messageOf("M-1").textContent, "Pedido corrigido ficticio");
 assert.equal(messageOf("M-1").metadata.editedAt, NOW.toISOString());
+assert.equal(messageOf("M-1").metadata.previousText, "Pedido ficticio", "guarda o texto anterior");
 assert.equal((await ingestion.handle(edit("M-INEXISTENTE", "x"), NOW)).status, "not_found");
+
+// 13b) Edição que chega em messages.upsert (protocolMessage MESSAGE_EDIT): atualiza a original e não cria linha.
+const upsertProtocol = (noticeId: string, protocolMessage: Record<string, unknown>) => ({
+  event: "messages.upsert",
+  instance: INSTANCE,
+  data: { key: { remoteJid: "5511900000101@s.whatsapp.net", fromMe: false, id: noticeId }, pushName: "Contato Ficticio", message: { protocolMessage }, messageType: "protocolMessage", messageTimestamp: at("2026-11-07T14:30:00.000Z") }
+});
+const upsertEdit = (noticeId: string, targetId: string, text: string) =>
+  upsertProtocol(noticeId, { key: { remoteJid: "5511900000101@s.whatsapp.net", fromMe: true, id: targetId }, type: 14, editedMessage: { conversation: text } });
+const rowsBeforeUpsertEdit = memory.messages.length;
+const LATER = new Date("2026-11-07T15:05:00.000Z");
+assert.deepEqual(await ingestion.handle(upsertEdit("AVISO-EDICAO-1", "M-1", "Pedido corrigido de novo ficticio"), LATER), { status: "updated", event: "edit", userId: "seller-a" });
+assert.equal(messageOf("M-1").textContent, "Pedido corrigido de novo ficticio");
+assert.equal(messageOf("M-1").metadata.previousText, "Pedido corrigido ficticio");
+assert.equal(messageOf("M-1").metadata.editedAt, LATER.toISOString());
+assert.equal(messageOf("M-1").type, "TEXT");
+assert.equal((await ingestion.handle(upsertEdit("AVISO-EDICAO-1", "M-1", "Pedido corrigido de novo ficticio"), NOW)).status, "duplicate", "reentrega não muda nada");
+assert.equal(messageOf("M-1").metadata.previousText, "Pedido corrigido ficticio");
+assert.equal(messageOf("M-1").metadata.editedAt, LATER.toISOString());
+assert.equal((await ingestion.handle(upsertEdit("AVISO-EDICAO-2", "M-INEXISTENTE", "x"), NOW)).status, "not_found");
+assert.equal((await ingestion.handle(upsertProtocol("AVISO-OUTRO", { type: 3, ephemeralExpiration: 86_400 }), NOW)).reason, "protocol");
+assert.equal(memory.messages.length, rowsBeforeUpsertEdit, "nenhuma linha nova");
+assert.equal(memory.messages.some((row) => row.externalMessageId.startsWith("AVISO-")), false);
+assert.equal(memory.messages.some((row) => row.type === "UNKNOWN"), false);
 
 // 14) Apagada pelo vendedor: mantém o texto com a marca. Pelo contato: só "[mensagem apagada]".
 const del = (id: string) => ({ event: "messages.delete", instance: INSTANCE, data: { remoteJid: "5511900000101@s.whatsapp.net", fromMe: false, id, status: "DELETED" } });
@@ -136,11 +161,29 @@ assert.equal((await ingestion.handle(del("M-1"), NOW)).direction, "inbound");
 assert.equal(messageOf("M-1").textContent, DELETED_BY_CONTACT_TEXT);
 assert.equal(messageOf("M-1").mediaMetadata, null);
 assert.equal(messageOf("M-1").metadata.editedAt, undefined, "marca de edição sai junto com o texto");
+assert.equal(messageOf("M-1").metadata.previousText, undefined, "texto anterior à edição sai junto");
 assert.equal(messageOf("M-1").metadata.deletedInWhatsAppAt, NOW.toISOString());
 assert.equal((await ingestion.handle(del("M-1"), NOW)).status, "duplicate", "reentrega do apagamento");
 assert.equal((await ingestion.handle(edit("M-1", "Volta ficticia"), NOW)).reason, "already_deleted");
 assert.equal(messageOf("M-1").textContent, DELETED_BY_CONTACT_TEXT);
 assert.equal((await ingestion.handle(del("M-INEXISTENTE"), NOW)).status, "not_found");
+
+// 14b) Revogação que chega em messages.upsert (protocolMessage REVOKE): mesma regra da apagada.
+await ingestion.handle(upsert("M-REV-IN", "5511900000101", "Recebida ficticia"), NOW);
+await ingestion.handle(upsert("M-REV-OUT", "5511900000101", "Enviada ficticia", { fromMe: true }), NOW);
+await ingestion.handle(upsertEdit("AVISO-EDICAO-3", "M-REV-IN", "Recebida editada ficticia"), NOW);
+const rowsBeforeRevoke = memory.messages.length;
+const revoke = (noticeId: string, targetId: string) => upsertProtocol(noticeId, { key: { remoteJid: "5511900000101@s.whatsapp.net", fromMe: false, id: targetId }, type: 0 });
+assert.deepEqual(await ingestion.handle(revoke("AVISO-REVOGA-1", "M-REV-IN"), NOW), { status: "updated", event: "delete", userId: "seller-a", direction: "inbound" });
+assert.equal(messageOf("M-REV-IN").textContent, DELETED_BY_CONTACT_TEXT);
+assert.deepEqual(messageOf("M-REV-IN").metadata, { deletedInWhatsAppAt: NOW.toISOString() }, "sem texto anterior nem marca de edição");
+assert.equal((await ingestion.handle(revoke("AVISO-REVOGA-2", "M-REV-OUT"), NOW)).direction, "outbound");
+assert.equal(messageOf("M-REV-OUT").textContent, "Enviada ficticia");
+assert.deepEqual(messageOf("M-REV-OUT").metadata, { origin: "app", deletedInWhatsAppAt: NOW.toISOString() });
+// O mesmo apagamento também chega por messages.delete: reentrega.
+assert.equal((await ingestion.handle(del("M-REV-IN"), NOW)).status, "duplicate");
+assert.equal((await ingestion.handle(revoke("AVISO-REVOGA-3", "M-INEXISTENTE"), NOW)).status, "not_found");
+assert.equal(memory.messages.length, rowsBeforeRevoke, "nenhuma linha nova");
 
 // 15) Áudio e imagem: só tipo, duração e legenda.
 await ingestion.handle({ ...upsert("M-12", "5511900000101", "x"), data: { ...upsert("M-12", "5511900000101", "x").data, message: { audioMessage: { seconds: 42, url: "https://mmg.invalid/a", mediaKey: "chave" } } } }, NOW);

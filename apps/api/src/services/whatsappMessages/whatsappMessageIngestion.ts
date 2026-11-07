@@ -1,4 +1,5 @@
 import { CommunicationDirection, CommunicationMessageStatus, CommunicationMessageType } from "@prisma/client";
+import { logApiEvent } from "../../utils/logger.js";
 import { isWhatsAppMessagesEnabled } from "../whatsappConnection/config.js";
 import { parseEvolutionMessageEvent, type ParsedEvolutionEvent } from "./evolutionMessageParser.js";
 import { PrismaWhatsAppMessageStore, type ConversationRow, type ConversationUpdate, type LinkStatus, type WhatsAppMessageStore } from "./whatsappMessageStore.js";
@@ -9,8 +10,11 @@ import { PrismaWhatsAppMessageStore, type ConversationRow, type ConversationUpda
 // - Idempotência: (provedor, número comercial, id da mensagem) é único; reentrega vira "duplicate".
 // - Vínculo: um cliente com o telefone = vinculada; nenhum ou mais de um = fila "não vinculadas" do dono do
 //   número, que expira em 7 dias. A cada mensagem nova de uma conversa sem vínculo a busca roda de novo.
-// - Editada: troca o texto e marca editedAt. Apagada: do vendedor, mantém o texto com a marca; do contato,
-//   o texto vira "[mensagem apagada]".
+// - Editada (messages.edited ou protocolMessage MESSAGE_EDIT dentro de messages.upsert): troca o texto e
+//   guarda o anterior e editedAt em metadata; nunca cria linha. Apagada (messages.delete ou REVOKE no
+//   upsert): do vendedor, mantém o texto com a marca; do contato, o texto vira "[mensagem apagada]" e o
+//   texto anterior da edição sai junto. Original não gravada: ignorada.
+// - Tipo desconhecido ("[mensagem não suportada]"): WARN só com os nomes dos campos de data.message.
 // - Relógio: messageTimestamp do WhatsApp; ausente ou mais de 5 min no futuro, vale a hora de chegada.
 // O resultado nunca traz texto, nome, número, JID ou id da mensagem: só códigos para log.
 
@@ -102,6 +106,9 @@ export class WhatsAppMessageIngestion {
 
   private async upsert(parsed: Extract<ParsedEvolutionEvent, { kind: "upsert" }>, connection: { userId: string; account: string }, now: Date): Promise<IngestionResult> {
     const base = { event: "upsert" as const, userId: connection.userId };
+    if (parsed.unsupportedFields) {
+      logApiEvent("WARN", "[whatsapp] unsupported message type", { fields: parsed.unsupportedFields, direction: parsed.fromMe ? "outbound" : "inbound" });
+    }
     const internal = await this.store.internalPhones();
     if (parsed.contactPhone === connection.account || internal.has(parsed.contactPhone)) {
       return { ...base, status: "ignored", reason: "internal_number" };
@@ -155,13 +162,18 @@ export class WhatsAppMessageIngestion {
     const message = await this.store.findMessage(account, parsed.targetMessageId);
     if (!message) return { status: "not_found", event: "edit", userId };
     if (message.metadata.deletedInWhatsAppAt) return { status: "ignored", event: "edit", userId, reason: "already_deleted" };
+    // Legenda editada de uma mídia mantém o tipo da mídia.
+    const keepsMediaType = message.type !== CommunicationMessageType.TEXT && parsed.content.type === CommunicationMessageType.TEXT;
+    const type = keepsMediaType ? message.type : parsed.content.type;
+    const textContent = keepsMediaType
+      ? `${(message.textContent ?? "").match(/^\[[^\]]+\]/)?.[0] ?? "[mídia]"} ${parsed.content.text}`
+      : parsed.content.text;
+    // Reentrega (ou o mesmo aviso por messages.edited e por messages.upsert): nada muda.
+    if (textContent === message.textContent && type === message.type) return { status: "duplicate", event: "edit", userId };
     await this.store.updateMessage(message.id, {
-      // Legenda editada de uma mídia mantém o tipo da mídia.
-      ...(parsed.content.type !== CommunicationMessageType.TEXT || message.type === CommunicationMessageType.TEXT ? { type: parsed.content.type } : {}),
-      textContent: message.type !== CommunicationMessageType.TEXT && parsed.content.type === CommunicationMessageType.TEXT
-        ? `${(message.textContent ?? "").match(/^\[[^\]]+\]/)?.[0] ?? "[mídia]"} ${parsed.content.text}`
-        : parsed.content.text,
-      metadata: { ...message.metadata, editedAt: now.toISOString() }
+      type,
+      textContent,
+      metadata: { ...message.metadata, previousText: message.textContent ?? null, editedAt: now.toISOString() }
     });
     return { status: "updated", event: "edit", userId };
   }
@@ -176,8 +188,8 @@ export class WhatsAppMessageIngestion {
       await this.store.updateMessage(message.id, { metadata });
       return { status: "updated", event: "delete", userId, direction: "outbound" };
     }
-    // Do contato: o texto sai, fica só o aviso.
-    const { editedAt: _editedAt, ...withoutEdit } = metadata;
+    // Do contato: o texto sai (também o anterior à edição), fica só o aviso.
+    const { editedAt: _editedAt, previousText: _previousText, ...withoutEdit } = metadata;
     await this.store.updateMessage(message.id, { textContent: DELETED_BY_CONTACT_TEXT, mediaMetadata: null, metadata: withoutEdit });
     return { status: "updated", event: "delete", userId, direction: "inbound" };
   }
