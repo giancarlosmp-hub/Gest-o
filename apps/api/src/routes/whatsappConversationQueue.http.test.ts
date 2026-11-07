@@ -168,6 +168,18 @@ try {
   assert.equal((await call("seller-b", "POST", "/whatsapp/unlinked/q-seller-b/discard")).status, 404);
 
   assert.equal((await call("seller-a", "GET", "/whatsapp/unlinked")).json.total, 0);
+
+  // 4) Corrida: a conversa saiu da fila entre a leitura e a gravação (outra aba vinculou ou descartou) → 409,
+  //    sem contato criado nem mensagem tocada.
+  tables.communicationConversation.push(queued("q-race", "seller-a", "5511900000309"));
+  const realUpdateMany = (prisma as any).communicationConversation.updateMany;
+  (prisma as any).communicationConversation.updateMany = async () => ({ count: 0 });
+  const contactsBefore = tables.contact.length;
+  const race = await call("seller-a", "POST", "/whatsapp/unlinked/q-race/link", { clientId: "client-a" });
+  (prisma as any).communicationConversation.updateMany = realUpdateMany;
+  assert.equal(race.status, 409);
+  assert.equal(race.json.code, "already_handled");
+  assert.equal(tables.contact.length, contactsBefore);
 } finally {
   server.close();
   await prisma.$disconnect().catch(() => undefined);
