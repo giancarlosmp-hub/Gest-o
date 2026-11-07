@@ -68,6 +68,12 @@
 | `WHATSAPP_EVOLUTION_WEBHOOK_SECRET` | segredo do webhook interno do Evolution | Condicional ao gate | repassada pelo env seguro; sem ela as rotas respondem 503 |
 | `WHATSAPP_EVOLUTION_MESSAGES_ENABLED` | gate da gravação das conversas (Evolution, Fase B) | Opcional, segura desligada | default `false`; exige também a Fase A ligada |
 | `WHATSAPP_MESSAGES_RETENTION_MONTHS` | retenção das mensagens vinculadas (Fase B) | Opcional | default `24`; inteiro ≥ 1, inválido volta a 24 |
+| `WHATSAPP_TRANSCRIPTION_ENABLED` | gate da transcrição dos áudios do WhatsApp | Opcional, segura desligada | default `false`; exige a gravação das conversas ligada e a chave |
+| `WHATSAPP_TRANSCRIPTION_BASE_URL` | endpoint no formato OpenAI do provedor de transcrição | Opcional | default `https://api.groq.com/openai/v1` |
+| `WHATSAPP_TRANSCRIPTION_API_KEY` | chave do provedor de transcrição (Groq, plano gratuito) | Condicional ao gate | repassada pelo env seguro; sem ela nada é transcrito |
+| `WHATSAPP_TRANSCRIPTION_MODEL` | modelo de transcrição | Opcional | default `whisper-large-v3` |
+| `WHATSAPP_TRANSCRIPTION_MAX_SECONDS` | duração máxima de um áudio transcrito | Opcional | default `600`; inteiro ≥ 1, inválido volta a 600 |
+| `WHATSAPP_TRANSCRIPTION_DAILY_MAX_MINUTES` | teto diário de minutos transcritos (dia de Brasília) | Opcional | default `180`; inteiro ≥ 1, inválido volta a 180 |
 | `GIT_COMMIT`, `GITHUB_SHA`, `VERCEL_GIT_COMMIT_SHA`, `COMMIT_SHA` | aliases de commit | Não usados no fluxo canônico | substituídos por `APP_COMMIT` validado |
 | `BUILD_TIMESTAMP`, `BUILT_AT` | aliases de build | Não usados no fluxo canônico | substituídos por `APP_BUILT_AT` |
 | `ACCESS_TOKEN_SECRET`, `REFRESH_TOKEN_SECRET` | aliases somente diagnósticos ERP | Não necessários com JWT canônico obrigatório | não repassados; `JWT_ACCESS_SECRET`/`JWT_REFRESH_SECRET` são obrigatórios |
