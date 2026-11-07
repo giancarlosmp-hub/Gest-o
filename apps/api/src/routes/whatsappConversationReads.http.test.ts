@@ -54,7 +54,7 @@ const message = (conversationId: string, iso: string, direction: "INBOUND" | "OU
   });
 };
 message("conv-a-seller-a", "2026-11-04T13:00:00.000Z", "INBOUND", "Mensagem ficticia antiga");
-message("conv-a-seller-a", "2026-11-05T13:00:00.000Z", "INBOUND", "Mensagem ficticia antes da oportunidade");
+message("conv-a-seller-a", "2026-11-05T13:00:00.000Z", "INBOUND", "Mensagem ficticia antes da oportunidade", { editedInWhatsAppAt: "2026-11-05T13:10:00.000Z" });
 message("conv-a-seller-a", "2026-11-05T16:00:00.000Z", "OUTBOUND", "Mensagem ficticia depois da oportunidade", { editedAt: "2026-11-05T16:01:00.000Z" });
 message("conv-a-seller-a", "2026-11-05T17:00:00.000Z", "OUTBOUND", "Mensagem ficticia apagada pelo vendedor", { deletedInWhatsAppAt: "2026-11-05T17:05:00.000Z" });
 message("conv-a-seller-a", "2026-11-05T18:00:00.000Z", "INBOUND", "[mensagem apagada]", { deletedInWhatsAppAt: "2026-11-05T18:05:00.000Z" });
@@ -128,12 +128,12 @@ try {
   const dayMessages = await get("seller-a", "/whatsapp/conversations/conv-a-seller-a/messages?day=2026-11-05");
   assert.equal(dayMessages.status, 200);
   assert.deepEqual(
-    dayMessages.json.items.map((item: any) => [item.text, item.origin, item.edited, item.deletedInWhatsApp]),
+    dayMessages.json.items.map((item: any) => [item.text, item.origin, item.edited, item.editedTextUnavailable, item.deletedInWhatsApp]),
     [
-      ["Mensagem ficticia antes da oportunidade", "received", false, false],
-      ["Mensagem ficticia depois da oportunidade", "app", true, false],
-      ["Mensagem ficticia apagada pelo vendedor", "app", false, true],
-      ["[mensagem apagada]", "received", false, true]
+      ["Mensagem ficticia antes da oportunidade", "received", false, true, false],
+      ["Mensagem ficticia depois da oportunidade", "app", true, false, false],
+      ["Mensagem ficticia apagada pelo vendedor", "app", false, false, true],
+      ["[mensagem apagada]", "received", false, false, true]
     ]
   );
   assert.equal(dayMessages.json.nextCursor, null);

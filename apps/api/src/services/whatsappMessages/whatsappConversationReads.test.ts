@@ -67,6 +67,7 @@ assert.deepEqual(outbound, {
   at: new Date("2026-11-06T15:00:00.000Z"),
   origin: "app",
   edited: true,
+  editedTextUnavailable: false,
   deletedInWhatsApp: true
 });
 const inbound = toMessageView({ id: "msg-2", direction: CommunicationDirection.INBOUND, type: "TEXT", textContent: null, providerTimestamp: null, metadata: null });
@@ -74,5 +75,11 @@ assert.equal(inbound.origin, "received");
 assert.equal(inbound.text, "");
 assert.equal(inbound.edited, false);
 assert.equal(inbound.deletedInWhatsApp, false);
+assert.equal(inbound.editedTextUnavailable, false);
+// Edição cifrada: só a marca, o texto continua o original.
+const encrypted = toMessageView({ id: "msg-3", direction: CommunicationDirection.INBOUND, type: "TEXT", textContent: "Texto ficticio original", providerTimestamp: null, metadata: { editedInWhatsAppAt: "2026-11-06T15:03:00.000Z" } });
+assert.equal(encrypted.editedTextUnavailable, true);
+assert.equal(encrypted.edited, false);
+assert.equal(encrypted.text, "Texto ficticio original");
 
 console.log("whatsappConversationReads.test.ts: ok");
