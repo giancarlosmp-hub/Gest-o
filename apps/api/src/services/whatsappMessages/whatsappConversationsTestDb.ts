@@ -23,7 +23,8 @@ export function createWhatsAppConversationsTestDb(prisma: PrismaClient) {
     clientPhoneIndex: [],
     communicationConversation: [],
     communicationMessage: [],
-    appConfig: []
+    appConfig: [],
+    whatsAppConnection: []
   };
   const tenantOf: Record<string, string> = { "seller-other-tenant": "tenant-b" };
   let sequence = 0;

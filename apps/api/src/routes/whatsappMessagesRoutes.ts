@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { Role } from "@prisma/client";
+import { Role, WhatsAppConnectionStatus } from "@prisma/client";
 import { z } from "zod";
 import { createAsyncRouter } from "../utils/asyncRouter.js";
 import { authMiddleware } from "../middlewares/auth.js";
@@ -8,8 +8,11 @@ import { prisma } from "../config/prisma.js";
 import { resolveUniqueActiveTenantForUser } from "../services/ultraFv3SyncService.js";
 import { EVOLUTION_PROVIDER } from "../services/whatsappMessages/whatsappMessageStore.js";
 import { brazilDayStart, readClientDayCards, readConversationDayMessages } from "../services/whatsappMessages/whatsappConversationReads.js";
+import { isWhatsAppMessagesEnabled } from "../services/whatsappConnection/config.js";
+import { readRecordingState, recordingSinceFor } from "../services/whatsappMessages/whatsappRecordingState.js";
 import {
   WhatsAppQueueError,
+  countUnlinkedConversations,
   discardUnlinkedConversation,
   linkUnlinkedConversation,
   listUnlinkedConversations
@@ -143,4 +146,16 @@ whatsappMessagesRoutes.post("/unlinked/:conversationId/discard", async (req, res
   } catch (error) {
     return sendQueueError(res, error);
   }
+});
+
+// Cartão "Meu número": gravação ligada/desligada desde quando e o tamanho da própria fila.
+whatsappMessagesRoutes.get("/messages/summary", async (req, res) => {
+  const [state, connection, unlinkedCount] = await Promise.all([
+    readRecordingState(),
+    prisma.whatsAppConnection.findUnique({ where: { userId: req.user!.id }, select: { status: true, connectedAt: true } }),
+    countUnlinkedConversations(req.user!.id)
+  ]);
+  const enabled = isWhatsAppMessagesEnabled();
+  const connectedAt = connection?.status === WhatsAppConnectionStatus.CONNECTED ? connection.connectedAt : null;
+  return res.json({ recording: { enabled, since: recordingSinceFor({ enabled, state, connectedAt }) }, unlinkedCount });
 });
