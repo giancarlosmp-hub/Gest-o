@@ -185,6 +185,50 @@ assert.equal((await ingestion.handle(del("M-REV-IN"), NOW)).status, "duplicate")
 assert.equal((await ingestion.handle(revoke("AVISO-REVOGA-3", "M-INEXISTENTE"), NOW)).status, "not_found");
 assert.equal(memory.messages.length, rowsBeforeRevoke, "nenhuma linha nova");
 
+// 14c) Edição cifrada (secretEncryptedMessage MESSAGE_EDIT em messages.upsert): marca a original com
+// editedInWhatsAppAt, mantém o texto e não guarda texto anterior. Os bytes vêm como o JSON do Evolution.
+const bytes = (length: number, seed: number) => Object.fromEntries(Array.from({ length }, (_, index) => [String(index), (seed + index * 7) % 256]));
+const encryptedEdit = (noticeId: string, targetId: string, secretEncType: unknown = 2) => ({
+  event: "messages.upsert",
+  instance: INSTANCE,
+  data: {
+    key: { remoteJid: "5511900000101@s.whatsapp.net", fromMe: false, id: noticeId },
+    pushName: "Contato Ficticio",
+    message: {
+      secretEncryptedMessage: { targetMessageKey: { remoteJid: "5511900000101@s.whatsapp.net", fromMe: false, id: targetId }, encPayload: bytes(48, 11), encIv: bytes(12, 3), secretEncType },
+      messageContextInfo: { messageSecret: bytes(32, 5) }
+    },
+    messageType: "secretEncryptedMessage",
+    messageTimestamp: at("2026-11-07T14:40:00.000Z")
+  }
+});
+await ingestion.handle(upsert("M-CIF-IN", "5511900000101", "Recebida cifrada ficticia"), NOW);
+await ingestion.handle(upsert("M-CIF-OUT", "5511900000101", "Enviada cifrada ficticia", { fromMe: true }), NOW);
+const rowsBeforeEncrypted = memory.messages.length;
+const marked = await ingestion.handle(encryptedEdit("AVISO-CIFRADO-1", "M-CIF-IN"), LATER);
+assert.deepEqual(marked, { status: "updated", event: "edit", userId: "seller-a", reason: "text_unavailable" });
+assert.equal(messageOf("M-CIF-IN").textContent, "Recebida cifrada ficticia", "texto mantido");
+assert.deepEqual(messageOf("M-CIF-IN").metadata, { editedInWhatsAppAt: LATER.toISOString() }, "sem previousText nem editedAt");
+assert.equal((await ingestion.handle(encryptedEdit("AVISO-CIFRADO-1", "M-CIF-IN"), NOW)).status, "duplicate", "reentrega não muda nada");
+assert.equal((await ingestion.handle(encryptedEdit("AVISO-CIFRADO-2", "M-CIF-IN"), NOW)).status, "duplicate", "outra edição cifrada: a marca já existe");
+assert.deepEqual(messageOf("M-CIF-IN").metadata, { editedInWhatsAppAt: LATER.toISOString() });
+assert.equal((await ingestion.handle(encryptedEdit("AVISO-CIFRADO-3", "M-CIF-OUT"), NOW)).status, "updated");
+assert.deepEqual(messageOf("M-CIF-OUT").metadata, { origin: "app", editedInWhatsAppAt: NOW.toISOString() });
+assert.equal(messageOf("M-CIF-OUT").textContent, "Enviada cifrada ficticia");
+// Original inexistente: ignorada. Outro secretEncType: ignorado pelo parser.
+assert.equal((await ingestion.handle(encryptedEdit("AVISO-CIFRADO-4", "M-INEXISTENTE"), NOW)).status, "not_found");
+assert.deepEqual(await ingestion.handle(encryptedEdit("AVISO-CIFRADO-5", "M-CIF-IN", 1), NOW), { status: "ignored", event: "other", reason: "secret_encrypted" });
+// Original apagada: nada muda. Apagada pelo contato depois da marca: a marca sai junto com o texto.
+assert.deepEqual(await ingestion.handle(encryptedEdit("AVISO-CIFRADO-6", "M-REV-OUT"), NOW), { status: "ignored", event: "edit", userId: "seller-a", reason: "already_deleted" });
+assert.deepEqual(messageOf("M-REV-OUT").metadata, { origin: "app", deletedInWhatsAppAt: NOW.toISOString() });
+await ingestion.handle(del("M-CIF-IN"), NOW);
+assert.deepEqual(messageOf("M-CIF-IN").metadata, { deletedInWhatsAppAt: NOW.toISOString() }, "sem a marca de edição");
+await ingestion.handle(del("M-CIF-OUT"), NOW);
+assert.deepEqual(messageOf("M-CIF-OUT").metadata, { origin: "app", editedInWhatsAppAt: NOW.toISOString(), deletedInWhatsAppAt: NOW.toISOString() }, "do vendedor mantém texto e marca");
+assert.equal(memory.messages.length, rowsBeforeEncrypted, "nenhuma linha nova");
+assert.equal(memory.messages.some((row) => row.externalMessageId.startsWith("AVISO-CIFRADO")), false);
+assert.doesNotMatch(JSON.stringify(marked), /ficticia|5511900000|s\.whatsapp|M-CIF|AVISO/);
+
 // 15) Áudio e imagem: só tipo, duração e legenda.
 await ingestion.handle({ ...upsert("M-12", "5511900000101", "x"), data: { ...upsert("M-12", "5511900000101", "x").data, message: { audioMessage: { seconds: 42, url: "https://mmg.invalid/a", mediaKey: "chave" } } } }, NOW);
 assert.equal(messageOf("M-12").textContent, "[áudio 0:42]");

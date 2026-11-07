@@ -152,11 +152,29 @@ for (const protocolMessage of [
 ]) {
   assert.deepEqual(parseEvolutionMessageEvent(upsert(contactKey(), { protocolMessage })), { kind: "ignored", reason: "protocol" }, JSON.stringify(protocolMessage.type));
 }
-// Edição cifrada (secretEncryptedMessage): sem texto novo legível, ignorada.
+// Edição cifrada (secretEncryptedMessage, Baileys 7.0.0-rc.9: SecretEncType UNKNOWN 0, EVENT_EDIT 1,
+// MESSAGE_EDIT 2). Os bytes chegam serializados pelo JSON do Evolution ({ "0": n, ... } ou Buffer).
+const bytes = (length: number, seed: number) => Object.fromEntries(Array.from({ length }, (_, index) => [String(index), (seed + index * 7) % 256]));
+const secret = (secretEncType: unknown, targetMessageKey: unknown = contactKey("ID-ORIGINAL-1", true)) => ({
+  secretEncryptedMessage: { targetMessageKey, encPayload: bytes(48, 11), encIv: bytes(12, 3), secretEncType },
+  messageContextInfo: { messageSecret: bytes(32, 5) }
+});
+const editWithoutText = { kind: "edit_without_text", instance: INSTANCE, targetMessageId: "ID-ORIGINAL-1" };
+assert.deepEqual(parseEvolutionMessageEvent(upsert(contactKey("ID-AVISO-CIFRADO"), secret(2), { messageType: "secretEncryptedMessage" })), editWithoutText);
+assert.deepEqual(parseEvolutionMessageEvent(upsert(contactKey("ID-AVISO-CIFRADO"), secret("MESSAGE_EDIT"))), editWithoutText, "enum por nome");
 assert.deepEqual(
-  parseEvolutionMessageEvent(upsert(contactKey(), { secretEncryptedMessage: { targetMessageKey: contactKey("ID-ORIGINAL-1"), encPayload: { 0: 1 }, encIv: { 0: 2 }, secretEncType: 2 }, messageContextInfo: {} })),
-  { kind: "ignored", reason: "secret_encrypted" }
+  parseEvolutionMessageEvent(upsert(contactKey("ID-AVISO-CIFRADO"), { ephemeralMessage: { message: secret(2) } })),
+  editWithoutText,
+  "conversa temporária"
 );
+const bufferPayload = { secretEncryptedMessage: { targetMessageKey: contactKey("ID-ORIGINAL-1"), encPayload: { type: "Buffer", data: [1, 2, 3] }, encIv: { type: "Buffer", data: [4, 5] }, secretEncType: 2 } };
+assert.deepEqual(parseEvolutionMessageEvent(upsert(contactKey("ID-AVISO-CIFRADO"), bufferPayload)), editWithoutText, "bytes como Buffer");
+// Outro secretEncType (ou ausente): continua ignorado. MESSAGE_EDIT sem id da original: payload inválido.
+for (const type of [0, 1, "EVENT_EDIT", "UNKNOWN", undefined, 99]) {
+  assert.deepEqual(parseEvolutionMessageEvent(upsert(contactKey(), secret(type))), { kind: "ignored", reason: "secret_encrypted" }, String(type));
+}
+assert.deepEqual(parseEvolutionMessageEvent(upsert(contactKey(), secret(2, { remoteJid: "5511900000101@s.whatsapp.net" }))), { kind: "ignored", reason: "invalid_payload" });
+assert.deepEqual(parseEvolutionMessageEvent(upsert(contactKey(), secret(2, null))), { kind: "ignored", reason: "invalid_payload" });
 
 // 8) Tipo realmente desconhecido: grava "[mensagem não suportada]" e devolve só os nomes dos campos de
 // primeiro nível de data.message (para o log), nunca valores.
