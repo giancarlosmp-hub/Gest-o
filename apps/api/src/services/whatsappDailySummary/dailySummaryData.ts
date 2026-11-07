@@ -1,8 +1,9 @@
 import { OpportunityStage, type Prisma } from "@prisma/client";
 import { WHATSAPP_DAILY_SUMMARY_MAX_ITEMS_PER_SECTION, type WhatsAppDailySummarySections } from "@salesforce-pro/shared";
+import { env } from "../../config/env.js";
 import { prisma as defaultPrisma } from "../../config/prisma.js";
 import { inactiveRecentAutomationOpportunityWhere } from "../commercialAutomationsService.js";
-import type { DailySummaryData, DailySummaryItem, DailySummarySection } from "./dailySummaryFormat.js";
+import { formatDailySummary, type DailySummaryData, type DailySummaryItem, type DailySummarySection } from "./dailySummaryFormat.js";
 
 // WhatsApp Fase D: o que entra no resumo de um vendedor. Só oportunidades dele (ownerSellerId), de cliente
 // não arquivado:
@@ -73,4 +74,15 @@ export async function loadDailySummaryData(
     data.sections.todayFollowUps = await section([open, { followUpDate: { gte: todayStart, lt: tomorrowStart } }], [{ followUpDate: "asc" }]);
   }
   return data;
+}
+
+/** Texto do resumo do vendedor (link do CRM pelo FRONTEND_URL), ou null quando não há nada a enviar. */
+export async function buildDailySummaryText(
+  seller: { id: string; name: string },
+  sections: WhatsAppDailySummarySections,
+  now: Date,
+  db: SummaryDb = defaultPrisma
+): Promise<string | null> {
+  const data = await loadDailySummaryData(seller, sections, now, db);
+  return formatDailySummary(data, { crmUrl: env.frontendUrl || null });
 }
