@@ -25,6 +25,7 @@ const KEY_ID = "3EB0FICTICIOKEYID0001";
 const TEXT = "Texto ficticio sigiloso";
 const CAPTION = "Legenda ficticia sigilosa";
 const PUSH_NAME = "Nome Ficticio Sigiloso";
+const FILE_NAME = "arquivo-ficticio-sigiloso.pdf";
 
 const server = app.listen(0);
 await once(server, "listening");
@@ -71,6 +72,34 @@ try {
   assert.deepEqual((await post(upsert(`${KEY_ID}-IMG`, { imageMessage: { caption: CAPTION, url: "https://mmg.invalid/x" } }))).json, { status: "stored" });
   assert.deepEqual((await post({ event: "messages.delete", instance: INSTANCE, data: { remoteJid: `${CONTACT}@s.whatsapp.net`, id: KEY_ID, status: "DELETED" } })).json, { status: "updated" });
 
+  // 2b) Tamanho real do Evolution v2.3.7: os binários da mensagem chegam como Uint8Array serializado,
+  // {"0":12,"1":34,...} (~10 bytes por byte). Imagem e documento com miniatura de 60 KB passam de 512 KiB
+  // (o limite antigo, que devolvia 413) e precisam ser gravados. Bytes fictícios.
+  const binary = (size: number, seed: number) => JSON.parse(JSON.stringify(Uint8Array.from({ length: size }, (_, index) => (index * 31 + seed) % 256)));
+  const contextInfo = { deviceListMetadata: { senderKeyHash: binary(10, 1), senderTimestamp: 1_794_000_000, recipientKeyHash: binary(10, 2), recipientTimestamp: 1_794_000_000 }, deviceListMetadataVersion: 2, messageSecret: binary(32, 3) };
+  const media = (mimetype: string, thumbnailBytes: number) => ({
+    url: "https://mmg.invalid/midia-ficticia", mimetype, fileSha256: binary(32, 4), fileLength: 123_456, mediaKey: binary(32, 5), fileEncSha256: binary(32, 6),
+    directPath: "/midia-ficticia", mediaKeyTimestamp: 1_794_000_000, ...(thumbnailBytes ? { jpegThumbnail: binary(thumbnailBytes, 7) } : {})
+  });
+  const real = {
+    text: upsert(`${KEY_ID}-REAL-TXT`, { conversation: TEXT, messageContextInfo: contextInfo }),
+    image: upsert(`${KEY_ID}-REAL-IMG`, { imageMessage: { ...media("image/jpeg", 60 * 1024), caption: CAPTION, height: 1280, width: 960, scansSidecar: binary(80, 8), midQualityFileSha256: binary(32, 9) }, messageContextInfo: contextInfo }),
+    document: upsert(`${KEY_ID}-REAL-DOC`, { documentMessage: { ...media("application/pdf", 60 * 1024), fileName: FILE_NAME, caption: CAPTION, pageCount: 3 }, messageContextInfo: contextInfo }),
+    audio: upsert(`${KEY_ID}-REAL-AUD`, { audioMessage: { ...media("audio/ogg; codecs=opus", 0), seconds: 12, ptt: true, waveform: binary(64, 10) }, messageContextInfo: contextInfo }),
+    reply: (() => {
+      // Resposta a uma imagem: o Evolution põe a mensagem citada (com a miniatura) em data.contextInfo.
+      const event = upsert(`${KEY_ID}-REAL-RPL`, { conversation: TEXT, messageContextInfo: contextInfo });
+      return { ...event, data: { ...event.data, contextInfo: { stanzaId: `${KEY_ID}-CITADA`, participant: `${CONTACT}@s.whatsapp.net`, quotedMessage: { imageMessage: { ...media("image/jpeg", 60 * 1024), caption: CAPTION } } } } };
+    })()
+  };
+  const sizeKiB = (body: unknown) => Buffer.byteLength(JSON.stringify(body)) / 1024;
+  for (const name of ["image", "document", "reply"] as const) assert(sizeKiB(real[name]) > 512, `${name} passa de 512 KiB (${sizeKiB(real[name]).toFixed(0)} KiB)`);
+  for (const [name, body] of Object.entries(real)) {
+    const response = await post(body);
+    assert.equal(response.status, 200, `${name}: ${response.status}`);
+    assert.deepEqual(response.json, { status: "stored" }, name);
+  }
+
   // 3) Instância desconhecida: 202 (o Evolution não repete), nada gravado.
   assert.equal((await post({ ...upsert("OUTRO-ID", { conversation: TEXT }), instance: "crm-desconhecida" })).status, 202);
 
@@ -94,7 +123,7 @@ try {
   assert.match(logged, /"status":"stored"/);
   assert.match(logged, /\[whatsapp\] message event failed/);
   assert.match(logged, /P2024/);
-  for (const forbidden of [TEXT, CAPTION, PUSH_NAME, CONTACT, "900000201", `${CONTACT}@s.whatsapp.net`, "s.whatsapp.net", KEY_ID, "FALHA-ID", "RAJADA-", INSTANCE_TOKEN, SECRET, "mmg.invalid", "5511900000001"]) {
+  for (const forbidden of [TEXT, CAPTION, PUSH_NAME, CONTACT, "900000201", `${CONTACT}@s.whatsapp.net`, "s.whatsapp.net", KEY_ID, "FALHA-ID", "RAJADA-", INSTANCE_TOKEN, SECRET, "mmg.invalid", "5511900000001", FILE_NAME, "-REAL-", "-CITADA"]) {
     assert.equal(logged.includes(forbidden), false, `log sem ${forbidden}`);
   }
 
