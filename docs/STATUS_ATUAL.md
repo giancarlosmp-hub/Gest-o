@@ -23,7 +23,8 @@
   de um: fila "não vinculadas" do dono do número, apagada em 7 dias. Sem envio pelo CRM.
 - Webhook interno: `messages.upsert`/`edited`/`delete`, idempotência pelo id da mensagem, editada troca o texto,
   apagada do contato vira `[mensagem apagada]`, grupo/status/transmissão/canal/LID/reação/usuários do CRM
-  ignorados, mídia só com tipo e legenda. Corpo até 512 KiB e rate limit próprio. Log sem conteúdo nem número.
+  ignorados, mídia só com tipo e legenda. Corpo até 4 MiB (acima: 200 e log só com o tamanho) e rate limit
+  próprio. Log sem conteúdo nem número.
 - Instâncias já conectadas assinam os eventos novos sem novo QR (`/webhook/set`, lista sempre explícita).
 - Job de hora em hora: fila vencida, retenção de 24 meses (configurável), índice e eventos diários.
 - Migration `20261107120000_whatsapp_messages` (só aditiva), registrada no **Production Schema PR827**.

@@ -85,9 +85,24 @@ try {
 
   // 4) Corpo inválido ou grande demais.
   assert.equal((await post("{nao-e-json")).status, 400);
-  // Limite de 512 KiB (Fase B: mensagens trazem miniatura e mensagem citada).
-  assert.equal((await post({ event: "connection.update", padding: "x".repeat(300 * 1024) })).status, 202, "abaixo do limite é lido");
-  assert.equal((await post({ event: "connection.update", padding: "x".repeat(600 * 1024) })).status, 413);
+  // Limite de 4 MiB (o Evolution manda os binários da mensagem como {"0":12,...}, ~10 bytes por byte).
+  assert.equal((await post({ event: "connection.update", padding: "x".repeat(600 * 1024) })).status, 202, "600 KiB (antes 413) é lido");
+  assert.equal((await post({ event: "connection.update", padding: "x".repeat(3 * 1024 * 1024) })).status, 202, "3 MiB é lido");
+  // Acima do limite: 200 (com 413 o Evolution repetiria o mesmo corpo 10 vezes) e log só com o tamanho.
+  const PADDING_MARK = "conteudo-ficticio-grande-";
+  const tooLarge = await post({ event: "messages.upsert", padding: PADDING_MARK.repeat(Math.ceil((4 * 1024 * 1024 + 1) / PADDING_MARK.length)) });
+  assert.equal(tooLarge.status, 200);
+  assert.deepEqual(tooLarge.json, { status: "too_large" });
+  const tooLargeLog = logs.find((line) => line.includes("[whatsapp] webhook body too large"));
+  assert(tooLargeLog, "recusa pelo tamanho registrada");
+  assert.match(tooLargeLog, /"reason":"body_too_large"/);
+  assert.match(tooLargeLog, /"limitBytes":4194304/);
+  assert.match(tooLargeLog, /"bytes":\d{7,}/);
+  assert.match(tooLargeLog, /"droppedSinceBoot":1/);
+  assert.equal(logs.some((line) => line.includes(PADDING_MARK)), false, "corpo grande não vai para log");
+  assert.equal(logs.some((line) => line.includes("[express error]")), false, "não passa pelo handler de erro");
+  // Sem segredo, o corpo grande nem é lido: 401.
+  assert.equal((await post({ event: "messages.upsert", padding: "x".repeat(5 * 1024 * 1024) }, {})).status, 401);
 
   // 5) QR e outros eventos: ignorados, nada gravado.
   const qr = await post(event("crm-aaaaaaaaaaaaaaaaaaaaaaaa", "qrcode.updated", { qrcode: { base64: harness.FAKE_QR, code: "x" } }));
