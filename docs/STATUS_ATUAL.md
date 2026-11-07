@@ -1,3 +1,14 @@
+# WhatsApp: transcrição dos áudios — código pronto, aguardando merge — 07/11/2026
+
+- Áudios recebidos e enviados pelo app viram texto no cartão "WhatsApp · dd/mm" (`🎤 0:42` + selo "transcrição
+  automática"). Só o texto é guardado, em `mediaMetadata.transcription`; o arquivo fica só em memória.
+- Groq no plano gratuito (`whisper-large-v3`, `pt`, vocabulário do agro fixo), por `fetch`. Fila em memória fora
+  do webhook, um áudio por vez; 429 respeita `retry-after` e, esgotadas as tentativas, `failed/rate_limited`.
+  Limite de 600 s por áudio e teto de 180 min/dia (`AppConfig`).
+- Desligada por padrão. Seis variáveis `WHATSAPP_TRANSCRIPTION_*` novas no compose de produção. Sem migration.
+  Detalhes em [communications/whatsapp-evolution.md](communications/whatsapp-evolution.md#transcrição-dos-áudios);
+  pendências em `TD-WHATSAPP-MESSAGES`.
+
 # WhatsApp Fase B2: telas e rotas das conversas — código pronto, aguardando merge — 07/11/2026
 
 - Linha do tempo do cliente e da oportunidade com cartões "WhatsApp · dd/mm" (conversa e dia de Brasília),
