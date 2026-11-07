@@ -1661,13 +1661,14 @@ Pendente:
   - Dia com mais de 3.000 mensagens de um cliente: o cartão mostra só a contagem lida.
   - "Desde dd/mm" começa a contar no primeiro deploy do B2 (estado em `AppConfig`); não há a data real de
     ligações anteriores.
-- O formato do evento de edição (`MESSAGES_EDITED` = `protocolMessage` com a chave da original) e do de apagada
-  (`{ ...key, status: "DELETED" }`) foi lido no código-fonte do Evolution v2.3.7. Em produção a apagada
-  funcionou, mas uma edição virou linha `[mensagem não suportada]` em `MESSAGES_UPSERT`. Edição e revogação
-  dentro do upsert passaram a ser tratadas e `secretEncryptedMessage` (edição cifrada) é ignorado; o formato
-  exato daquela edição não foi visto. Confirmar no próximo teste pelo log `[whatsapp] unsupported message
-  type` (nomes dos campos) ou pelo motivo `secret_encrypted` em `[whatsapp] message event`. Se a edição vier
-  cifrada, o texto novo não é gravado (exige decifrar com o `messageSecret` da original, que não é guardado).
+- **Edição cifrada: confirmada, tratada com marca.** Em produção a edição chega em `MESSAGES_UPSERT` como
+  `secretEncryptedMessage` (`secretEncType` 2, `MESSAGE_EDIT`). Decisão: não decifrar (não guardar o
+  `messageSecret`). A original recebe `metadata.editedInWhatsAppAt` e o cartão mostra "(editada no WhatsApp –
+  texto novo não disponível)"; o texto exibido continua o original. Limites conhecidos:
+  - o texto novo nunca aparece no CRM; ver o conteúdo exige o celular;
+  - uma edição legível (`protocolMessage`) que chegue depois mantém a marca, e o cartão mostra "editada" e a
+    marca juntos;
+  - original anterior à ligação da Fase B (não gravada): a edição é ignorada.
 - Sem importação de histórico: mensagens anteriores à ligação da Fase B não entram (`MESSAGES_SET` não assinado).
 - Pedido de exclusão de um titular (LGPD): não há rota para apagar as conversas de um contato; a exclusão de
   cliente segue bloqueada com 409 quando há conversas.
