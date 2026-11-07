@@ -209,9 +209,13 @@ Desligado por padrão: exige `COMMUNICATIONS_ENABLED`, `WHATSAPP_EVOLUTION_ENABL
 - Instâncias já conectadas na Fase A passam para a lista nova **sem novo QR**, por `POST /webhook/set/{instância}`
   (o Evolution faz upsert por instância): na subida da API, uma vez por dia e na consulta de
   `GET /whatsapp/connection`. Instância nova já nasce com a lista atual.
-- Limites do webhook interno: corpo de até 512 KiB (mensagens trazem miniatura e mensagem citada) e rate limit
-  próprio de 30 mil eventos por 15 min, separado do webhook da Meta. O Evolution repete 429, 5xx e timeout até 10
-  vezes e não repete 400, 401, 403, 404 e 422; falha ao gravar responde 503 sem detalhes.
+- Limites do webhook interno: corpo de até 4 MiB e rate limit próprio de 30 mil eventos por 15 min, separado do
+  webhook da Meta. O Evolution v2.3.7 manda os binários da mensagem (miniatura, chaves, hashes) como
+  `{"0":12,"1":34,...}`, ~10 bytes por byte: imagem ou documento com miniatura de 60 KB passa de 600 KiB (o limite
+  antigo, 512 KiB, recusava com 413). Acima de 4 MiB a rota responde 200 `{"status":"too_large"}` e registra
+  `[whatsapp] webhook body too large` só com tamanho declarado, limite e contagem desde a subida (a mensagem se
+  perde, mas sem 10 reenvios inúteis). O Evolution repete 413, 429, 5xx e timeout até 10 vezes e não repete 400,
+  401, 403, 404 e 422; falha ao gravar responde 503 sem detalhes.
 
 ### Regras
 
