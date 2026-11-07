@@ -53,3 +53,8 @@ export const authRefreshRateLimit = createRateLimiter("auth-refresh", 60, 1_000)
 export const appUsageRateLimit = createRateLimiter("app-usage", 2_000, 10_000);
 
 export const communicationsWebhookRateLimit = createRateLimiter("communications-webhook", 120, 120);
+// Webhook interno do Evolution (WhatsApp Fase B): todos os eventos chegam do mesmo container, e cada
+// mensagem enviada ou recebida por qualquer número conectado é um evento. Estimativa de 20 números com 300
+// mensagens/dia (cerca de 6 mil eventos/dia) mais rajadas ao reconectar: 30 mil por 15 min (~33/s) cobre
+// com folga. 429 faz o Evolution repetir (até 10 vezes) e depois a mensagem se perde.
+export const whatsappEvolutionWebhookRateLimit = createRateLimiter("whatsapp-evolution-webhook", 30_000, 30_000);
