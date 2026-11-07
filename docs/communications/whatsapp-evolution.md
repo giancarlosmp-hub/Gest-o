@@ -231,10 +231,21 @@ Desligado por padrão: exige `COMMUNICATIONS_ENABLED`, `WHATSAPP_EVOLUTION_ENABL
   atualizado por cliente quando um contato muda, quando código ou documento do cliente mudam e na mesclagem.
 - **Origem:** mensagem do vendedor = `OUTBOUND` com `metadata.origin = "app"` ("WhatsApp · via app").
 - **Idempotência:** o id da mensagem é único dentro do número comercial; reentrega não grava de novo.
-- **Editada:** troca o texto e marca `metadata.editedAt` (legenda editada mantém o tipo da mídia). Original
-  ainda não gravada: ignorada.
+- **Editada:** troca o texto e guarda `metadata.previousText` (texto anterior) e `metadata.editedAt` (legenda
+  editada mantém o tipo da mídia); nunca cria linha. Chega por `MESSAGES_EDITED` ou dentro de `MESSAGES_UPSERT`
+  como `protocolMessage` type 14 (`MESSAGE_EDIT`) com `editedMessage` e a chave da original em `key.id` (solto,
+  em `editedMessage.message` ou em `ephemeralMessage.message`: o Evolution v2.3.7 só desvia para
+  `MESSAGES_EDITED` o `protocolMessage` de primeiro nível). Reentrega com o mesmo texto não muda nada.
+  Original ainda não gravada: ignorada.
 - **Apagada:** do vendedor, mantém o texto com `metadata.deletedInWhatsAppAt` ("apagada no WhatsApp"); do
-  contato, o texto vira `[mensagem apagada]` e a marca de edição sai.
+  contato, o texto vira `[mensagem apagada]` e saem a marca de edição e o texto anterior. Chega por
+  `MESSAGES_DELETE` ou como `protocolMessage` type 0 (`REVOKE`) dentro de `MESSAGES_UPSERT`.
+- **Avisos de protocolo:** qualquer outro `protocolMessage` no upsert é ignorado (não vira mensagem), assim como
+  `secretEncryptedMessage` (edição cifrada com o segredo da original, que o Baileys 7.0.0-rc.9 não abre: o
+  texto anterior fica, sem marca de edição).
+- **Tipo desconhecido:** gravado como `[mensagem não suportada]`, com log `WARN [whatsapp] unsupported message
+  type` só com os nomes dos campos de primeiro nível de `data.message` (nunca valores), para identificar
+  formatos novos.
 - **Relógio:** `messageTimestamp` do WhatsApp; ausente ou mais de 5 min no futuro, vale a hora de chegada
   (marcada em `metadata.clock`). A ordem de exibição é por esse horário.
 - **Ignorados:** grupo, status (stories), lista de transmissão, canal, LID sem número, número de fora do
