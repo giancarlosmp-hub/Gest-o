@@ -26,6 +26,8 @@ const TEXT = "Texto ficticio sigiloso";
 const CAPTION = "Legenda ficticia sigilosa";
 const PUSH_NAME = "Nome Ficticio Sigiloso";
 const FILE_NAME = "arquivo-ficticio-sigiloso.pdf";
+const EDITED_TEXT = "Texto editado ficticio sigiloso";
+const UNKNOWN_VALUE = "Valor ficticio sigiloso de tipo novo";
 
 const server = app.listen(0);
 await once(server, "listening");
@@ -117,13 +119,78 @@ try {
   assert.equal(failed.status, 503);
   assert.deepEqual(failed.json, { message: "Temporarily unavailable" });
 
+  // 5b) Edição e revogação em messages.upsert (caso visto em produção: a edição virava uma linha UNKNOWN).
+  // Formatos do Baileys 7.0.0-rc.9 com o JSON do Evolution v2.3.7: binários como {"0":..}, enum como número.
+  const original = (id: string, fromMe = false) => upsert(id, { conversation: TEXT, messageContextInfo: contextInfo }, fromMe);
+  const notice = (noticeId: string, message: unknown) => {
+    const event = upsert(noticeId, { ...(message as object), messageContextInfo: contextInfo });
+    return { ...event, data: { ...event.data, messageType: "protocolMessage" } };
+  };
+  const editOf = (targetId: string, text = EDITED_TEXT) => ({
+    key: { remoteJid: `${CONTACT}@s.whatsapp.net`, fromMe: true, id: targetId },
+    type: 14,
+    editedMessage: { conversation: text, messageContextInfo: { messageSecret: binary(32, 11) } },
+    timestampMs: "1794000060000"
+  });
+  const textOf = (id: string) => memory.messages.find((row) => row.externalMessageId === id);
+  const editFormats = {
+    solto: (id: string) => ({ protocolMessage: editOf(id) }),
+    editedMessage: (id: string) => ({ editedMessage: { message: { protocolMessage: editOf(id) } } }),
+    temporaria: (id: string) => ({ ephemeralMessage: { message: { protocolMessage: editOf(id) } } })
+  };
+  for (const [name, format] of Object.entries(editFormats)) {
+    const id = `${KEY_ID}-ED-${name}`;
+    assert.deepEqual((await post(original(id))).json, { status: "stored" }, name);
+    const rows: number = memory.messages.length;
+    const edited = await post(notice(`${KEY_ID}-AVISO-${name}`, format(id)));
+    assert.equal(edited.status, 200, name);
+    assert.deepEqual(edited.json, { status: "updated" }, name);
+    assert.equal(memory.messages.length, rows, `${name}: nenhuma linha nova`);
+    assert.equal(textOf(id)?.textContent, EDITED_TEXT, name);
+    assert.equal(textOf(id)?.metadata.previousText, TEXT, name);
+    assert.equal(typeof textOf(id)?.metadata.editedAt, "string", name);
+    assert.deepEqual((await post(notice(`${KEY_ID}-AVISO-${name}`, format(id)))).json, { status: "duplicate" }, `${name}: reentrega`);
+  }
+  const rowsBeforeProtocol = memory.messages.length;
+  assert.deepEqual((await post(notice(`${KEY_ID}-AVISO-SEM-ORIGINAL`, { protocolMessage: editOf(`${KEY_ID}-NUNCA-GRAVADA`) }))).json, { status: "not_found" });
+  assert.deepEqual((await post(notice(`${KEY_ID}-AVISO-TEMPORARIAS`, { protocolMessage: { type: 3, ephemeralExpiration: 604_800 } }))).json, { status: "ignored" });
+  assert.deepEqual(
+    (await post(notice(`${KEY_ID}-AVISO-CIFRADO`, { secretEncryptedMessage: { targetMessageKey: { remoteJid: `${CONTACT}@s.whatsapp.net`, fromMe: true, id: `${KEY_ID}-ED-solto` }, encPayload: binary(48, 12), encIv: binary(12, 13), secretEncType: 2 } }))).json,
+    { status: "ignored" }
+  );
+  // Revogação no upsert: do contato vira "[mensagem apagada]" (sai o texto anterior da edição); do vendedor
+  // mantém o texto com a marca.
+  assert.deepEqual((await post(notice(`${KEY_ID}-AVISO-REVOGA-1`, { protocolMessage: { key: { remoteJid: `${CONTACT}@s.whatsapp.net`, fromMe: false, id: `${KEY_ID}-ED-solto` }, type: 0 } }))).json, { status: "updated" });
+  assert.equal(textOf(`${KEY_ID}-ED-solto`)?.textContent, "[mensagem apagada]");
+  assert.equal(textOf(`${KEY_ID}-ED-solto`)?.metadata.previousText, undefined);
+  assert.equal(typeof textOf(`${KEY_ID}-ED-solto`)?.metadata.deletedInWhatsAppAt, "string");
+  assert.deepEqual((await post(original(`${KEY_ID}-ED-VENDEDOR`, true))).json, { status: "stored" });
+  const rowsBeforeSellerRevoke = memory.messages.length;
+  assert.deepEqual((await post(notice(`${KEY_ID}-AVISO-REVOGA-2`, { ephemeralMessage: { message: { protocolMessage: { key: { remoteJid: `${CONTACT}@s.whatsapp.net`, fromMe: true, id: `${KEY_ID}-ED-VENDEDOR` }, type: 0 } } } }))).json, { status: "updated" });
+  assert.equal(textOf(`${KEY_ID}-ED-VENDEDOR`)?.textContent, TEXT);
+  assert.equal(typeof textOf(`${KEY_ID}-ED-VENDEDOR`)?.metadata.deletedInWhatsAppAt, "string");
+  assert.equal(memory.messages.length, rowsBeforeSellerRevoke);
+  assert.equal(memory.messages.length, rowsBeforeProtocol + 1, "só a mensagem do vendedor entrou");
+  assert.equal(memory.messages.some((row) => row.externalMessageId.includes("-AVISO-")), false);
+  assert.equal(memory.messages.some((row) => row.type === "UNKNOWN"), false, "nenhum aviso virou UNKNOWN");
+
+  // 5c) Tipo realmente desconhecido: grava "[mensagem não suportada]" e loga WARN só com os nomes dos campos.
+  assert.deepEqual((await post(upsert(`${KEY_ID}-TIPO-NOVO`, { tipoNovoFicticioMessage: { texto: UNKNOWN_VALUE, url: "https://mmg.invalid/novo" }, messageContextInfo: contextInfo }))).json, { status: "stored" });
+  assert.equal(textOf(`${KEY_ID}-TIPO-NOVO`)?.type, "UNKNOWN");
+  const warn = logs.find((line) => line.includes("[whatsapp] unsupported message type"));
+  assert(warn, "WARN do tipo desconhecido");
+  assert.match(warn, /WARN/);
+  assert.match(warn, /tipoNovoFicticioMessage/);
+  assert.match(warn, /messageContextInfo/);
+  assert.doesNotMatch(warn, /texto|url|deviceListMetadata|messageSecret/, "só o primeiro nível, sem valores");
+
   // 6) Logs: há registro de cada evento, sem nenhum dado da mensagem.
   const logged = logs.join("\n");
   assert.match(logged, /\[whatsapp\] message event/);
   assert.match(logged, /"status":"stored"/);
   assert.match(logged, /\[whatsapp\] message event failed/);
   assert.match(logged, /P2024/);
-  for (const forbidden of [TEXT, CAPTION, PUSH_NAME, CONTACT, "900000201", `${CONTACT}@s.whatsapp.net`, "s.whatsapp.net", KEY_ID, "FALHA-ID", "RAJADA-", INSTANCE_TOKEN, SECRET, "mmg.invalid", "5511900000001", FILE_NAME, "-REAL-", "-CITADA"]) {
+  for (const forbidden of [TEXT, CAPTION, PUSH_NAME, CONTACT, "900000201", `${CONTACT}@s.whatsapp.net`, "s.whatsapp.net", KEY_ID, "FALHA-ID", "RAJADA-", INSTANCE_TOKEN, SECRET, "mmg.invalid", "5511900000001", FILE_NAME, "-REAL-", "-CITADA", EDITED_TEXT, UNKNOWN_VALUE, "-AVISO-", "-ED-", "-TIPO-NOVO", "-NUNCA-GRAVADA"]) {
     assert.equal(logged.includes(forbidden), false, `log sem ${forbidden}`);
   }
 

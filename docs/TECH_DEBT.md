@@ -1662,8 +1662,12 @@ Pendente:
   - "Desde dd/mm" começa a contar no primeiro deploy do B2 (estado em `AppConfig`); não há a data real de
     ligações anteriores.
 - O formato do evento de edição (`MESSAGES_EDITED` = `protocolMessage` com a chave da original) e do de apagada
-  (`{ ...key, status: "DELETED" }`) foi lido no código-fonte do Evolution v2.3.7, não visto em execução:
-  confirmar com um número de teste antes de ligar.
+  (`{ ...key, status: "DELETED" }`) foi lido no código-fonte do Evolution v2.3.7. Em produção a apagada
+  funcionou, mas uma edição virou linha `[mensagem não suportada]` em `MESSAGES_UPSERT`. Edição e revogação
+  dentro do upsert passaram a ser tratadas e `secretEncryptedMessage` (edição cifrada) é ignorado; o formato
+  exato daquela edição não foi visto. Confirmar no próximo teste pelo log `[whatsapp] unsupported message
+  type` (nomes dos campos) ou pelo motivo `secret_encrypted` em `[whatsapp] message event`. Se a edição vier
+  cifrada, o texto novo não é gravado (exige decifrar com o `messageSecret` da original, que não é guardado).
 - Sem importação de histórico: mensagens anteriores à ligação da Fase B não entram (`MESSAGES_SET` não assinado).
 - Pedido de exclusão de um titular (LGPD): não há rota para apagar as conversas de um contato; a exclusão de
   cliente segue bloqueada com 409 quando há conversas.
