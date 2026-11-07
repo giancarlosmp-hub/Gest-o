@@ -2,9 +2,9 @@ import { env } from "../../config/env.js";
 import { EVOLUTION_MESSAGE_WEBHOOK_EVENTS, EVOLUTION_WEBHOOK_SECRET_HEADER, EVOLUTION_WEBHOOK_URL, evolutionWebhookEvents } from "./config.js";
 
 // Cliente mínimo da Evolution API v2.3.7: criar instância (com QR), consultar estado, ler o número
-// conectado, apagar a instância e (Fase B) ajustar os eventos do webhook da instância. Não existe nenhum
-// método de envio de mensagem.
-// Nada aqui grava log: QR, chave e número nunca passam pelo logger.
+// conectado, apagar a instância, (Fase B) ajustar os eventos do webhook da instância e baixar o áudio a
+// transcrever. Não existe nenhum método de envio de mensagem.
+// Nada aqui grava log: QR, chave, número e mídia nunca passam pelo logger.
 
 export class EvolutionUnavailableError extends Error {
   constructor(readonly reason: string) {
@@ -23,6 +23,8 @@ type EvolutionClientOptions = {
   timeoutMs?: number;
   /** A criação espera o QR (cerca de 5 s no Evolution). */
   createTimeoutMs?: number;
+  /** Download de mídia (o Evolution tenta de novo depois de 5 s). */
+  mediaTimeoutMs?: number;
 };
 
 const QR_DATA_URL = /^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/;
@@ -157,6 +159,30 @@ export class EvolutionClient {
     if (isMissingInstance(status, json)) return "not_found";
     if (status >= 400) throw new EvolutionUnavailableError(`webhook_set_http_${status}`);
     return "ok";
+  }
+
+  /**
+   * Baixa e decifra a mídia de uma mensagem (POST /chat/getBase64FromMediaMessage). O Evolution do CRM não
+   * grava mensagens, então a busca só pela chave não acha nada: vai a mensagem inteira (key + message), que
+   * chega no webhook e fica só em memória. O Evolution espera 5 s antes de tentar de novo: timeout maior.
+   * Resposta sem base64, ou maior que o limite, é recusada. Nunca grava log.
+   */
+  async getMediaBase64(
+    instanceName: string,
+    message: { key: Record<string, unknown>; message: Record<string, unknown> },
+    maxBase64Length: number
+  ): Promise<{ base64: string; mimetype: string | null }> {
+    const { status, json } = await this.request(
+      "POST",
+      `/chat/getBase64FromMediaMessage/${encodeURIComponent(instanceName)}`,
+      { message, convertToMp4: false },
+      this.options.mediaTimeoutMs ?? 30_000
+    );
+    if (status >= 400) throw new EvolutionUnavailableError(`media_http_${status}`);
+    const base64 = json?.base64;
+    if (typeof base64 !== "string" || !base64) throw new EvolutionUnavailableError("media_empty");
+    if (base64.length > maxBase64Length) throw new EvolutionUnavailableError("media_too_large");
+    return { base64, mimetype: typeof json?.mimetype === "string" ? json.mimetype : null };
   }
 
   /** Desconecta (logout) e apaga a instância e a sessão. Instância inexistente já é o resultado esperado. */

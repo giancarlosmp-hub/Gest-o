@@ -29,7 +29,8 @@ const client = new EvolutionClient({
   apiKey: "chave-ficticia",
   webhookSecret: "segredo-ficticio",
   timeoutMs: 300,
-  createTimeoutMs: 300
+  createTimeoutMs: 300,
+  mediaTimeoutMs: 300
 });
 const respond = (status: number, body: unknown, delayMs?: number) => {
   nextResponse = { status, body, delayMs };
@@ -147,9 +148,29 @@ try {
   env.whatsappEvolutionMessagesEnabled = false;
   assert.deepEqual([...evolutionWebhookEvents()], ["CONNECTION_UPDATE"], "gravação desligada volta a só conexão");
 
-  // 8) O cliente não tem nenhum método de envio.
+  // 8) O cliente não tem nenhum método de envio; o único de mídia é a leitura do áudio a transcrever.
   const methods = Object.getOwnPropertyNames(EvolutionClient.prototype);
-  assert.deepEqual(methods.filter((name) => /send|message|text|media/i.test(name)), []);
+  assert.deepEqual(methods.filter((name) => /send|message|text|media/i.test(name)), ["getMediaBase64"]);
+
+  // 9) Áudio para transcrever: mensagem inteira (key + message), sem conversão, base64 devolvido.
+  const audioRef = {
+    key: { remoteJid: "5511900000101@s.whatsapp.net", fromMe: false, id: "AUDIO-FICTICIO-1" },
+    message: { audioMessage: { url: "https://mmg.invalid/ficticio", mediaKey: "chave-ficticia", seconds: 7, ptt: true } }
+  };
+  respond(201, { mediaType: "audioMessage", mimetype: "audio/ogg; codecs=opus", base64: "T2dnUw==" });
+  assert.deepEqual(await client.getMediaBase64("crm-ficticio", audioRef, 100), { base64: "T2dnUw==", mimetype: "audio/ogg; codecs=opus" });
+  assert.equal(last().method, "POST");
+  assert.equal(last().url, "/chat/getBase64FromMediaMessage/crm-ficticio");
+  assert.equal(last().headers.apikey, "chave-ficticia");
+  assert.deepEqual(last().body, { message: audioRef, convertToMp4: false });
+  respond(400, { response: { message: ["Message not found"] } });
+  await assert.rejects(client.getMediaBase64("crm-ficticio", audioRef, 100), /media_http_400/);
+  respond(201, { mediaType: "audioMessage" });
+  await assert.rejects(client.getMediaBase64("crm-ficticio", audioRef, 100), /media_empty/);
+  respond(201, { base64: "A".repeat(101) });
+  await assert.rejects(client.getMediaBase64("crm-ficticio", audioRef, 100), /media_too_large/);
+  respond(500, {});
+  await assert.rejects(client.getMediaBase64("crm-ficticio", audioRef, 100), EvolutionUnavailableError);
 
   console.log("evolutionClient.test.ts: ok");
 } finally {
