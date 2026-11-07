@@ -20,7 +20,7 @@ export const INACTIVE_RECENT_AUTOMATION_ORIGIN = "automation:inactive_recent";
 // Oportunidade criada pela automação de inativos recentes: pela coluna origin ou, nas antigas, pela marca nas notas.
 export const isInactiveRecentAutomationOpportunity = (opportunity: { origin?: string | null; notes?: string | null } | null | undefined) =>
   opportunity?.origin === INACTIVE_RECENT_AUTOMATION_ORIGIN || Boolean(opportunity?.notes?.includes(WORKFLOW_INACTIVE_CLIENT_ORIGIN));
-const inactiveRecentAutomationOpportunityWhere = {
+export const inactiveRecentAutomationOpportunityWhere = {
   OR: [{ origin: INACTIVE_RECENT_AUTOMATION_ORIGIN }, { notes: { contains: WORKFLOW_INACTIVE_CLIENT_ORIGIN } }]
 } satisfies Prisma.OpportunityWhereInput;
 
