@@ -796,6 +796,28 @@ export const findPdfPartner = (
   return null;
 };
 
+/**
+ * Mesma regra do findPdfPartner (código ERP do cliente e, sem ele, o documento; vence o primeiro parceiro
+ * da lista), com mapas montados uma vez: para varrer todos os clientes sem custo quadrático.
+ */
+export const createPdfPartnerLookup = (partners: Record<string, unknown>[]) => {
+  const byCode = new Map<string, Record<string, unknown>>();
+  const byDocument = new Map<string, Record<string, unknown>>();
+  for (const partner of partners) {
+    const code = normalizeErpParameterCode(getPartnerRawCode(partner));
+    if (code && !byCode.has(code)) byCode.set(code, partner);
+    const document = pickFirstString(partner, PARTNER_DOCUMENT_KEYS).replace(/\D/g, "");
+    if (document && !byDocument.has(document)) byDocument.set(document, partner);
+  }
+  return (client: Pick<Client, "code" | "cnpj">) => {
+    const normalizedCode = normalizeErpParameterCode(cleanText(client.code, ""));
+    if (normalizedCode && byCode.has(normalizedCode)) return byCode.get(normalizedCode)!;
+    const normalizedDocument = cleanText(client.cnpj, "").replace(/\D/g, "");
+    if (normalizedDocument && byDocument.has(normalizedDocument)) return byDocument.get(normalizedDocument)!;
+    return null;
+  };
+};
+
 export const getStoredErpPartnerRows = (
   prisma: Pick<PrismaClient, "appConfig">,
 ) => getStoredReferenceRows(prisma, "erp.ultrafv3.partners");

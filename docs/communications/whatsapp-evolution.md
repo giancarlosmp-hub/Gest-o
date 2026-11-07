@@ -111,6 +111,8 @@ API (`docker-compose.production.yml`, valores no env protegido):
 | `WHATSAPP_EVOLUTION_BASE_URL` | `http://crm-evolution-api:8080` | endereço interno do Evolution |
 | `WHATSAPP_EVOLUTION_API_KEY` | vazio | chave do Evolution (`AUTHENTICATION_API_KEY`) |
 | `WHATSAPP_EVOLUTION_WEBHOOK_SECRET` | vazio | segredo do header do webhook interno |
+| `WHATSAPP_EVOLUTION_MESSAGES_ENABLED` | `false` | Fase B: grava as conversas (exige a Fase A ligada) |
+| `WHATSAPP_MESSAGES_RETENTION_MONTHS` | `24` | Fase B: retenção das mensagens vinculadas (inteiro ≥ 1; inválido volta a 24) |
 
 Compose do WhatsApp (env protegido próprio): `WHATSAPP_EVOLUTION_API_KEY` (a mesma) e
 `EVOLUTION_DB_PASSWORD` (só letras e números, porque vai dentro da URL de conexão).
@@ -189,3 +191,78 @@ Perder `EVOLUTION_DB_PASSWORD` depois do primeiro `up` impede o Evolution de abr
   Configurações → Usuários mostrar `DISCONNECTED`, foi o webhook (essa lista não consulta o Evolution).
 
 Antes do teste de ponta a ponta: migration `20261106120000_whatsapp_connection` aplicada com evidência.
+
+## Fase B — gravação das conversas (backend, B1)
+
+Grava as mensagens do número comercial conectado, recebidas e enviadas, inclusive as que o vendedor manda
+pelo app do celular, e liga cada conversa ao cliente. **Não existe envio pelo CRM** (Fase C). As telas, a fila e
+as rotas de leitura ficam para o B2. O Evolution continua sem guardar mensagens: o CRM é o único lugar.
+Desligado por padrão: exige `COMMUNICATIONS_ENABLED`, `WHATSAPP_EVOLUTION_ENABLED` **e**
+`WHATSAPP_EVOLUTION_MESSAGES_ENABLED`.
+
+### Eventos
+
+- O webhook de cada instância assina `CONNECTION_UPDATE`, `MESSAGES_UPSERT`, `MESSAGES_EDITED` e
+  `MESSAGES_DELETE` quando a Fase B está ligada, e só `CONNECTION_UPDATE` quando não está. A lista é sempre
+  explícita: no Evolution, `enabled` com lista vazia assina **todos** os eventos. Ficam de fora de propósito
+  `MESSAGES_UPDATE` (entrega e leitura), `MESSAGES_SET` (histórico), contatos, chats, grupos e presença.
+- Instâncias já conectadas na Fase A passam para a lista nova **sem novo QR**, por `POST /webhook/set/{instância}`
+  (o Evolution faz upsert por instância): na subida da API, uma vez por dia e na consulta de
+  `GET /whatsapp/connection`. Instância nova já nasce com a lista atual.
+- Limites do webhook interno: corpo de até 512 KiB (mensagens trazem miniatura e mensagem citada) e rate limit
+  próprio de 30 mil eventos por 15 min, separado do webhook da Meta. O Evolution repete 429, 5xx e timeout até 10
+  vezes e não repete 400, 401, 403, 404 e 422; falha ao gravar responde 503 sem detalhes.
+
+### Regras
+
+- **Conversa** = número comercial + número do contato (`CommunicationConversation`, provedor
+  `evolution_whatsapp`). Cada vendedor tem a sua conversa com o mesmo contato.
+- **Vínculo** pelo telefone na regra compartilhada (`normalizeBrazilPhone`; celular com o nono dígito e fixo de
+  WhatsApp Business), pelo índice `ClientPhoneIndex`: telefones do ERP (cache do `/partners`, mesma busca do
+  cartão do cliente) e dos contatos do CRM. Um cliente não arquivado = vinculada. Nenhum ou mais de um =
+  fila **não vinculadas** do dono do número (`linkStatus` `unlinked` ou `ambiguous`), com o nome do contato no
+  WhatsApp guardado só enquanto não houver vínculo. A cada mensagem nova o vínculo é tentado de novo. Sem
+  vínculo em 7 dias, a conversa é apagada.
+- **Índice** reconstruído por completo depois de cada gravação do cache de parceiros e uma vez por dia, e
+  atualizado por cliente quando um contato muda, quando código ou documento do cliente mudam e na mesclagem.
+- **Origem:** mensagem do vendedor = `OUTBOUND` com `metadata.origin = "app"` ("WhatsApp · via app").
+- **Idempotência:** o id da mensagem é único dentro do número comercial; reentrega não grava de novo.
+- **Editada:** troca o texto e marca `metadata.editedAt` (legenda editada mantém o tipo da mídia). Original
+  ainda não gravada: ignorada.
+- **Apagada:** do vendedor, mantém o texto com `metadata.deletedInWhatsAppAt` ("apagada no WhatsApp"); do
+  contato, o texto vira `[mensagem apagada]` e a marca de edição sai.
+- **Relógio:** `messageTimestamp` do WhatsApp; ausente ou mais de 5 min no futuro, vale a hora de chegada
+  (marcada em `metadata.clock`). A ordem de exibição é por esse horário.
+- **Ignorados:** grupo, status (stories), lista de transmissão, canal, LID sem número, número de fora do
+  Brasil, reação e conversa com números de usuários do CRM (celular cadastrado ou número conectado).
+- **Mídia:** só tipo, duração e legenda (`[imagem] legenda`, `[áudio 0:42]`, `[documento] legenda`). URL,
+  chave, miniatura, coordenadas, vCard e nome de arquivo não são gravados; nada é baixado.
+
+### Retenção, acesso e log
+
+- Conteúdo só no PostgreSQL do CRM (`CommunicationMessage.textContent`), portanto também nos backups do banco.
+- Mensagens vinculadas: `WHATSAPP_MESSAGES_RETENTION_MONTHS` (padrão 24); o job de hora em hora apaga as mais
+  antigas e as conversas vinculadas que ficaram vazias. Só o provedor Evolution é tocado.
+- Visibilidade (B2): vendedor vê as conversas dos clientes da carteira dele; gerente e diretor veem tudo. A
+  conversa pertence ao cliente, não ao vendedor. Nada vai para a IA externa nesta fase.
+- Log só com códigos e contagens (evento, resultado, motivo, vínculo, direção, usuário, duração). **Nunca** texto,
+  legenda, nome do contato, número, JID, id da mensagem ou `apikey`; teste garante.
+
+### Tabelas (migration `20261107120000_whatsapp_messages`, só aditiva)
+
+- Valor `evolution_whatsapp` em `CommunicationProviderType`. **Caixa mista de propósito:** o gate de preview do
+  schema só aceita valor novo de enum em minúsculas (`META_WHATSAPP_CLOUD` continua como está).
+- `CommunicationConversation`: `numberOwnerUserId` (FK `User`, `SET NULL`), `linkStatus`, `linkSource`,
+  `linkedById`, `linkedAt`, `unlinkedExpiresAt`, todas anuláveis, e dois índices.
+- `CommunicationMessage`: índice `(conversationId, providerTimestamp)`.
+- `ClientPhoneIndex` (`phone`, `clientId` com `CASCADE`, `source` `erp`/`crm`, `tenantId`).
+- Cadastrada no ferramental do **Production Schema PR827**; o cutover do código fica bloqueado até a evidência.
+
+### Antes de ligar
+
+1. Migration `20261107120000_whatsapp_messages` aplicada com evidência.
+2. Flag em `true` no `.env` da API e deploy (build + cutover) de um SHA novo. Na subida, a API ajusta os eventos
+   das instâncias conectadas e reconstrói o índice.
+3. Com um número de teste: mensagem recebida, enviada pelo app, editada e apagada, e conferir o formato do
+   evento de edição (`protocolMessage` com a chave da original), que só foi lido no código-fonte do Evolution.
+

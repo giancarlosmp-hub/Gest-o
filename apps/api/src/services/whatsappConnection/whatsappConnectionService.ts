@@ -5,6 +5,7 @@ import { logApiEvent } from "../../utils/logger.js";
 import { isWhatsAppEvolutionConfigured } from "./config.js";
 import { createEvolutionClient, EvolutionUnavailableError, type EvolutionClient } from "./evolutionClient.js";
 import { displayPhone, maskPhone, normalizeMobilePhone, phoneFromWhatsAppJid } from "./phoneMatch.js";
+import { ensureInstanceWebhookEvents } from "../whatsappMessages/whatsappWebhookSubscriptions.js";
 
 // WhatsApp Fase A: cada usuário conecta o próprio número comercial lendo um QR. Só fica CONNECTED se o
 // número lido for o User.phone; senão a instância é apagada (logout) e o número lido não é gravado.
@@ -173,7 +174,11 @@ export class WhatsAppConnectionService {
       }
       if (row.status === WhatsAppConnectionStatus.CONNECTED) {
         const state = await this.clientFactory().connectionState(row.instanceName);
-        if (state === "open") row = await this.db.whatsAppConnection.update({ where: { id: row.id }, data: { lastSeenAt: new Date() } });
+        if (state === "open") {
+          row = await this.db.whatsAppConnection.update({ where: { id: row.id }, data: { lastSeenAt: new Date() } });
+          // Fase B: a instância conectada assina os eventos das flags atuais (sem novo QR). Nunca derruba a tela.
+          await ensureInstanceWebhookEvents(row.instanceName, { clientFactory: this.clientFactory, isReady: this.isConfigured }).catch(() => undefined);
+        }
         else if (state === "close" || state === "not_found") row = await this.markClosed(row, "session_closed");
       }
       return this.view(row, expected);

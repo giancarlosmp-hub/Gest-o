@@ -66,6 +66,8 @@
 | `WHATSAPP_EVOLUTION_BASE_URL` | endereço interno do Evolution | Opcional | default `http://crm-evolution-api:8080` (alias na `gest-o_default`) |
 | `WHATSAPP_EVOLUTION_API_KEY` | chave do Evolution (`AUTHENTICATION_API_KEY`) | Condicional ao gate | repassada pelo env seguro; sem ela as rotas respondem 503 |
 | `WHATSAPP_EVOLUTION_WEBHOOK_SECRET` | segredo do webhook interno do Evolution | Condicional ao gate | repassada pelo env seguro; sem ela as rotas respondem 503 |
+| `WHATSAPP_EVOLUTION_MESSAGES_ENABLED` | gate da gravação das conversas (Evolution, Fase B) | Opcional, segura desligada | default `false`; exige também a Fase A ligada |
+| `WHATSAPP_MESSAGES_RETENTION_MONTHS` | retenção das mensagens vinculadas (Fase B) | Opcional | default `24`; inteiro ≥ 1, inválido volta a 24 |
 | `GIT_COMMIT`, `GITHUB_SHA`, `VERCEL_GIT_COMMIT_SHA`, `COMMIT_SHA` | aliases de commit | Não usados no fluxo canônico | substituídos por `APP_COMMIT` validado |
 | `BUILD_TIMESTAMP`, `BUILT_AT` | aliases de build | Não usados no fluxo canônico | substituídos por `APP_BUILT_AT` |
 | `ACCESS_TOKEN_SECRET`, `REFRESH_TOKEN_SECRET` | aliases somente diagnósticos ERP | Não necessários com JWT canônico obrigatório | não repassados; `JWT_ACCESS_SECRET`/`JWT_REFRESH_SECRET` são obrigatórios |

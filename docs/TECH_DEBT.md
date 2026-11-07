@@ -1639,3 +1639,40 @@ diretor e gerente. Pendente:
   em que um cadastro tem o documento só em `cnpj` (o que a sugestão do "Mesclar duplicado" já cobre).
 - Contatos trazidos na mesclagem podem repetir os do cadastro que fica (não há deduplicação de contato).
 - Mesclagens manuais antigas usavam o prefixo `[ARQUIVADO]` e motivo livre; continuam como estão.
+
+### TD-WHATSAPP-MESSAGES — WhatsApp Fase B (gravação das conversas)
+
+**Aberto, médio.** Backend do B1 pronto e desligado por padrão
+([communications/whatsapp-evolution.md](communications/whatsapp-evolution.md#fase-b--gravação-das-conversas-backend-b1)).
+Pendente:
+
+- Apply da migration `20261107120000_whatsapp_messages` pelo **Production Schema PR827**; o cutover fica bloqueado
+  até a evidência de schema.
+- B2: telas (linha do tempo do cliente e da oportunidade, fila "não vinculadas" em `/whatsapp`, cartão Meu
+  número) e rotas de leitura, vínculo manual e descarte. As colunas `linkedById`/`linkSource = manual` já existem.
+- O formato do evento de edição (`MESSAGES_EDITED` = `protocolMessage` com a chave da original) e do de apagada
+  (`{ ...key, status: "DELETED" }`) foi lido no código-fonte do Evolution v2.3.7, não visto em execução:
+  confirmar com um número de teste antes de ligar.
+- Sem importação de histórico: mensagens anteriores à ligação da Fase B não entram (`MESSAGES_SET` não assinado).
+- Pedido de exclusão de um titular (LGPD): não há rota para apagar as conversas de um contato; a exclusão de
+  cliente segue bloqueada com 409 quando há conversas.
+- **Enum com caixa mista:** `CommunicationProviderType` tem `META_WHATSAPP_CLOUD` e `evolution_whatsapp`, porque o
+  gate de preview do schema (`scripts/production-schema-preview.sh`) só aceita valor novo de enum em minúsculas.
+  Padronizar exige mudar o gate em PR próprio.
+
+### TD-TIMELINE-EVENTS-OWNER-FILTER — histórico some quando o cliente muda de vendedor
+
+**Aberto, médio.** `GET /events` filtra por `TimelineEvent.ownerSellerId` (`sellerWhere`): para o vendedor, eventos
+gravados pelo dono anterior do cliente somem da linha do tempo do cliente e da oportunidade quando a carteira muda.
+Contraria a regra de que o histórico pertence ao cliente. Correção em PR próprio (filtrar pelo dono atual do
+cliente ou da oportunidade). A Fase B do WhatsApp não grava `TimelineEvent` por isso: os cartões de conversa (B2)
+virão das próprias mensagens, com escopo pela carteira do cliente.
+
+### TD-COMMUNICATIONS-PHONE-HASH — regra antiga de telefone das comunicações sem uso real
+
+**Aberto, baixo.** `apps/api/src/services/communications/phoneNormalization.ts` (`+55…`, celular de 8 dígitos
+marcado como ambíguo) diverge da regra compartilhada `normalizeBrazilPhone` (`55…`, põe o nono dígito), e
+`Contact.phoneHash`/`Contact.phoneNormalized` nunca são gravados por nenhum código: o `findSafeClientLink` do
+fluxo da Meta (desligado) sempre devolve `no_match`. A Fase B usa a regra compartilhada e o `ClientPhoneIndex`.
+Remover ou alinhar quando a integração da Meta for retomada.
+

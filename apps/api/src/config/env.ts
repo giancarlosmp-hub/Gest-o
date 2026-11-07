@@ -25,6 +25,14 @@ function toNumber(value: string | undefined, defaultValue: number) {
   return Number.isFinite(parsed) ? parsed : defaultValue;
 }
 
+/** Inteiro >= 1; vazio, zero, negativo ou texto voltam ao padrão (toNumber leria "" como 0). */
+export function toPositiveInteger(value: string | undefined, defaultValue: number) {
+  const text = cleanEnvString(value);
+  if (!/^\d+$/.test(text)) return defaultValue;
+  const parsed = Number(text);
+  return Number.isSafeInteger(parsed) && parsed >= 1 ? parsed : defaultValue;
+}
+
 export const env = {
   nodeEnv: process.env.NODE_ENV || "development",
   isProduction: (process.env.NODE_ENV || "development") === "production",
@@ -104,5 +112,8 @@ export const env = {
   whatsappEvolutionEnabled: toBoolean(process.env.WHATSAPP_EVOLUTION_ENABLED, false),
   whatsappEvolutionBaseUrl: cleanEnvString(process.env.WHATSAPP_EVOLUTION_BASE_URL, "http://crm-evolution-api:8080"),
   whatsappEvolutionApiKey: cleanEnvString(process.env.WHATSAPP_EVOLUTION_API_KEY),
-  whatsappEvolutionWebhookSecret: cleanEnvString(process.env.WHATSAPP_EVOLUTION_WEBHOOK_SECRET)
+  whatsappEvolutionWebhookSecret: cleanEnvString(process.env.WHATSAPP_EVOLUTION_WEBHOOK_SECRET),
+  // WhatsApp Fase B: gravar as conversas do número conectado (só com a Fase A também ligada).
+  whatsappEvolutionMessagesEnabled: toBoolean(process.env.WHATSAPP_EVOLUTION_MESSAGES_ENABLED, false),
+  whatsappMessagesRetentionMonths: toPositiveInteger(process.env.WHATSAPP_MESSAGES_RETENTION_MONTHS, 24)
 };

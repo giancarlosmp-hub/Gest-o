@@ -108,6 +108,10 @@ export function createWhatsAppTestHarness(prisma: PrismaClient) {
         const instance = instances.get(url.searchParams.get("instanceName") || "");
         return send(200, instance ? [{ name: url.searchParams.get("instanceName"), ownerJid: instance.ownerJid, connectionStatus: instance.state }] : []);
       }
+      if (req.method === "POST" && url.pathname.startsWith("/webhook/set/")) {
+        if (!instances.has(name)) return missing();
+        return send(201, { webhook: { instanceName: name, enabled: body?.webhook?.enabled, events: body?.webhook?.events } });
+      }
       if (req.method === "DELETE" && url.pathname.startsWith("/instance/delete/")) {
         if (!instances.delete(name)) return missing();
         return send(200, { status: "SUCCESS" });

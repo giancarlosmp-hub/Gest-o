@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import { createServer, type IncomingMessage } from "node:http";
-import { EVOLUTION_WEBHOOK_SECRET_HEADER, EVOLUTION_WEBHOOK_URL } from "./config.js";
-import { EvolutionClient, EvolutionUnavailableError, pickQrDataUrl } from "./evolutionClient.js";
+import { env } from "../../config/env.js";
+import { EVOLUTION_MESSAGE_WEBHOOK_EVENTS, EVOLUTION_WEBHOOK_SECRET_HEADER, EVOLUTION_WEBHOOK_URL, evolutionWebhookEvents } from "./config.js";
+import { EvolutionClient, EvolutionUnavailableError, explicitWebhookEvents, pickQrDataUrl } from "./evolutionClient.js";
 
 // Cliente da Evolution API contra um Evolution falso em localhost. Chave, segredo e QR fictícios.
 type Recorded = { method: string; url: string; headers: IncomingMessage["headers"]; body: any };
@@ -108,7 +109,45 @@ try {
   assert.equal(pickQrDataUrl({ base64: `data:image/png;base64,${"A".repeat(70_000)}` }), null);
   assert.equal(pickQrDataUrl(null), null);
 
-  // 7) O cliente não tem nenhum método de envio.
+  // 7) Fase B: lista de eventos conforme as flags, sempre explícita (vazia assinaria todos no Evolution).
+  assert.deepEqual([...evolutionWebhookEvents()], ["CONNECTION_UPDATE"], "flags desligadas: só conexão");
+  env.communicationsEnabled = true;
+  env.whatsappEvolutionEnabled = true;
+  env.whatsappEvolutionMessagesEnabled = true;
+  assert.deepEqual([...evolutionWebhookEvents()], ["CONNECTION_UPDATE", "MESSAGES_UPSERT", "MESSAGES_EDITED", "MESSAGES_DELETE"]);
+  respond(201, { instance: { instanceName: "crm-ficticio-b", status: "connecting" }, qrcode: { base64: FAKE_QR } });
+  await client.createInstance("crm-ficticio-b");
+  assert.deepEqual(last().body.webhook.events, [...EVOLUTION_MESSAGE_WEBHOOK_EVENTS], "instância nova já nasce com as mensagens");
+  respond(201, { webhook: { enabled: true } });
+  assert.equal(await client.setWebhook("crm-ficticio", evolutionWebhookEvents()), "ok");
+  assert.equal(last().method, "POST");
+  assert.equal(last().url, "/webhook/set/crm-ficticio");
+  assert.equal(last().headers.apikey, "chave-ficticia");
+  assert.deepEqual(last().body, {
+    webhook: {
+      enabled: true,
+      url: EVOLUTION_WEBHOOK_URL,
+      byEvents: false,
+      base64: false,
+      headers: { [EVOLUTION_WEBHOOK_SECRET_HEADER]: "segredo-ficticio" },
+      events: ["CONNECTION_UPDATE", "MESSAGES_UPSERT", "MESSAGES_EDITED", "MESSAGES_DELETE"]
+    }
+  });
+  assert.doesNotMatch(JSON.stringify(last().body), /MESSAGES_UPDATE|MESSAGES_SET|CONTACTS|CHATS|GROUP|PRESENCE|SEND_MESSAGE/, "sem entrega/leitura, histórico, contatos, grupos ou envio");
+  const before = recorded.length;
+  await assert.rejects(client.setWebhook("crm-ficticio", []), /webhook_events_empty/, "lista vazia nunca vai ao Evolution");
+  await assert.rejects(client.setWebhook("crm-ficticio", ["MESSAGES_UPSERT", "MESSAGES_UPSERT"]), /webhook_events_invalid/);
+  await assert.rejects(client.setWebhook("crm-ficticio", ["SEND_MESSAGE"]), /webhook_events_invalid/);
+  assert.equal(recorded.length, before, "nada foi enviado nas listas recusadas");
+  assert.throws(() => explicitWebhookEvents([]), /webhook_events_empty/);
+  respond(404, { response: { message: ['The "crm-ficticio" instance does not exist'] } });
+  assert.equal(await client.setWebhook("crm-ficticio", ["CONNECTION_UPDATE"]), "not_found");
+  respond(400, { response: { message: ["outro erro"] } });
+  await assert.rejects(client.setWebhook("crm-ficticio", ["CONNECTION_UPDATE"]), EvolutionUnavailableError);
+  env.whatsappEvolutionMessagesEnabled = false;
+  assert.deepEqual([...evolutionWebhookEvents()], ["CONNECTION_UPDATE"], "gravação desligada volta a só conexão");
+
+  // 8) O cliente não tem nenhum método de envio.
   const methods = Object.getOwnPropertyNames(EvolutionClient.prototype);
   assert.deepEqual(methods.filter((name) => /send|message|text|media/i.test(name)), []);
 

@@ -1,8 +1,9 @@
 import { env } from "../../config/env.js";
-import { EVOLUTION_WEBHOOK_EVENTS, EVOLUTION_WEBHOOK_SECRET_HEADER, EVOLUTION_WEBHOOK_URL } from "./config.js";
+import { EVOLUTION_MESSAGE_WEBHOOK_EVENTS, EVOLUTION_WEBHOOK_SECRET_HEADER, EVOLUTION_WEBHOOK_URL, evolutionWebhookEvents } from "./config.js";
 
-// Cliente mínimo da Evolution API v2.3.7 para a Fase A: criar instância (com QR), consultar estado,
-// ler o número conectado e apagar a instância. Não existe nenhum método de envio de mensagem.
+// Cliente mínimo da Evolution API v2.3.7: criar instância (com QR), consultar estado, ler o número
+// conectado, apagar a instância e (Fase B) ajustar os eventos do webhook da instância. Não existe nenhum
+// método de envio de mensagem.
 // Nada aqui grava log: QR, chave e número nunca passam pelo logger.
 
 export class EvolutionUnavailableError extends Error {
@@ -32,6 +33,30 @@ export function pickQrDataUrl(value: unknown): string | null {
   const base64 = (value as { base64?: unknown } | null | undefined)?.base64;
   return typeof base64 === "string" && base64.length <= MAX_QR_LENGTH && QR_DATA_URL.test(base64) ? base64 : null;
 }
+
+const ALLOWED_WEBHOOK_EVENTS = new Set<string>(EVOLUTION_MESSAGE_WEBHOOK_EVENTS);
+
+/**
+ * Lista de eventos que pode ir ao Evolution: não vazia (vazia com "enabled" assina todos os eventos), sem
+ * repetição e só com eventos conhecidos do CRM.
+ */
+export function explicitWebhookEvents(events: readonly string[]): string[] {
+  const list = [...events];
+  if (list.length === 0) throw new Error("webhook_events_empty");
+  if (new Set(list).size !== list.length || list.some((event) => !ALLOWED_WEBHOOK_EVENTS.has(event))) {
+    throw new Error("webhook_events_invalid");
+  }
+  return list;
+}
+
+const webhookConfig = (webhookSecret: string, events: readonly string[]) => ({
+  enabled: true,
+  url: EVOLUTION_WEBHOOK_URL,
+  byEvents: false,
+  base64: false,
+  headers: { [EVOLUTION_WEBHOOK_SECRET_HEADER]: webhookSecret },
+  events: explicitWebhookEvents(events)
+});
 
 const isMissingInstance = (status: number, json: unknown) =>
   status === 404 || (status === 400 && /does not exist/i.test(JSON.stringify(json ?? "")));
@@ -69,8 +94,9 @@ export class EvolutionClient {
   }
 
   /**
-   * Cria a instância já com QR. O webhook recebe só eventos de conexão, no alias interno da API, com o
-   * segredo no header. Histórico, grupos, presença e leitura ficam desligados.
+   * Cria a instância já com QR. O webhook (alias interno da API, segredo no header) recebe os eventos da
+   * lista atual (conexão; mais mensagens com a Fase B ligada). Histórico, grupos, presença e leitura ficam
+   * desligados.
    */
   async createInstance(instanceName: string): Promise<{ qrDataUrl: string | null }> {
     const { status, json } = await this.request(
@@ -86,14 +112,7 @@ export class EvolutionClient {
         readMessages: false,
         readStatus: false,
         rejectCall: false,
-        webhook: {
-          enabled: true,
-          url: EVOLUTION_WEBHOOK_URL,
-          byEvents: false,
-          base64: false,
-          headers: { [EVOLUTION_WEBHOOK_SECRET_HEADER]: this.options.webhookSecret },
-          events: [...EVOLUTION_WEBHOOK_EVENTS]
-        }
+        webhook: webhookConfig(this.options.webhookSecret, evolutionWebhookEvents())
       },
       this.options.createTimeoutMs ?? 12_000
     );
@@ -125,6 +144,19 @@ export class EvolutionClient {
     if (status >= 400) throw new EvolutionUnavailableError(`fetch_http_${status}`);
     const first = Array.isArray(json) ? json[0] : null;
     return typeof first?.ownerJid === "string" ? first.ownerJid : null;
+  }
+
+  /**
+   * Troca os eventos do webhook de uma instância já conectada, sem novo QR (POST /webhook/set, que faz
+   * upsert por instância). A lista é sempre explícita. Instância inexistente: "not_found".
+   */
+  async setWebhook(instanceName: string, events: readonly string[]): Promise<"ok" | "not_found"> {
+    const { status, json } = await this.request("POST", `/webhook/set/${encodeURIComponent(instanceName)}`, {
+      webhook: webhookConfig(this.options.webhookSecret, events)
+    });
+    if (isMissingInstance(status, json)) return "not_found";
+    if (status >= 400) throw new EvolutionUnavailableError(`webhook_set_http_${status}`);
+    return "ok";
   }
 
   /** Desconecta (logout) e apaga a instância e a sessão. Instância inexistente já é o resultado esperado. */

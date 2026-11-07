@@ -242,6 +242,36 @@ if (migrationId === "20261106120000_whatsapp_connection") {
   }
   process.exit(0);
 }
+if (migrationId === "20261107120000_whatsapp_messages") {
+  const migration = resolveMigration(migrationId);
+  // Empty diff means already applied (the runner proves the catalog). Otherwise the diff must be
+  // exactly the statements of the checksummed migration: enum value, conversation columns, the
+  // ClientPhoneIndex table, six indexes and two foreign keys. Prisma emits the enum value without
+  // IF NOT EXISTS (required by the preview gate in the file) and may order ADD COLUMN clauses
+  // differently, so both sides are normalized the same way. Anything missing, extra or different
+  // is drift.
+  if (statements.length === 0) process.exit(0);
+  const normalize = (statement) => {
+    const flat = statement.replace(/(?:"public"|public)\./g, "").replace(/\s+/g, " ").trim()
+      .replace(/^(ALTER TYPE "[A-Za-z]+" ADD VALUE) IF NOT EXISTS /, "$1 ");
+    const columns = flat.match(/^(ALTER TABLE "[A-Za-z]+") (ADD COLUMN [\s\S]+)$/);
+    if (!columns) return flat;
+    return `${columns[1]} ${columns[2].split(/,\s*(?=ADD COLUMN )/).map((clause) => clause.trim()).sort().join(", ")}`;
+  };
+  const migrationSql = readFileSync(migration.absolutePath, "utf8").replace(/^\s*--.*$/gm, "");
+  const expected = migrationSql.split(/;\s*/).map(normalize).filter(Boolean);
+  const remaining = new Set(expected);
+  for (const statement of statements) {
+    const normalized = normalize(statement);
+    if (!remaining.delete(normalized)) {
+      throw new Error(`unapproved or partially-compatible pre-apply drift: ${statement.slice(0, 180)}`);
+    }
+  }
+  if (remaining.size !== 0 || expected.length !== 11) {
+    throw new Error("unapproved or partially-compatible pre-apply drift: authorized WhatsApp messages operation set is incomplete");
+  }
+  process.exit(0);
+}
 for (const statement of statements) {
   const allowed = new RegExp(`^CREATE TYPE "${enums}" AS ENUM`, "s").test(statement)
     || new RegExp(`^CREATE TABLE "${tables}" \\(`, "s").test(statement)

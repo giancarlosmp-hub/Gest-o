@@ -13,6 +13,7 @@ import { getErpRuntimeEnvironmentDiagnostics, getMissingErpRuntimeConfig, type E
 import { normalizeCnpj, normalizeState, normalizeText } from "../utils/normalize.js";
 import { incrementPartnerMatchCounter, resolvePartnerIdentityMatch } from "./partnerIdentityMatching.js";
 import { recordClientCodeChange } from "./clientCodeAuditService.js";
+import { scheduleClientPhoneIndexRebuild } from "./whatsappMessages/clientPhoneIndex.js";
 import { formatOrderStatusSyncWarning } from "./erpOrderStatusSyncWarning.js";
 import { calculatePriceFromErpVariation, orderPriceAuthoritySteps, resolveErpPriceVariationPercent, resolveVariationBasePrice, shouldSweepAbsentPrices, summarizeErpPriceVariationRules } from "./erpPriceVariationPolicy.js";
 import { sanitizeUltraFv3PayloadForLog } from "./ultraFv3PayloadSanitization.js";
@@ -364,6 +365,8 @@ const cachePartnerRows = async (rows: unknown[], seenAt = new Date()) => {
     },
   });
   await recordPartnerLastSeen(rows, seenAt);
+  // WhatsApp Fase B: os telefones do ERP mudaram; o índice telefone → cliente é reconstruído em segundo plano.
+  scheduleClientPhoneIndexRebuild("partners_cache_updated");
 };
 
 /**

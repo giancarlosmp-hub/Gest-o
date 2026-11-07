@@ -85,7 +85,9 @@ try {
 
   // 4) Corpo inválido ou grande demais.
   assert.equal((await post("{nao-e-json")).status, 400);
-  assert.equal((await post({ event: "connection.update", padding: "x".repeat(70 * 1024) })).status, 413);
+  // Limite de 512 KiB (Fase B: mensagens trazem miniatura e mensagem citada).
+  assert.equal((await post({ event: "connection.update", padding: "x".repeat(300 * 1024) })).status, 202, "abaixo do limite é lido");
+  assert.equal((await post({ event: "connection.update", padding: "x".repeat(600 * 1024) })).status, 413);
 
   // 5) QR e outros eventos: ignorados, nada gravado.
   const qr = await post(event("crm-aaaaaaaaaaaaaaaaaaaaaaaa", "qrcode.updated", { qrcode: { base64: harness.FAKE_QR, code: "x" } }));

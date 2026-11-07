@@ -9,6 +9,7 @@ import { validateDatabaseHealth } from "../utils/databaseHealth.js";
 import { logApiEvent } from "../utils/logger.js";
 import { startErpSyncScheduler } from "../jobs/erpSyncScheduler.js";
 import { startCommercialAutomationsScheduler } from "../jobs/commercialAutomationsScheduler.js";
+import { startWhatsAppMessagesScheduler } from "../jobs/whatsappMessagesScheduler.js";
 import { ensureErpOrderNumberSequence } from "../services/erpOrderNumberSequenceSetup.js";
 
 console.log("BOOTSTRAP START");
@@ -180,6 +181,8 @@ async function start() {
       .catch((error) => logApiEvent("ERROR", "[erp-sync/scheduler] initialization-failed", { entrypoint: "dist/scripts/bootstrap.js", error: error instanceof Error ? error.message : String(error) }));
     void startCommercialAutomationsScheduler()
       .catch((error) => logApiEvent("ERROR", "[commercial automations scheduler] initialization-failed", { entrypoint: "dist/scripts/bootstrap.js", error: error instanceof Error ? error.message : String(error) }));
+    void startWhatsAppMessagesScheduler()
+      .catch((error) => logApiEvent("ERROR", "[whatsapp scheduler] initialization-failed", { entrypoint: "dist/scripts/bootstrap.js", error: error instanceof Error ? error.name : "unknown" }));
     console.log("BOOTSTRAP END");
     if (process.env.BOOTSTRAP_SMOKE_EXIT === "true") server.close(() => void prisma.$disconnect().finally(() => process.exit(0)));
   });

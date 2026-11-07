@@ -39,9 +39,7 @@ const NUMBERED_CONTACTS = [
 
 const EMAIL_SEPARATOR = /[\s;,\/|]+/;
 
-export const buildClientErpContacts = (partner: Record<string, unknown> | null): ClientErpContacts => {
-  if (!partner) return { erpPhones: [], erpEmails: [] };
-
+const partnerContactSources = (partner: Record<string, unknown>) => {
   const phoneSources: { label: string; value: unknown }[] = [
     { label: "Principal", value: partner.TELEFONE },
     { label: "Celular", value: partner.CELULAR },
@@ -58,6 +56,26 @@ export const buildClientErpContacts = (partner: Record<string, unknown> | null):
     phoneSources.push({ label, value: record.TELEFONE }, { label, value: record.CELULAR });
     emailSources.push({ label, value: record.EMAIL });
   }
+  return { phoneSources, emailSources };
+};
+
+/** Telefones válidos do parceiro (mesmas fontes do cartão do cliente) em 55 + DDD + número, sem repetição. */
+export const erpPartnerPhoneNumbers = (partner: Record<string, unknown> | null): string[] => {
+  if (!partner) return [];
+  const numbers = new Set<string>();
+  for (const source of partnerContactSources(partner).phoneSources) {
+    for (const raw of splitPhoneField(source.value)) {
+      const phone = normalizeBrazilPhone(raw);
+      if (phone.valid) numbers.add(phone.e164);
+    }
+  }
+  return [...numbers];
+};
+
+export const buildClientErpContacts = (partner: Record<string, unknown> | null): ClientErpContacts => {
+  if (!partner) return { erpPhones: [], erpEmails: [] };
+
+  const { phoneSources, emailSources } = partnerContactSources(partner);
 
   // Duplicados entre campos: o primeiro rótulo vence (Principal, Celular, contatos numerados, lista CONTATOS).
   const erpPhones: ClientErpPhone[] = [];

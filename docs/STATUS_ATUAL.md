@@ -1,3 +1,18 @@
+# WhatsApp Fase B1: gravação das conversas (backend) — código pronto, aguardando merge — 07/11/2026
+
+- Mensagens do número comercial conectado (recebidas e enviadas, inclusive pelo app do celular, "via app")
+  gravadas em `CommunicationConversation`/`CommunicationMessage` (provedor `evolution_whatsapp`) e ligadas ao
+  cliente pelo telefone (`ClientPhoneIndex`: ERP + contatos do CRM, regra compartilhada). Sem cliente ou com mais
+  de um: fila "não vinculadas" do dono do número, apagada em 7 dias. Sem envio pelo CRM.
+- Webhook interno: `messages.upsert`/`edited`/`delete`, idempotência pelo id da mensagem, editada troca o texto,
+  apagada do contato vira `[mensagem apagada]`, grupo/status/transmissão/canal/LID/reação/usuários do CRM
+  ignorados, mídia só com tipo e legenda. Corpo até 512 KiB e rate limit próprio. Log sem conteúdo nem número.
+- Instâncias já conectadas assinam os eventos novos sem novo QR (`/webhook/set`, lista sempre explícita).
+- Job de hora em hora: fila vencida, retenção de 24 meses (configurável), índice e eventos diários.
+- Migration `20261107120000_whatsapp_messages` (só aditiva), registrada no **Production Schema PR827**.
+- Desligado por padrão (`WHATSAPP_EVOLUTION_MESSAGES_ENABLED=false`); as duas variáveis novas já passam pelo
+  compose de produção (defaults `false` e `24`). Telas e rotas de leitura no B2. Pendências em `TD-WHATSAPP-MESSAGES`.
+
 # WhatsApp Fase A3: workflow para subir o Evolution em produção — código pronto, aguardando merge — 06/11/2026
 
 - Workflow **WhatsApp Evolution** (só `workflow_dispatch` na `main`, environment `production-cutover`, mesmo grupo
