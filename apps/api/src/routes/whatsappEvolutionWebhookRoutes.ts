@@ -16,15 +16,43 @@ import { whatsappMessageIngestion } from "../services/whatsappMessages/whatsappM
 // - flag desligada: 404;
 // - requisição que passou pelo proxy (X-Forwarded-For, X-Real-IP ou Forwarded): 404;
 // - segredo do header comparado em tempo constante: 401;
-// - corpo cru de até 512 KiB (mensagens trazem miniatura e mensagem citada), lido como JSON só depois do
-//   segredo.
+// - corpo cru de até 4 MiB, lido como JSON só depois do segredo. O Evolution v2.3.7 converte os campos binários
+//   da mensagem (miniatura, chaves, hashes) em Uint8Array, que vira {"0":12,"1":34,...} no JSON: cada byte ocupa
+//   ~10 bytes. Uma miniatura de 60 KB já passa de 600 KiB; uma resposta a uma imagem traz a miniatura da citada.
+//   Acima do limite: 200 e um log só com o tamanho (sem conteúdo). Com 413 o Evolution repete o mesmo corpo
+//   até 10 vezes (só não repete 400/401/403/404/422), sem chance de passar.
 // Rate limit próprio (todos os eventos vêm do mesmo container). O corpo (apikey da instância, número,
 // texto, nome) nunca vai para log: o handler de erro troca o corpo por "[raw-body-redacted]" em
 // /webhooks/communications/*, e o log de mensagem traz só códigos e contagens. Falha ao gravar mensagem:
 // 503 sem detalhes, para o Evolution tentar de novo.
 export const whatsappEvolutionWebhookRoutes = createAsyncRouter();
 
-export const EVOLUTION_WEBHOOK_BODY_LIMIT = "512kb";
+export const EVOLUTION_WEBHOOK_BODY_LIMIT = "4mb";
+
+/** Corpos recusados pelo tamanho desde a subida do processo (vai no log de cada recusa). */
+let droppedTooLarge = 0;
+
+const declaredLength = (req: express.Request) => {
+  const value = Number(req.get("content-length"));
+  return Number.isSafeInteger(value) && value >= 0 ? value : null;
+};
+
+/**
+ * Corpo acima do limite: o body-parser já descartou o corpo. Responde 200 (o Evolution desiste) e registra
+ * só o motivo e os números. Qualquer outro erro segue para o handler padrão.
+ */
+const handleBodyTooLarge = (error: unknown, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if ((error as { type?: unknown } | null)?.type !== "entity.too.large") return next(error);
+  droppedTooLarge += 1;
+  const limitBytes = Number((error as { limit?: unknown }).limit);
+  logApiEvent("WARN", "[whatsapp] webhook body too large", {
+    reason: "body_too_large",
+    bytes: declaredLength(req),
+    limitBytes: Number.isFinite(limitBytes) ? limitBytes : null,
+    droppedSinceBoot: droppedTooLarge
+  });
+  return res.status(200).json({ status: "too_large" });
+};
 
 const digest = (value: string) => createHash("sha256").update(value, "utf8").digest();
 
@@ -83,5 +111,6 @@ whatsappEvolutionWebhookRoutes.post(
       if (error instanceof EvolutionUnavailableError) return res.status(503).json({ message: "Temporarily unavailable" });
       throw error;
     }
-  }
+  },
+  handleBodyTooLarge
 );
