@@ -116,10 +116,13 @@ try {
   assert.deepEqual(cardKeys(byOpportunity.json), ["2026-11-06 conv-a-seller-b 1", "2026-11-05 conv-a-seller-a 3"]);
   assert.equal(byOpportunity.json.clientId, "client-a");
   assert.equal(byOpportunity.json.since, "2026-11-05T15:00:00.000Z");
+  assert.equal(byOpportunity.json.canOpenClient, false, "dono da oportunidade não abre o cliente de outra carteira");
   // O dono atual do cliente também vê pela oportunidade; vendedor sem vínculo, não.
-  assert.equal((await get("seller-a", "/whatsapp/opportunities/opp-b-on-a/days")).status, 200);
+  const byClientOwner = await get("seller-a", "/whatsapp/opportunities/opp-b-on-a/days");
+  assert.equal(byClientOwner.status, 200);
+  assert.equal(byClientOwner.json.canOpenClient, true);
   assert.equal((await get("seller-c", "/whatsapp/opportunities/opp-b-on-a/days")).status, 404);
-  assert.equal((await get("manager-a", "/whatsapp/opportunities/opp-b-on-a/days")).status, 200);
+  assert.equal((await get("manager-a", "/whatsapp/opportunities/opp-b-on-a/days")).json.canOpenClient, true);
 
   // 4) Mensagens de um cartão: origem e marcas; pela oportunidade, nada antes da criação.
   const dayMessages = await get("seller-a", "/whatsapp/conversations/conv-a-seller-a/messages?day=2026-11-05");

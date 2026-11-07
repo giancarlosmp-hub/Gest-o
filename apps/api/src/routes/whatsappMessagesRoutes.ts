@@ -54,7 +54,7 @@ const readableOpportunity = (req: Request, tenantId: string, opportunityId: stri
       client: { tenantId },
       ...(isManager(req) ? {} : { OR: [{ ownerSellerId: req.user!.id }, { client: { ownerSellerId: req.user!.id } }] })
     },
-    select: { id: true, clientId: true, createdAt: true }
+    select: { id: true, clientId: true, createdAt: true, client: { select: { ownerSellerId: true } } }
   });
 
 const queryText = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : null);
@@ -91,7 +91,9 @@ whatsappMessagesRoutes.get("/opportunities/:opportunityId/days", async (req, res
   const opportunity = await readableOpportunity(req, tenantId, req.params.opportunityId);
   if (!opportunity) return res.status(404).json({ message: "Oportunidade não encontrada." });
   const page = await readClientDayCards({ clientId: opportunity.clientId, before, since: opportunity.createdAt, take: parseTake(req) });
-  return res.json({ ...page, clientId: opportunity.clientId, since: opportunity.createdAt });
+  // O link "ver histórico completo no cliente" só aparece para quem abre o cliente (dono atual ou gestão).
+  const canOpenClient = isManager(req) || opportunity.client.ownerSellerId === req.user!.id;
+  return res.json({ ...page, clientId: opportunity.clientId, since: opportunity.createdAt, canOpenClient });
 });
 
 whatsappMessagesRoutes.get("/conversations/:conversationId/messages", async (req, res) => {
