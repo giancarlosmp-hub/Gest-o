@@ -13,8 +13,9 @@ import { contactPhoneFromWhatsAppJid } from "../whatsappConnection/phoneMatch.js
 //   protocolMessage de primeiro nível (ou em editedMessage.message); dentro de ephemeralMessage (conversa com
 //   mensagens temporárias) ele segue como upsert. protocolMessage type 14 (MESSAGE_EDIT) com editedMessage =
 //   edição; type 0 (REVOKE) = apagada; key.id = id da original. Outro tipo de protocolMessage é ignorado.
-//   secretEncryptedMessage (edição cifrada com o segredo da original, que o Baileys 7.0.0-rc.9 não abre) é
-//   ignorado: não há texto novo para gravar.
+//   secretEncryptedMessage é a edição cifrada com o segredo da original, que o Baileys 7.0.0-rc.9 não abre (e o
+//   CRM não guarda o segredo): com secretEncType MESSAGE_EDIT (2) e targetMessageKey.id vira "edição sem texto",
+//   só para marcar a original; outro secretEncType (UNKNOWN 0, EVENT_EDIT 1) é ignorado.
 // Grupo, status (stories), lista de transmissão e canal são ignorados. Mídia: só tipo e legenda; URL,
 // chave, miniatura, coordenadas, vCard e nome de arquivo nunca saem daqui.
 
@@ -40,6 +41,8 @@ export type ParsedEvolutionEvent =
       unsupportedFields?: string[];
     }
   | { kind: "edit"; instance: string; targetMessageId: string; content: ParsedMessageContent }
+  /** Edição cifrada: só o id da original, sem texto novo. */
+  | { kind: "edit_without_text"; instance: string; targetMessageId: string }
   | { kind: "delete"; instance: string; targetMessageId: string }
   | { kind: "ignored"; reason: IgnoredReason };
 
@@ -61,6 +64,7 @@ export const UNSUPPORTED_MESSAGE_TEXT = "[mensagem não suportada]";
 
 const PROTOCOL_REVOKE = 0;
 const PROTOCOL_MESSAGE_EDIT = 14;
+const SECRET_ENC_MESSAGE_EDIT = 2;
 
 const MESSAGE_EVENTS: Record<string, "upsert" | "edit" | "delete"> = {
   "messages.upsert": "upsert",
@@ -185,6 +189,14 @@ function parseUpsertProtocol(instance: string, protocol: Json): ParsedEvolutionE
   return { kind: "edit", instance, targetMessageId: targetId, content };
 }
 
+/** Edição cifrada (MESSAGE_EDIT) com o id da original; outro secretEncType é ignorado. */
+function parseSecretEncrypted(instance: string, secret: Json): ParsedEvolutionEvent {
+  if (!protocolTypeIs(secret.secretEncType, SECRET_ENC_MESSAGE_EDIT, "MESSAGE_EDIT")) return { kind: "ignored", reason: "secret_encrypted" };
+  const targetId = messageId(asRecord(secret.targetMessageKey)?.id);
+  if (!targetId) return { kind: "ignored", reason: "invalid_payload" };
+  return { kind: "edit_without_text", instance, targetMessageId: targetId };
+}
+
 /** messageTimestamp em segundos (número, texto ou Long { low, high }). */
 export function parseMessageTimestamp(value: unknown): Date | null {
   let seconds: number;
@@ -222,6 +234,8 @@ export function parseEvolutionMessageEvent(payload: unknown): ParsedEvolutionEve
     const unwrapped = outer ? unwrap(outer) : null;
     const protocol = asRecord(unwrapped?.protocolMessage);
     if (protocol) return parseUpsertProtocol(instance, protocol);
+    const secret = asRecord(unwrapped?.secretEncryptedMessage);
+    if (secret) return parseSecretEncrypted(instance, secret);
     if (unwrapped?.secretEncryptedMessage) return { kind: "ignored", reason: "secret_encrypted" };
     const content = parseMessageContent(data.message);
     if (content === "reaction" || content === "protocol" || content === "empty") return { kind: "ignored", reason: content };
