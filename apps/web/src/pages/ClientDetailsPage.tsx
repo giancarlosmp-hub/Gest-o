@@ -5,6 +5,7 @@ import api from "../lib/apiClient";
 import { AI_REQUEST_TIMEOUT_MS } from "../lib/aiRequest";
 import TimelineEventList, { TimelineEventItem } from "../components/TimelineEventList";
 import TimelineIntelligenceCard from "../components/TimelineIntelligenceCard";
+import { useWhatsAppDayCards } from "../components/whatsapp/WhatsAppDayCard";
 import ClientAutoSummaryCard from "../components/clients/ClientAutoSummaryCard";
 import ClientCreditAlertBanner, { ClientCreditAlert } from "../components/clients/ClientCreditAlertBanner";
 import ClientErpPhones, { type ClientErpEmail, type ClientErpPhone } from "../components/clients/ClientErpPhones";
@@ -210,6 +211,8 @@ export default function ClientDetailsPage() {
   const [suggestion, setSuggestion] = useState<ClientSuggestion>(null);
   const [loadingSuggestion, setLoadingSuggestion] = useState(false);
   const [orderSummary, setOrderSummary] = useState<ClientOrderSummary>({ count: 0, totalValue: 0 });
+  // WhatsApp Fase B2: cartões das conversas gravadas, intercalados na linha do tempo.
+  const whatsapp = useWhatsAppDayCards(id ? `/whatsapp/clients/${id}/days` : null);
 
   const fetchSuggestion = useCallback(async (clientId: string) => {
     setSuggestion(null);
@@ -887,8 +890,12 @@ export default function ClientDetailsPage() {
               events={events}
               loading={loading}
               hasMore={Boolean(eventsCursor)}
-              loadingMore={loadingMoreEvents}
-              onLoadMore={() => void loadMoreEvents()}
+              loadingMore={loadingMoreEvents || whatsapp.loadingMore}
+              onLoadMore={() => {
+                void loadMoreEvents();
+                void whatsapp.loadMore();
+              }}
+              whatsapp={{ cards: whatsapp.cards, hasMore: whatsapp.hasMore }}
               emptyMessage="Sem interações registradas."
               loadingMessage="Carregando timeline..."
             />

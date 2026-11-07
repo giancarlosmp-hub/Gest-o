@@ -1,4 +1,6 @@
 import { formatDateBR } from "../lib/formatters";
+import { mergeTimeline, type WhatsAppDayCardItem } from "../lib/whatsappMessages";
+import WhatsAppDayCard from "./whatsapp/WhatsAppDayCard";
 
 export type TimelineEventType = "comentario" | "mudanca_etapa" | "status";
 
@@ -22,6 +24,11 @@ type TimelineEventListProps = {
   loadingMore?: boolean;
   hasMore?: boolean;
   compact?: boolean;
+  /**
+   * WhatsApp Fase B2: cartões "WhatsApp · dd/mm" intercalados por data. `hasMore` aqui é dos cartões; o
+   * `hasMore` da lista continua sendo dos eventos. Pela oportunidade, `opportunityId` limita as mensagens.
+   */
+  whatsapp?: { cards: WhatsAppDayCardItem[]; hasMore: boolean; opportunityId?: string };
 };
 
 type EventPresentation = {
@@ -47,13 +54,20 @@ export default function TimelineEventList({
   onLoadMore,
   loadingMore,
   hasMore,
-  compact
+  compact,
+  whatsapp
 }: TimelineEventListProps) {
+  const entries = mergeTimeline({ events, eventsHasMore: Boolean(hasMore), cards: whatsapp?.cards ?? [], cardsHasMore: Boolean(whatsapp?.hasMore) });
+  const anyMore = Boolean(hasMore) || Boolean(whatsapp?.hasMore);
   return (
     <div className={compact ? "space-y-2" : "space-y-3"}>
       {loading ? <p className="text-sm text-slate-500">{loadingMessage}</p> : null}
 
-      {!loading && events.length ? events.map((event) => {
+      {!loading && entries.length ? entries.map((entry) => {
+        if (entry.kind === "whatsapp") {
+          return <WhatsAppDayCard key={`wa-${entry.card.day}-${entry.card.conversationId}`} card={entry.card} opportunityId={whatsapp?.opportunityId} />;
+        }
+        const { event } = entry;
         const presentation = getEventPresentation(event);
         return (
           <article key={event.id} className="rounded-lg border border-slate-200 bg-white p-3 text-sm">
@@ -70,9 +84,9 @@ export default function TimelineEventList({
         );
       }) : null}
 
-      {!loading && !events.length ? <p className="text-sm text-slate-500">{emptyMessage}</p> : null}
+      {!loading && !entries.length ? <p className="text-sm text-slate-500">{emptyMessage}</p> : null}
 
-      {!loading && hasMore && onLoadMore ? (
+      {!loading && anyMore && onLoadMore ? (
         <button
           type="button"
           onClick={onLoadMore}
