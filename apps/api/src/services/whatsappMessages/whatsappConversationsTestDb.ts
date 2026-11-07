@@ -139,6 +139,13 @@ export function createWhatsAppConversationsTestDb(prisma: PrismaClient) {
       tables[model].push(row);
       return project(model, row, args.select);
     };
+    target.update = async (args: Row) => {
+      log("update", args);
+      const row = tables[model].find((item) => matches(model, item, args.where));
+      if (!row) throw new Error("registro inexistente");
+      Object.assign(row, args.data, { updatedAt: new Date() });
+      return project(model, row, args.select);
+    };
     target.updateMany = async (args: Row) => {
       log("updateMany", args);
       const rows = tables[model].filter((row) => matches(model, row, args.where));

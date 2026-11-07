@@ -5222,6 +5222,8 @@ router.post(
     const data = await prisma.contact.create({
       data: {
         ...req.body,
+        // E-mail opcional: a coluna não aceita nulo, então ausente vira vazio.
+        email: req.body.email ?? "",
         clientId: req.params.id,
         ownerSellerId: resolveOwnerId(req),
       },
@@ -5432,7 +5434,8 @@ router.post("/contacts", validateBody(contactSchema), async (req, res) => {
   const tenantId = await resolveRequestTenantId(req, res);
   if (!tenantId) return;
   if (!await findOpportunityClientInScope(req, tenantId, req.body.clientId)) return res.status(403).json({ message: OPPORTUNITY_CLIENT_OUT_OF_SCOPE_MESSAGE });
-  const created = await prisma.contact.create({ data: { ...req.body, ownerSellerId: resolveOwnerId(req, req.body.ownerSellerId) } });
+  // E-mail opcional: a coluna não aceita nulo, então ausente vira vazio.
+  const created = await prisma.contact.create({ data: { ...req.body, email: req.body.email ?? "", ownerSellerId: resolveOwnerId(req, req.body.ownerSellerId) } });
   scheduleClientPhoneIndexRefresh([created.clientId], "contact_created");
   res.status(201).json(created);
 });

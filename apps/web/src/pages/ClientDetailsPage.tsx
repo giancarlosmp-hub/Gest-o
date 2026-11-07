@@ -12,7 +12,7 @@ import ClientErpPhones, { type ClientErpEmail, type ClientErpPhone } from "../co
 import { useAuth } from "../context/AuthContext";
 import { canManageArchivedClients, canReactivateClient, clientArchiveBadgeLabel, isPortfolioCleanupArchivedClient } from "../lib/clientArchiveStatus";
 import ClientMergeDuplicateDialog from "../components/clients/ClientMergeDuplicateDialog";
-import { PORTFOLIO_STATUS_LABELS, type PortfolioStatus } from "@salesforce-pro/shared";
+import { PORTFOLIO_STATUS_LABELS, isValidOptionalContactEmail, type PortfolioStatus } from "@salesforce-pro/shared";
 import { portfolioStatusBadgeClass } from "../lib/portfolioStatusBadge";
 
 type CommercialSummary = {
@@ -431,8 +431,13 @@ export default function ClientDetailsPage() {
   const saveContact = async () => {
     if (!id) return;
 
-    if (!contactForm.name.trim() || !contactForm.email.trim()) {
-      toast.error("Preencha pelo menos nome e email do contato.");
+    if (!contactForm.name.trim()) {
+      toast.error("Preencha pelo menos o nome do contato.");
+      return;
+    }
+    // E-mail é opcional; se preenchido, precisa ser válido.
+    if (!isValidOptionalContactEmail(contactForm.email)) {
+      toast.error("Email inválido.");
       return;
     }
 
@@ -954,7 +959,7 @@ export default function ClientDetailsPage() {
               </label>
 
               <label className="block">
-                <span className="text-sm font-medium text-slate-700">Email</span>
+                <span className="text-sm font-medium text-slate-700">Email (opcional)</span>
                 <input
                   type="email"
                   value={contactForm.email}
