@@ -1,4 +1,4 @@
-# WhatsApp: transcrição dos áudios — código pronto, aguardando merge — 07/11/2026
+# WhatsApp: transcrição dos áudios — em produção; ligada em 07/11/2026 (chave no env protegido) — 07/11/2026
 
 - Áudios recebidos e enviados pelo app viram texto no cartão "WhatsApp · dd/mm" (`🎤 0:42` + selo "transcrição
   automática"). Só o texto é guardado, em `mediaMetadata.transcription`; o arquivo fica só em memória.
