@@ -117,6 +117,7 @@ model User {
   activities                 Activity[]
   timelineEvents             TimelineEvent[]
   communicationConversations CommunicationConversation[]
+  whatsAppOwnedConversations CommunicationConversation[] @relation("WhatsAppNumberOwner")
   goals                      Goal[]
   activityKpis               ActivityKPI[]
   sales                      Sale[]
@@ -230,6 +231,7 @@ model Client {
   opportunities              Opportunity[]
   timelineEvents             TimelineEvent[]
   communicationConversations CommunicationConversation[]
+  phoneIndex                 ClientPhoneIndex[]
   createdAt                  DateTime                    @default(now())
   agendaEvents               AgendaEvent[]
   agendaStops                AgendaStop[]
@@ -795,8 +797,10 @@ enum CommunicationChannelType {
   OTHER
 }
 
+// Caixa mista de propósito: o gate de preview do schema só aceita valor novo de enum em minúsculas.
 enum CommunicationProviderType {
   META_WHATSAPP_CLOUD
+  evolution_whatsapp
 }
 
 enum CommunicationDirection {
@@ -889,6 +893,14 @@ model CommunicationConversation {
   lastOutboundAt          DateTime?
   unreadCount             Int                              @default(0)
   previewSanitized        String?                          @db.VarChar(240)
+  // WhatsApp Fase B (Evolution): dono atual do número comercial e vínculo com o cliente.
+  numberOwnerUserId       String?
+  numberOwner             User?                            @relation("WhatsAppNumberOwner", fields: [numberOwnerUserId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  linkStatus              String?                          @db.VarChar(16)
+  linkSource              String?                          @db.VarChar(16)
+  linkedById              String?
+  linkedAt                DateTime?
+  unlinkedExpiresAt       DateTime?
   createdAt               DateTime                         @default(now())
   updatedAt               DateTime                         @updatedAt
   messages                CommunicationMessage[]
@@ -902,6 +914,8 @@ model CommunicationConversation {
   @@index([contactNormalized])
   @@index([status])
   @@index([lastMessageAt])
+  @@index([numberOwnerUserId, linkStatus])
+  @@index([unlinkedExpiresAt])
 }
 
 model CommunicationMessage {
@@ -935,6 +949,7 @@ model CommunicationMessage {
   @@index([tenantId])
   @@index([providerTimestamp])
   @@index([status])
+  @@index([conversationId, providerTimestamp])
 }
 
 model CommunicationWebhookEvent {
@@ -995,4 +1010,20 @@ model WhatsAppConnection {
 
   @@index([status])
   @@index([connectedPhone])
+}
+
+// WhatsApp Fase B: telefone (55 + DDD + número) → cliente, a partir dos telefones do ERP (cache do
+// /partners) e dos contatos do CRM. Reconstruído por completo; nunca é a fonte do dado.
+model ClientPhoneIndex {
+  id        String   @id @default(cuid())
+  tenantId  String?  @db.VarChar(64)
+  phone     String   @db.VarChar(13)
+  clientId  String
+  client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  source    String   @db.VarChar(16)
+  createdAt DateTime @default(now())
+
+  @@unique([phone, clientId, source])
+  @@index([phone])
+  @@index([clientId])
 }
