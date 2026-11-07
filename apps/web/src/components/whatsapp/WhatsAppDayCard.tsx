@@ -66,6 +66,7 @@ export function WhatsAppDayCardView({ card, open, messages, loading, error, hasM
                     <span>{formatWhatsAppTime(message.at)}</span>
                     <span>{whatsappOriginLabel(message)}</span>
                     {message.edited ? <span>editada</span> : null}
+                    {message.editedTextUnavailable ? <span>(editada no WhatsApp – texto novo não disponível)</span> : null}
                     {outbound && message.deletedInWhatsApp ? <span className="font-semibold text-amber-700">apagada no WhatsApp</span> : null}
                   </p>
                 </div>
