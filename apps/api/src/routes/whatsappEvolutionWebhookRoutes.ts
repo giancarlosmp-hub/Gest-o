@@ -41,7 +41,7 @@ const declaredLength = (req: express.Request) => {
  * Corpo acima do limite: o body-parser já descartou o corpo. Responde 200 (o Evolution desiste) e registra
  * só o motivo e os números. Qualquer outro erro segue para o handler padrão.
  */
-const handleBodyTooLarge = (error: unknown, req: express.Request, res: express.Response, next: express.NextFunction) => {
+const handleBodyTooLarge: express.ErrorRequestHandler = (error: unknown, req, res, next) => {
   if ((error as { type?: unknown } | null)?.type !== "entity.too.large") return next(error);
   droppedTooLarge += 1;
   const limitBytes = Number((error as { limit?: unknown }).limit);
@@ -111,6 +111,8 @@ whatsappEvolutionWebhookRoutes.post(
       if (error instanceof EvolutionUnavailableError) return res.status(503).json({ message: "Temporarily unavailable" });
       throw error;
     }
-  },
-  handleBodyTooLarge
+  }
 );
+
+// Depois da rota: o erro do body-parser chega aqui antes do handler padrão do app.
+whatsappEvolutionWebhookRoutes.use(handleBodyTooLarge);
