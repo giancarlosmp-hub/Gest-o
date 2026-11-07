@@ -158,6 +158,15 @@ try {
   await call("POST", "/whatsapp/connection", "seller-a");
   evolution.open(rowOf("seller-a")!.instanceName, "5511900000001@s.whatsapp.net");
   assert.equal((await call("GET", "/whatsapp/connection", "seller-a")).json.status, "CONNECTED");
+  // Fase B: a consulta de quem já está conectado ajusta os eventos do webhook (sem novo QR), lista explícita.
+  const setsBefore = evolution.requests.filter((request) => request.url.startsWith("/webhook/set/")).length;
+  assert.equal((await call("GET", "/whatsapp/connection", "seller-a")).json.status, "CONNECTED");
+  const webhookSets = evolution.requests.filter((request) => request.url.startsWith("/webhook/set/"));
+  assert.equal(webhookSets.length, setsBefore + 1);
+  assert.equal(webhookSets[webhookSets.length - 1].url, `/webhook/set/${rowOf("seller-a")!.instanceName}`);
+  assert.deepEqual(webhookSets[webhookSets.length - 1].body.webhook.events, ["CONNECTION_UPDATE"], "Fase B desligada: só conexão");
+  await call("GET", "/whatsapp/connection", "seller-a");
+  assert.equal(evolution.requests.filter((request) => request.url.startsWith("/webhook/set/")).length, setsBefore + 1, "não repete a mesma lista");
   evolution.close(rowOf("seller-a")!.instanceName);
   const closed = await call("GET", "/whatsapp/connection", "seller-a");
   assert.equal(closed.json.status, "DISCONNECTED");
