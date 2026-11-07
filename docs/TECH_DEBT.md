@@ -1648,8 +1648,19 @@ Pendente:
 
 - Apply da migration `20261107120000_whatsapp_messages` pelo **Production Schema PR827**; o cutover fica bloqueado
   até a evidência de schema.
-- B2: telas (linha do tempo do cliente e da oportunidade, fila "não vinculadas" em `/whatsapp`, cartão Meu
-  número) e rotas de leitura, vínculo manual e descarte. As colunas `linkedById`/`linkSource = manual` já existem.
+- B2 (telas e rotas) pronto, sem migration
+  ([Fase B2](communications/whatsapp-evolution.md#fase-b2--telas-e-rotas-das-conversas)). Seguimentos:
+  - **Assinatura dos eventos pode atrasar 1 h:** na subida, o agendador roda a limpeza antes da parte diária,
+    que ajusta os eventos das instâncias. Se a limpeza falhar na subida, a assinatura fica para a rodada
+    seguinte, uma hora depois. A consulta `GET /whatsapp/connection` do próprio usuário também ajusta a
+    instância dele.
+  - O link "Ver histórico completo no cliente" só aparece quando a oportunidade tem algum cartão; um cliente com
+    conversas só anteriores à criação da oportunidade não mostra o link.
+  - Vincular uma conversa não revincula na hora as conversas do mesmo contato com outros números: elas casam
+    na próxima mensagem (o índice é atualizado em segundo plano).
+  - Dia com mais de 3.000 mensagens de um cliente: o cartão mostra só a contagem lida.
+  - "Desde dd/mm" começa a contar no primeiro deploy do B2 (estado em `AppConfig`); não há a data real de
+    ligações anteriores.
 - O formato do evento de edição (`MESSAGES_EDITED` = `protocolMessage` com a chave da original) e do de apagada
   (`{ ...key, status: "DELETED" }`) foi lido no código-fonte do Evolution v2.3.7, não visto em execução:
   confirmar com um número de teste antes de ligar.
