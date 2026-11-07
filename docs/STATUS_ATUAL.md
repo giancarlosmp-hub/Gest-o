@@ -10,8 +10,8 @@
 - Instâncias já conectadas assinam os eventos novos sem novo QR (`/webhook/set`, lista sempre explícita).
 - Job de hora em hora: fila vencida, retenção de 24 meses (configurável), índice e eventos diários.
 - Migration `20261107120000_whatsapp_messages` (só aditiva), registrada no **Production Schema PR827**.
-- Desligado por padrão (`WHATSAPP_EVOLUTION_MESSAGES_ENABLED=false`); a variável ainda não está no compose de
-  produção. Telas e rotas de leitura no B2. Pendências em `TD-WHATSAPP-MESSAGES`.
+- Desligado por padrão (`WHATSAPP_EVOLUTION_MESSAGES_ENABLED=false`); as duas variáveis novas já passam pelo
+  compose de produção (defaults `false` e `24`). Telas e rotas de leitura no B2. Pendências em `TD-WHATSAPP-MESSAGES`.
 
 # WhatsApp Fase A3: workflow para subir o Evolution em produção — código pronto, aguardando merge — 06/11/2026
 

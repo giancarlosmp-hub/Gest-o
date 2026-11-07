@@ -111,8 +111,8 @@ API (`docker-compose.production.yml`, valores no env protegido):
 | `WHATSAPP_EVOLUTION_BASE_URL` | `http://crm-evolution-api:8080` | endereço interno do Evolution |
 | `WHATSAPP_EVOLUTION_API_KEY` | vazio | chave do Evolution (`AUTHENTICATION_API_KEY`) |
 | `WHATSAPP_EVOLUTION_WEBHOOK_SECRET` | vazio | segredo do header do webhook interno |
-| `WHATSAPP_EVOLUTION_MESSAGES_ENABLED` | `false` | Fase B: grava as conversas (exige a Fase A ligada). **Ainda não está no compose de produção** |
-| `WHATSAPP_MESSAGES_RETENTION_MONTHS` | `24` | Fase B: retenção das mensagens vinculadas (inteiro ≥ 1; inválido volta a 24). **Ainda não está no compose** |
+| `WHATSAPP_EVOLUTION_MESSAGES_ENABLED` | `false` | Fase B: grava as conversas (exige a Fase A ligada) |
+| `WHATSAPP_MESSAGES_RETENTION_MONTHS` | `24` | Fase B: retenção das mensagens vinculadas (inteiro ≥ 1; inválido volta a 24) |
 
 Compose do WhatsApp (env protegido próprio): `WHATSAPP_EVOLUTION_API_KEY` (a mesma) e
 `EVOLUTION_DB_PASSWORD` (só letras e números, porque vai dentro da URL de conexão).
@@ -261,11 +261,8 @@ Desligado por padrão: exige `COMMUNICATIONS_ENABLED`, `WHATSAPP_EVOLUTION_ENABL
 ### Antes de ligar
 
 1. Migration `20261107120000_whatsapp_messages` aplicada com evidência.
-2. **Exceção a aprovar:** incluir `WHATSAPP_EVOLUTION_MESSAGES_ENABLED` e `WHATSAPP_MESSAGES_RETENTION_MONTHS` no
-   `environment` da API em `docker-compose.production.yml` (o compose lista as variáveis uma a uma; sem isso a
-   flag fica `false` no container e a retenção fica em 24 meses).
-3. Flag em `true` no `.env` da API e deploy (build + cutover) de um SHA novo. Na subida, a API ajusta os eventos
+2. Flag em `true` no `.env` da API e deploy (build + cutover) de um SHA novo. Na subida, a API ajusta os eventos
    das instâncias conectadas e reconstrói o índice.
-4. Com um número de teste: mensagem recebida, enviada pelo app, editada e apagada, e conferir o formato do
+3. Com um número de teste: mensagem recebida, enviada pelo app, editada e apagada, e conferir o formato do
    evento de edição (`protocolMessage` com a chave da original), que só foi lido no código-fonte do Evolution.
 

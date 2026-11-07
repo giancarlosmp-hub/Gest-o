@@ -1648,9 +1648,6 @@ Pendente:
 
 - Apply da migration `20261107120000_whatsapp_messages` pelo **Production Schema PR827**; o cutover fica bloqueado
   até a evidência de schema.
-- `docker-compose.production.yml` lista as variáveis da API uma a uma: `WHATSAPP_EVOLUTION_MESSAGES_ENABLED` e
-  `WHATSAPP_MESSAGES_RETENTION_MONTHS` ainda não estão lá (exceção a aprovar). Até entrar, a gravação fica
-  desligada no container e a retenção em 24 meses.
 - B2: telas (linha do tempo do cliente e da oportunidade, fila "não vinculadas" em `/whatsapp`, cartão Meu
   número) e rotas de leitura, vínculo manual e descarte. As colunas `linkedById`/`linkSource = manual` já existem.
 - O formato do evento de edição (`MESSAGES_EDITED` = `protocolMessage` com a chave da original) e do de apagada
