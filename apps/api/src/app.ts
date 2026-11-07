@@ -15,6 +15,7 @@ import { communicationWebhookRoutes } from "./routes/communicationWebhookRoutes.
 import { communicationRoutes } from "./routes/communicationRoutes.js";
 import { whatsappConnectionRoutes } from "./routes/whatsappConnectionRoutes.js";
 import { whatsappEvolutionWebhookRoutes } from "./routes/whatsappEvolutionWebhookRoutes.js";
+import { whatsappMessagesRoutes } from "./routes/whatsappMessagesRoutes.js";
 import { env } from "./config/env.js";
 import { requestContextMiddleware } from "./middlewares/requestLogging.js";
 import { logApiEvent, sanitizePayload } from "./utils/logger.js";
@@ -227,7 +228,7 @@ app.use(["/auth/login", "/api/auth/login"], authLoginRateLimit);
 app.use(["/auth/refresh", "/api/auth/refresh"], authRefreshRateLimit);
 app.use(["/auth/me", "/api/auth/me", "/auth/logout", "/api/auth/logout"], appUsageRateLimit);
 app.use(["/communications", "/api/communications"], appUsageRateLimit, communicationRoutes);
-app.use(["/whatsapp", "/api/whatsapp"], appUsageRateLimit, whatsappConnectionRoutes);
+app.use(["/whatsapp", "/api/whatsapp"], appUsageRateLimit, whatsappConnectionRoutes, whatsappMessagesRoutes);
 app.use("/technical-cultures", appUsageRateLimit);
 
 app.get("/technical-cultures", async (_req, res) => {
