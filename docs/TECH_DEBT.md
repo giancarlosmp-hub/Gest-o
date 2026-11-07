@@ -1669,6 +1669,17 @@ Pendente:
   - uma edição legível (`protocolMessage`) que chegue depois mantém a marca, e o cartão mostra "editada" e a
     marca juntos;
   - original anterior à ligação da Fase B (não gravada): a edição é ignorada.
+- **Transcrição dos áudios** (pronta, desligada;
+  [detalhes](communications/whatsapp-evolution.md#transcrição-dos-áudios)). Limites conhecidos:
+  - API reiniciada com áudios na fila: viram `failed/interrupted` e não há "tentar de novo" (a referência do
+    arquivo não é guardada, por decisão);
+  - a validade do link de mídia do WhatsApp não é documentada; uma espera longa por 429 pode fazer o download
+    falhar (`failed/download_failed`);
+  - o contador diário é lido e somado sem trava (um job por vez numa API só; com mais de uma réplica da API o
+    teto poderia passar um pouco);
+  - os limites do plano gratuito da Groq valem para a conta inteira; a Groq não informa a política de treino com
+    os dados;
+  - áudio sem duração no WhatsApp é pulado (`no_duration`).
 - Sem importação de histórico: mensagens anteriores à ligação da Fase B não entram (`MESSAGES_SET` não assinado).
 - Pedido de exclusão de um titular (LGPD): não há rota para apagar as conversas de um contato; a exclusão de
   cliente segue bloqueada com 409 quando há conversas.

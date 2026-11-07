@@ -115,5 +115,12 @@ export const env = {
   whatsappEvolutionWebhookSecret: cleanEnvString(process.env.WHATSAPP_EVOLUTION_WEBHOOK_SECRET),
   // WhatsApp Fase B: gravar as conversas do número conectado (só com a Fase A também ligada).
   whatsappEvolutionMessagesEnabled: toBoolean(process.env.WHATSAPP_EVOLUTION_MESSAGES_ENABLED, false),
-  whatsappMessagesRetentionMonths: toPositiveInteger(process.env.WHATSAPP_MESSAGES_RETENTION_MONTHS, 24)
+  whatsappMessagesRetentionMonths: toPositiveInteger(process.env.WHATSAPP_MESSAGES_RETENTION_MONTHS, 24),
+  // Transcrição dos áudios do WhatsApp (só com a gravação das conversas ligada e com chave). Groq, plano gratuito.
+  whatsappTranscriptionEnabled: toBoolean(process.env.WHATSAPP_TRANSCRIPTION_ENABLED, false),
+  whatsappTranscriptionBaseUrl: cleanEnvString(process.env.WHATSAPP_TRANSCRIPTION_BASE_URL, "https://api.groq.com/openai/v1"),
+  whatsappTranscriptionApiKey: cleanEnvString(process.env.WHATSAPP_TRANSCRIPTION_API_KEY),
+  whatsappTranscriptionModel: cleanEnvString(process.env.WHATSAPP_TRANSCRIPTION_MODEL, "whisper-large-v3"),
+  whatsappTranscriptionMaxSeconds: toPositiveInteger(process.env.WHATSAPP_TRANSCRIPTION_MAX_SECONDS, 600),
+  whatsappTranscriptionDailyMaxMinutes: toPositiveInteger(process.env.WHATSAPP_TRANSCRIPTION_DAILY_MAX_MINUTES, 180)
 };

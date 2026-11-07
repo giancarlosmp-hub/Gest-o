@@ -1,6 +1,7 @@
 import { CommunicationDirection, type Prisma, type PrismaClient } from "@prisma/client";
 import { prisma as defaultPrisma } from "../../config/prisma.js";
 import { EVOLUTION_PROVIDER } from "./whatsappMessageStore.js";
+import { transcriptionOf, type TranscriptionReason, type TranscriptionStatus } from "./whatsappTranscriptionQueue.js";
 
 // WhatsApp Fase B2: leitura das conversas gravadas para a linha do tempo do cliente e da oportunidade.
 // - Cartão = uma conversa (número comercial + contato) num dia de Brasília: "WhatsApp · dd/mm".
@@ -125,6 +126,21 @@ export type MessageView = {
   /** Edição cifrada no WhatsApp: o texto mostrado é o original, o novo não é legível. */
   editedTextUnavailable: boolean;
   deletedInWhatsApp: boolean;
+  /** Só em áudio com a transcrição já pedida: estado e, quando pronta, o texto. */
+  transcription: TranscriptionView | null;
+};
+
+export type TranscriptionView = { status: TranscriptionStatus; text?: string; reason?: TranscriptionReason };
+
+/** Estado da transcrição para a tela: o texto só quando pronta; tentativas, data e modelo ficam de fora. */
+export const toTranscriptionView = (mediaMetadata: Prisma.JsonValue | null | undefined): TranscriptionView | null => {
+  const state = transcriptionOf(mediaMetadata);
+  if (!state || !["pending", "done", "failed", "skipped"].includes(state.status)) return null;
+  return {
+    status: state.status,
+    ...(state.status === "done" ? { text: typeof state.text === "string" ? state.text : "" } : {}),
+    ...(state.status !== "done" && typeof state.reason === "string" ? { reason: state.reason } : {})
+  };
 };
 
 const metadataOf = (value: Prisma.JsonValue | null) =>
@@ -137,6 +153,7 @@ export const toMessageView = (row: {
   textContent: string | null;
   providerTimestamp: Date | null;
   metadata: Prisma.JsonValue | null;
+  mediaMetadata?: Prisma.JsonValue | null;
 }): MessageView => {
   const metadata = metadataOf(row.metadata);
   const outbound = row.direction === CommunicationDirection.OUTBOUND;
@@ -149,7 +166,8 @@ export const toMessageView = (row: {
     origin: outbound ? "app" : "received",
     edited: Boolean(metadata.editedAt),
     editedTextUnavailable: Boolean(metadata.editedInWhatsAppAt),
-    deletedInWhatsApp: Boolean(metadata.deletedInWhatsAppAt)
+    deletedInWhatsApp: Boolean(metadata.deletedInWhatsAppAt),
+    transcription: row.type === "AUDIO" ? toTranscriptionView(row.mediaMetadata) : null
   };
 };
 
@@ -170,7 +188,7 @@ export async function readConversationDayMessages(
     orderBy: [{ providerTimestamp: "asc" }, { id: "asc" }],
     take: MESSAGES_PAGE + 1,
     ...(input.cursor ? { cursor: { id: input.cursor }, skip: 1 } : {}),
-    select: { id: true, direction: true, type: true, textContent: true, providerTimestamp: true, metadata: true }
+    select: { id: true, direction: true, type: true, textContent: true, providerTimestamp: true, metadata: true, mediaMetadata: true }
   });
   const page = rows.slice(0, MESSAGES_PAGE);
   return { items: page.map(toMessageView), nextCursor: rows.length > MESSAGES_PAGE ? page[page.length - 1].id : null };

@@ -257,7 +257,8 @@ Desligado por padrão: exige `COMMUNICATIONS_ENABLED`, `WHATSAPP_EVOLUTION_ENABL
 - **Ignorados:** grupo, status (stories), lista de transmissão, canal, LID sem número, número de fora do
   Brasil, reação e conversa com números de usuários do CRM (celular cadastrado ou número conectado).
 - **Mídia:** só tipo, duração e legenda (`[imagem] legenda`, `[áudio 0:42]`, `[documento] legenda`). URL,
-  chave, miniatura, coordenadas, vCard e nome de arquivo não são gravados; nada é baixado.
+  chave, miniatura, coordenadas, vCard e nome de arquivo não são gravados. Só o áudio é baixado, e só com a
+  transcrição ligada (ver [Transcrição dos áudios](#transcrição-dos-áudios)).
 
 ### Retenção, acesso e log
 
@@ -344,3 +345,80 @@ Leitura das conversas gravadas no B1, fila "não vinculadas", vínculo manual e 
 - **Contato do cliente:** e-mail opcional no formulário e na API (`contactSchema`, `clientContactSchema`); se
   informado, continua validado como e-mail.
 
+## Transcrição dos áudios
+
+Áudios recebidos e enviados pelo app do celular viram texto na conversa do cliente. Só o texto é guardado; o
+arquivo nunca vai para o banco nem para o disco. Desligada por padrão (`WHATSAPP_TRANSCRIPTION_ENABLED=false`) e só
+funciona com a gravação das conversas ligada e com a chave do provedor. Sem migration.
+
+### Provedor
+
+- Groq, plano gratuito (sem cartão), `whisper-large-v3`, `language=pt`, com um vocabulário curto do agro fixo no
+  código (`AGRO_VOCABULARY_PROMPT`, sem dados de clientes). Chamada por `fetch` no formato da OpenAI
+  (`POST {WHATSAPP_TRANSCRIPTION_BASE_URL}/audio/transcriptions`, multipart), sem SDK.
+- Limites publicados pela Groq para os modelos Whisper (página de limites, consultada em 07/11/2026; conferir os
+  da conta na página de limites do console): 20 pedidos/min, 2.000/dia, 7.200 s de áudio/hora e 28.800 s/dia.
+- Dados: por padrão a Groq não guarda as entradas de inferência, mas pode manter logs de confiabilidade e abuso
+  por até 30 dias; a opção ZDR (zero retenção) nas configurações de dados da conta desliga isso. A página não diz
+  se os dados são usados para treino. O áudio e a fala do cliente saem do país (EUA).
+
+### Fluxo
+
+1. **Webhook:** o áudio é gravado como antes (`textContent` = `[áudio 0:42]`) e ganha
+   `mediaMetadata.transcription`:
+   - `pending`: vai para a fila em memória com a `key` e o `audioMessage` (`url`, `directPath`, `mediaKey`), que
+     nunca são gravados nem logados;
+   - `skipped/too_long`: mais de `WHATSAPP_TRANSCRIPTION_MAX_SECONDS` (600) ou arquivo acima de 10 MB;
+   - `skipped/no_duration`: sem duração.
+
+   O webhook responde na hora; nada lento roda nele.
+2. **Fila (um áudio por vez):**
+   - confere o teto do dia (`WHATSAPP_TRANSCRIPTION_DAILY_MAX_MINUTES`, padrão 180, dia de Brasília, contado em
+     `AppConfig` na chave `whatsapp_transcription_seconds:AAAA-MM-DD`); estourado: `skipped/daily_cap`, sem baixar;
+   - baixa o áudio pelo Evolution (`POST /chat/getBase64FromMediaMessage/{instância}` com a mensagem inteira:
+     o Evolution do CRM não grava mensagens, então a busca só pela chave não acharia nada);
+   - manda ao provedor e grava `done` com o texto (até 8.000 caracteres). O buffer do áudio é zerado depois.
+3. **Tentativas:** até 4.
+   - 429 (limite do plano gratuito): pausa a fila inteira pelo `retry-after` (até 1 h; sem ele, a espera
+     padrão) e tenta de novo; esgotadas, `failed/rate_limited`;
+   - rede, timeout, 5xx do provedor e falha de download: esperas de 30 s, 2 min e 10 min; esgotadas,
+     `failed/provider_failed` ou `failed/download_failed`;
+   - 4xx do provedor (chave inválida, arquivo recusado): `failed/provider_failed` na hora.
+
+   Cada tentativa baixa o áudio de novo (nada fica guardado entre elas).
+4. **Apagada pelo contato** antes ou durante a transcrição (`mediaMetadata` zerado): nada é gravado.
+5. **API reiniciada:** a referência do áudio se perde. O job de hora em hora marca como `failed/interrupted` o
+   pendente com mais de 30 min que não está na fila, e apaga os contadores diários com mais de 30 dias.
+
+### Tela
+
+No cartão "WhatsApp · dd/mm", o áudio aparece como `🎤 0:42` com o selo **transcrição automática** e o texto
+(acima de 400 caracteres começa cortado, com "ver mais"). Sem texto: "sem fala reconhecida". Pendente:
+"transcrevendo…"; longo demais: "longo demais para transcrever"; teto do dia: "limite diário de transcrição
+atingido"; falhou: "não foi possível transcrever". Áudio de antes da transcrição continua `[áudio 0:42]`.
+`GET /whatsapp/conversations/:id/messages` manda `transcription: { status, text?, reason? }` só em áudio;
+tentativas, data e modelo não saem.
+
+### Log e privacidade
+
+- Log só com códigos e números: motivo, código do erro (`rate_limited`, `http_401`, `media_http_400`),
+  tentativa, espera, segundos e duração. **Nunca** texto, áudio, base64, URL, `directPath`, `mediaKey`, número ou
+  id da mensagem; teste garante.
+- A transcrição fica em `CommunicationMessage.mediaMetadata` (portanto nos backups), sai junto quando o contato
+  apaga a mensagem e segue a mesma retenção das mensagens. Se o cliente falar CPF ou telefone, isso fica no
+  texto, como numa mensagem digitada. A transcrição não vai para a IA do CRM.
+
+### Variáveis da transcrição
+
+| Variável | Padrão |
+|---|---|
+| `WHATSAPP_TRANSCRIPTION_ENABLED` | `false` |
+| `WHATSAPP_TRANSCRIPTION_BASE_URL` | `https://api.groq.com/openai/v1` |
+| `WHATSAPP_TRANSCRIPTION_API_KEY` | vazio (sem chave, não transcreve) |
+| `WHATSAPP_TRANSCRIPTION_MODEL` | `whisper-large-v3` |
+| `WHATSAPP_TRANSCRIPTION_MAX_SECONDS` | `600` |
+| `WHATSAPP_TRANSCRIPTION_DAILY_MAX_MINUTES` | `180` |
+
+Repassadas à API pelo `docker-compose.production.yml`. Para ligar: criar a chave na conta da Groq (com ZDR
+ligado), pôr a chave e `WHATSAPP_TRANSCRIPTION_ENABLED=true` no arquivo de env protegido e recriar a API pelo
+fluxo oficial, com a aprovação de sempre.

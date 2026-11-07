@@ -9,6 +9,7 @@ import type {
   MessageUpdate,
   WhatsAppMessageStore
 } from "./whatsappMessageStore.js";
+import type { TranscriptionStore } from "./whatsappTranscriptionQueue.js";
 
 // Apoio dos testes da Fase B do WhatsApp (não é carregado pela aplicação): armazenamento em memória com a
 // mesma unicidade do banco (conversa por número comercial + contato; mensagem por número comercial + id).
@@ -83,8 +84,46 @@ export function createMemoryWhatsAppMessageStore() {
     }
   };
 
+  // Transcrição: mesmas mensagens; contador diário como o AppConfig.
+  const usage = new Map<string, number>();
+  const transcriptionStore: TranscriptionStore = {
+    async readAudio(account, externalMessageId) {
+      const row = messages.find((item) => item.account === account && item.externalMessageId === externalMessageId);
+      return row ? { id: row.id, mediaMetadata: row.mediaMetadata ? structuredClone(row.mediaMetadata) : null } : null;
+    },
+    async writeTranscription(id, mediaMetadata) {
+      const row = messages.find((item) => item.id === id);
+      if (!row || row.mediaMetadata?.kind !== "audio") return false;
+      row.mediaMetadata = structuredClone(mediaMetadata);
+      return true;
+    },
+    async usedSeconds(day) {
+      return usage.get(day) ?? 0;
+    },
+    async addUsedSeconds(day, seconds) {
+      usage.set(day, (usage.get(day) ?? 0) + seconds);
+    },
+    async pendingRows() {
+      return messages
+        .filter((row) => (row.mediaMetadata?.transcription as { status?: unknown } | undefined)?.status === "pending")
+        .map((row) => ({ id: row.id, account: row.account, externalMessageId: row.externalMessageId, mediaMetadata: structuredClone(row.mediaMetadata) }));
+    },
+    async pruneUsage(day) {
+      let count = 0;
+      for (const key of [...usage.keys()]) {
+        if (key < day) {
+          usage.delete(key);
+          count++;
+        }
+      }
+      return count;
+    }
+  };
+
   return {
     store,
+    transcriptionStore,
+    usage,
     instances,
     phoneIndex,
     clientTenants,

@@ -68,7 +68,8 @@ assert.deepEqual(outbound, {
   origin: "app",
   edited: true,
   editedTextUnavailable: false,
-  deletedInWhatsApp: true
+  deletedInWhatsApp: true,
+  transcription: null
 });
 const inbound = toMessageView({ id: "msg-2", direction: CommunicationDirection.INBOUND, type: "TEXT", textContent: null, providerTimestamp: null, metadata: null });
 assert.equal(inbound.origin, "received");
@@ -81,5 +82,18 @@ const encrypted = toMessageView({ id: "msg-3", direction: CommunicationDirection
 assert.equal(encrypted.editedTextUnavailable, true);
 assert.equal(encrypted.edited, false);
 assert.equal(encrypted.text, "Texto ficticio original");
+
+// Transcrição do áudio: estado e, pronta, o texto; tentativas, data e modelo não saem. Texto não tem.
+const audioView = (mediaMetadata: unknown, type = "AUDIO") =>
+  toMessageView({ id: "msg-4", direction: CommunicationDirection.INBOUND, type, textContent: "[áudio 0:42]", providerTimestamp: null, metadata: null, mediaMetadata: mediaMetadata as never }).transcription;
+assert.deepEqual(audioView({ kind: "audio", seconds: 42, transcription: { status: "done", text: "Texto ficticio falado", attempts: 2, model: "whisper-large-v3", at: "2026-11-06T15:04:00.000Z" } }), { status: "done", text: "Texto ficticio falado" });
+assert.deepEqual(audioView({ kind: "audio", seconds: 42, transcription: { status: "done", at: "2026-11-06T15:04:00.000Z" } }), { status: "done", text: "" });
+assert.deepEqual(audioView({ kind: "audio", seconds: 42, transcription: { status: "pending", at: "2026-11-06T15:04:00.000Z" } }), { status: "pending" });
+assert.deepEqual(audioView({ kind: "audio", seconds: 42, transcription: { status: "failed", reason: "rate_limited", attempts: 4, at: "x" } }), { status: "failed", reason: "rate_limited" });
+assert.deepEqual(audioView({ kind: "audio", seconds: 900, transcription: { status: "skipped", reason: "too_long", at: "x" } }), { status: "skipped", reason: "too_long" });
+assert.equal(audioView({ kind: "audio", seconds: 42 }), null, "áudio de antes da transcrição");
+assert.equal(audioView(null), null, "áudio apagado pelo contato");
+assert.equal(audioView({ kind: "audio", transcription: { status: "outro" } }), null);
+assert.equal(audioView({ kind: "audio", transcription: { status: "done", text: "x" } }, "TEXT"), null);
 
 console.log("whatsappConversationReads.test.ts: ok");

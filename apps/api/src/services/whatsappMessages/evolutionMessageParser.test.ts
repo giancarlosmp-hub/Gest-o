@@ -186,4 +186,23 @@ assert.equal(poll.kind === "upsert" && "unsupportedFields" in poll, false, "enqu
 const text = parseEvolutionMessageEvent(upsert(contactKey(), { conversation: "Oi ficticio" }));
 assert.equal(text.kind === "upsert" && "unsupportedFields" in text, false);
 
+// Áudio a transcrever: a referência (key + audioMessage, já fora dos invólucros) segue só em memória; o
+// conteúdo gravado continua só com tipo e duração.
+const audioMessage = { url: "https://mmg.invalid/ficticio", directPath: "/v/ficticio", mediaKey: { 0: 1, 1: 2 }, mimetype: "audio/ogg; codecs=opus", seconds: 42, ptt: true, fileLength: "84000" };
+const voice = parseEvolutionMessageEvent(upsert(contactKey("AUDIO-FICTICIO-1", true), { ephemeralMessage: { message: { audioMessage } } }));
+assert(voice.kind === "upsert");
+assert.deepEqual(voice.content, { type: "AUDIO", text: "[áudio 0:42]", media: { kind: "audio", seconds: 42 } });
+assert.deepEqual(voice.audioSource, {
+  key: { remoteJid: contactKey().remoteJid, fromMe: true, id: "AUDIO-FICTICIO-1" },
+  audioMessage,
+  fileLength: 84000
+});
+const longLength = parseEvolutionMessageEvent(upsert(contactKey(), { audioMessage: { ...audioMessage, fileLength: { low: 5_000_000, high: 0 } } }));
+assert.equal(longLength.kind === "upsert" && longLength.audioSource?.fileLength, 5_000_000);
+const noLength = parseEvolutionMessageEvent(upsert(contactKey(), { audioMessage: { seconds: 3 } }));
+assert.equal(noLength.kind === "upsert" && noLength.audioSource !== undefined && "fileLength" in noLength.audioSource, false);
+assert.equal(text.kind === "upsert" && "audioSource" in text, false, "texto não leva referência de mídia");
+const imageEvent = parseEvolutionMessageEvent(upsert(contactKey(), { imageMessage: { url: "https://mmg.invalid/ficticio", mediaKey: "x" } }));
+assert.equal(imageEvent.kind === "upsert" && "audioSource" in imageEvent, false, "só áudio leva referência");
+
 console.log("evolutionMessageParser.test.ts: ok");

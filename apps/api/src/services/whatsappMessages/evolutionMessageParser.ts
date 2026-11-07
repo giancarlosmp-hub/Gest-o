@@ -17,7 +17,9 @@ import { contactPhoneFromWhatsAppJid } from "../whatsappConnection/phoneMatch.js
 //   CRM não guarda o segredo): com secretEncType MESSAGE_EDIT (2) e targetMessageKey.id vira "edição sem texto",
 //   só para marcar a original; outro secretEncType (UNKNOWN 0, EVENT_EDIT 1) é ignorado.
 // Grupo, status (stories), lista de transmissão e canal são ignorados. Mídia: só tipo e legenda; URL,
-// chave, miniatura, coordenadas, vCard e nome de arquivo nunca saem daqui.
+// chave, miniatura, coordenadas, vCard e nome de arquivo nunca saem daqui para o banco. Única exceção, só em
+// memória: o áudio a transcrever (audioSource) leva a key e o audioMessage até a fila, que pede o arquivo ao
+// Evolution; nada disso é gravado nem vai para log.
 
 export type ParsedMessageContent = {
   type: CommunicationMessageType;
@@ -25,6 +27,14 @@ export type ParsedMessageContent = {
   text: string;
   /** Só o tipo e a duração; nunca URL, chave, miniatura ou nome de arquivo. */
   media: { kind: string; seconds?: number } | null;
+};
+
+/** O que o Evolution precisa para baixar o áudio (a mensagem inteira: ele não grava mensagens). */
+export type AudioSource = {
+  key: { remoteJid: string; fromMe: boolean; id: string };
+  audioMessage: Record<string, unknown>;
+  /** Tamanho do arquivo em bytes, quando informado. */
+  fileLength?: number;
 };
 
 export type ParsedEvolutionEvent =
@@ -39,6 +49,8 @@ export type ParsedEvolutionEvent =
       content: ParsedMessageContent;
       /** Só em "[mensagem não suportada]": nomes dos campos de primeiro nível de data.message, nunca valores. */
       unsupportedFields?: string[];
+      /** Só em áudio: referência para baixar o arquivo e transcrever. Só em memória; nunca gravada nem logada. */
+      audioSource?: AudioSource;
     }
   | { kind: "edit"; instance: string; targetMessageId: string; content: ParsedMessageContent }
   /** Edição cifrada: só o id da original, sem texto novo. */
@@ -214,7 +226,35 @@ export function parseMessageTimestamp(value: unknown): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+/** fileLength em bytes (número, texto ou Long { low, high }). */
+const toByteLength = (value: unknown): number | undefined => {
+  let bytes: number;
+  if (typeof value === "number") bytes = value;
+  else if (typeof value === "string" && /^\d+$/.test(value.trim())) bytes = Number(value);
+  else {
+    const long = asRecord(value);
+    if (!long || typeof long.low !== "number") return undefined;
+    bytes = (typeof long.high === "number" ? long.high : 0) * 2 ** 32 + (long.low >>> 0);
+  }
+  return Number.isSafeInteger(bytes) && bytes >= 0 ? bytes : undefined;
+};
+
+/** Referência do áudio a transcrever: só a key e o audioMessage (já fora dos invólucros). */
+function audioSourceOf(rawMessage: unknown, key: Json, id: string): AudioSource | undefined {
+  const outer = asRecord(rawMessage);
+  const audio = outer ? asRecord(unwrap(outer).audioMessage) : null;
+  if (!audio || typeof key.remoteJid !== "string") return undefined;
+  const fileLength = toByteLength(audio.fileLength);
+  return {
+    key: { remoteJid: key.remoteJid, fromMe: key.fromMe === true, id },
+    audioMessage: audio,
+    ...(fileLength !== undefined ? { fileLength } : {})
+  };
+}
+
 const messageId = (value: unknown) => (typeof value === "string" && value.trim() && value.length <= 128 ? value.trim() : null);
+
+const withAudioSource = (audioSource: AudioSource | undefined) => (audioSource ? { audioSource } : {});
 
 export function parseEvolutionMessageEvent(payload: unknown): ParsedEvolutionEvent {
   const body = asRecord(payload);
@@ -250,7 +290,8 @@ export function parseEvolutionMessageEvent(payload: unknown): ParsedEvolutionEve
       pushName,
       timestamp: parseMessageTimestamp(data.messageTimestamp),
       content,
-      ...(content.text === UNSUPPORTED_MESSAGE_TEXT ? { unsupportedFields: messageFieldNames(data.message) } : {})
+      ...(content.text === UNSUPPORTED_MESSAGE_TEXT ? { unsupportedFields: messageFieldNames(data.message) } : {}),
+      ...(content.type === CommunicationMessageType.AUDIO ? withAudioSource(audioSourceOf(data.message, key, id)) : {})
     };
   }
 

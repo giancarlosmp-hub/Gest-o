@@ -124,6 +124,38 @@ try {
   assert.equal((open.match(/data-whatsapp-direction="outbound"/g) ?? []).length, 2);
   assert.match(textOf(mod.renderCard({ card: card("2026-11-05", "2026-11-05T18:00:00.000Z"), open: true, error: true })), /Não foi possível carregar as mensagens/);
 
+  // Áudio transcrito: "🎤 0:42", selo e texto; pendente, pulado e falhou mostram só o aviso; sem transcrição,
+  // como antes. Texto longo começa cortado com "ver mais".
+  const audio = (id: string, text: string, transcription: unknown) => ({ id, direction: "inbound", type: "AUDIO", text, at: "2026-11-05T17:00:00.000Z", origin: "received", edited: false, editedTextUnavailable: false, deletedInWhatsApp: false, transcription });
+  const longText = `Inicio ficticio ${"palavra ".repeat(80)}FIM-OCULTO`;
+  const audioCard = mod.renderCard({
+    card: card("2026-11-05", "2026-11-05T18:00:00.000Z"),
+    open: true,
+    messages: [
+      audio("a1", "[áudio 0:42]", { status: "done", text: "Quero cotar dez sacas ficticias" }),
+      audio("a2", "[áudio 0:05]", { status: "pending" }),
+      audio("a3", "[áudio 12:10]", { status: "skipped", reason: "too_long" }),
+      audio("a4", "[áudio 0:20]", { status: "skipped", reason: "daily_cap" }),
+      audio("a5", "[áudio 0:09]", { status: "failed", reason: "rate_limited" }),
+      audio("a6", "[áudio 0:03]", { status: "done", text: "" }),
+      audio("a7", "[áudio 3:00]", { status: "done", text: longText }),
+      audio("a8", "[áudio 0:15]", null)
+    ]
+  });
+  const audioText = textOf(audioCard);
+  assert.match(audioText, /🎤 0:42 transcrição automática Quero cotar dez sacas ficticias 14:00 recebida/);
+  assert.match(audioText, /🎤 0:05 transcrevendo… 14:00/);
+  assert.match(audioText, /🎤 12:10 longo demais para transcrever 14:00/);
+  assert.match(audioText, /🎤 0:20 limite diário de transcrição atingido 14:00/);
+  assert.match(audioText, /🎤 0:09 não foi possível transcrever 14:00/);
+  assert.match(audioText, /🎤 0:03 transcrição automática sem fala reconhecida 14:00/);
+  assert.match(audioText, /Inicio ficticio palavra .*… ver mais/);
+  assert.doesNotMatch(audioText, /FIM-OCULTO/, "texto longo começa cortado");
+  assert.match(audioText, /\[áudio 0:15\] 14:00 recebida/, "sem transcrição, como antes");
+  assert.equal((audioText.match(/transcrição automática/g) ?? []).length, 3);
+  assert.equal(mod.whatsappAudioLabel("[áudio]"), "🎤");
+  assert.equal(mod.whatsappAudioLabel("[imagem] legenda"), "[imagem] legenda");
+
   // 5) Linha do tempo: cartões entre os eventos; "Carregar mais" aparece se qualquer lista tem mais.
   const list = mod.renderList({ events, hasMore: false, whatsapp: { cards, hasMore: false } });
   const order = ["Interação ficticia e1", "WhatsApp · 05/11", "Interação ficticia e2", "WhatsApp · 01/11"].map((text) => textOf(list).indexOf(text));

@@ -34,5 +34,9 @@ export const isWhatsAppMessagesEnabled = () => isWhatsAppEvolutionEnabled() && e
 export const evolutionWebhookEvents = (): readonly string[] =>
   isWhatsAppMessagesEnabled() ? EVOLUTION_MESSAGE_WEBHOOK_EVENTS : EVOLUTION_WEBHOOK_EVENTS;
 
+/** Transcrição dos áudios: exige a gravação das conversas ligada, a flag própria e a chave do provedor. */
+export const isWhatsAppTranscriptionEnabled = () =>
+  isWhatsAppMessagesEnabled() && env.whatsappTranscriptionEnabled && Boolean(env.whatsappTranscriptionApiKey && env.whatsappTranscriptionBaseUrl);
+
 export const isWhatsAppEvolutionConfigured = () =>
   Boolean(env.whatsappEvolutionBaseUrl && env.whatsappEvolutionApiKey && env.whatsappEvolutionWebhookSecret);

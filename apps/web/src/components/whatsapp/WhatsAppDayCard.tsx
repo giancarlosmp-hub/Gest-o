@@ -2,16 +2,22 @@ import { useCallback, useEffect, useState } from "react";
 import { ChevronDown, ChevronUp, MessageCircle } from "lucide-react";
 import api from "../../lib/apiClient";
 import {
+  TRANSCRIPT_PREVIEW_CHARS,
   formatWhatsAppDay,
   formatWhatsAppTime,
+  whatsappAudioLabel,
   whatsappOriginLabel,
+  whatsappTranscriptionNote,
   type WhatsAppDayCardItem,
   type WhatsAppDayCardsPage,
-  type WhatsAppMessageItem
+  type WhatsAppMessageItem,
+  type WhatsAppTranscription
 } from "../../lib/whatsappMessages";
 
 // WhatsApp Fase B2: cartão "WhatsApp · dd/mm" na linha do tempo do cliente e da oportunidade. Abre as
 // mensagens daquele dia (pela oportunidade, só as de depois da criação dela). Só leitura.
+// Áudio com transcrição: "🎤 0:42" com o selo "transcrição automática" e o texto (longo começa cortado), ou o
+// aviso de pendente, pulado ou falhou.
 
 type ViewProps = {
   card: WhatsAppDayCardItem;
@@ -30,6 +36,34 @@ const counts = (card: WhatsAppDayCardItem) => {
   if (card.outbound) parts.push(card.outbound === 1 ? "1 enviada" : `${card.outbound} enviadas`);
   return parts.join(" · ");
 };
+
+function AudioTranscription({ transcription }: { transcription: WhatsAppTranscription }) {
+  const [expanded, setExpanded] = useState(false);
+  const note = whatsappTranscriptionNote(transcription);
+  if (note) return <p className="mt-1 text-xs italic text-slate-500">{note}</p>;
+  const text = transcription.text ?? "";
+  const long = text.length > TRANSCRIPT_PREVIEW_CHARS;
+  const shown = long && !expanded ? `${text.slice(0, TRANSCRIPT_PREVIEW_CHARS).trimEnd()}…` : text;
+  return (
+    <div className="mt-1">
+      <span className="inline-block rounded bg-white px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-500 ring-1 ring-slate-200">
+        transcrição automática
+      </span>
+      {text ? (
+        <p className="mt-1 whitespace-pre-wrap break-words" data-whatsapp-transcription>
+          {shown}
+        </p>
+      ) : (
+        <p className="mt-1 text-xs italic text-slate-500">sem fala reconhecida</p>
+      )}
+      {long ? (
+        <button type="button" onClick={() => setExpanded((value) => !value)} className="mt-1 text-xs font-medium text-emerald-700">
+          {expanded ? "ver menos" : "ver mais"}
+        </button>
+      ) : null}
+    </div>
+  );
+}
 
 /** Parte visual, sem rede: usada pelo cartão e pelos testes. */
 export function WhatsAppDayCardView({ card, open, messages, loading, error, hasMore, onToggle, onLoadMore }: ViewProps) {
@@ -61,7 +95,10 @@ export function WhatsAppDayCardView({ card, open, messages, loading, error, hasM
             return (
               <div key={message.id} className={`flex ${outbound ? "justify-end" : "justify-start"}`} data-whatsapp-direction={message.direction}>
                 <div className={`max-w-[85%] rounded-lg px-3 py-2 ${outbound ? "bg-emerald-50 text-slate-800" : "bg-slate-100 text-slate-800"}`}>
-                  <p className={`whitespace-pre-wrap break-words ${!outbound && message.deletedInWhatsApp ? "italic text-slate-500" : ""}`}>{message.text}</p>
+                  <p className={`whitespace-pre-wrap break-words ${!outbound && message.deletedInWhatsApp ? "italic text-slate-500" : ""}`}>
+                    {message.transcription ? whatsappAudioLabel(message.text) : message.text}
+                  </p>
+                  {message.transcription ? <AudioTranscription transcription={message.transcription} /> : null}
                   <p className="mt-1 flex flex-wrap gap-x-2 text-[11px] text-slate-500">
                     <span>{formatWhatsAppTime(message.at)}</span>
                     <span>{whatsappOriginLabel(message)}</span>
