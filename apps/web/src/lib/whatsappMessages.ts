@@ -35,7 +35,34 @@ export type WhatsAppMessageItem = {
   /** Edição cifrada no WhatsApp: o texto mostrado é o original, o novo não é legível. */
   editedTextUnavailable: boolean;
   deletedInWhatsApp: boolean;
+  /** Só em áudio com a transcrição pedida; o texto vem quando pronta. */
+  transcription?: WhatsAppTranscription | null;
 };
+
+export type WhatsAppTranscription = {
+  status: "pending" | "done" | "failed" | "skipped";
+  text?: string;
+  reason?: string;
+};
+
+/** "[áudio 0:42]" → "🎤 0:42"; outro texto fica igual. */
+export const whatsappAudioLabel = (text: string) => {
+  const match = text.match(/^\[áudio(?: (\d+:\d{2}))?\]$/);
+  if (!match) return text;
+  return match[1] ? `🎤 ${match[1]}` : "🎤";
+};
+
+/** Aviso do áudio sem texto transcrito (pendente, pulado ou falhou); pronto: null. */
+export const whatsappTranscriptionNote = (transcription: WhatsAppTranscription) => {
+  if (transcription.status === "done") return null;
+  if (transcription.status === "pending") return "transcrevendo…";
+  if (transcription.reason === "too_long") return "longo demais para transcrever";
+  if (transcription.reason === "daily_cap") return "limite diário de transcrição atingido";
+  return "não foi possível transcrever";
+};
+
+/** Transcrição longa começa cortada, com "ver mais". */
+export const TRANSCRIPT_PREVIEW_CHARS = 400;
 
 export type WhatsAppUnlinkedItem = {
   id: string;
