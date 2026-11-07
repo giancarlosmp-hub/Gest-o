@@ -5,13 +5,14 @@ import api from "../lib/apiClient";
 import { AI_REQUEST_TIMEOUT_MS } from "../lib/aiRequest";
 import TimelineEventList, { TimelineEventItem } from "../components/TimelineEventList";
 import TimelineIntelligenceCard from "../components/TimelineIntelligenceCard";
+import { useWhatsAppDayCards } from "../components/whatsapp/WhatsAppDayCard";
 import ClientAutoSummaryCard from "../components/clients/ClientAutoSummaryCard";
 import ClientCreditAlertBanner, { ClientCreditAlert } from "../components/clients/ClientCreditAlertBanner";
 import ClientErpPhones, { type ClientErpEmail, type ClientErpPhone } from "../components/clients/ClientErpPhones";
 import { useAuth } from "../context/AuthContext";
 import { canManageArchivedClients, canReactivateClient, clientArchiveBadgeLabel, isPortfolioCleanupArchivedClient } from "../lib/clientArchiveStatus";
 import ClientMergeDuplicateDialog from "../components/clients/ClientMergeDuplicateDialog";
-import { PORTFOLIO_STATUS_LABELS, type PortfolioStatus } from "@salesforce-pro/shared";
+import { PORTFOLIO_STATUS_LABELS, isValidOptionalContactEmail, type PortfolioStatus } from "@salesforce-pro/shared";
 import { portfolioStatusBadgeClass } from "../lib/portfolioStatusBadge";
 
 type CommercialSummary = {
@@ -210,6 +211,8 @@ export default function ClientDetailsPage() {
   const [suggestion, setSuggestion] = useState<ClientSuggestion>(null);
   const [loadingSuggestion, setLoadingSuggestion] = useState(false);
   const [orderSummary, setOrderSummary] = useState<ClientOrderSummary>({ count: 0, totalValue: 0 });
+  // WhatsApp Fase B2: cartões das conversas gravadas, intercalados na linha do tempo.
+  const whatsapp = useWhatsAppDayCards(id ? `/whatsapp/clients/${id}/days` : null);
 
   const fetchSuggestion = useCallback(async (clientId: string) => {
     setSuggestion(null);
@@ -428,8 +431,13 @@ export default function ClientDetailsPage() {
   const saveContact = async () => {
     if (!id) return;
 
-    if (!contactForm.name.trim() || !contactForm.email.trim()) {
-      toast.error("Preencha pelo menos nome e email do contato.");
+    if (!contactForm.name.trim()) {
+      toast.error("Preencha pelo menos o nome do contato.");
+      return;
+    }
+    // E-mail é opcional; se preenchido, precisa ser válido.
+    if (!isValidOptionalContactEmail(contactForm.email)) {
+      toast.error("Email inválido.");
       return;
     }
 
@@ -887,8 +895,12 @@ export default function ClientDetailsPage() {
               events={events}
               loading={loading}
               hasMore={Boolean(eventsCursor)}
-              loadingMore={loadingMoreEvents}
-              onLoadMore={() => void loadMoreEvents()}
+              loadingMore={loadingMoreEvents || whatsapp.loadingMore}
+              onLoadMore={() => {
+                void loadMoreEvents();
+                void whatsapp.loadMore();
+              }}
+              whatsapp={{ cards: whatsapp.cards, hasMore: whatsapp.hasMore }}
               emptyMessage="Sem interações registradas."
               loadingMessage="Carregando timeline..."
             />
@@ -947,7 +959,7 @@ export default function ClientDetailsPage() {
               </label>
 
               <label className="block">
-                <span className="text-sm font-medium text-slate-700">Email</span>
+                <span className="text-sm font-medium text-slate-700">Email (opcional)</span>
                 <input
                   type="email"
                   value={contactForm.email}

@@ -142,10 +142,14 @@ export const companySchema = z.object({
   ownerSellerId: z.string().optional()
 });
 
+// E-mail do contato é opcional (vazio ou ausente); se informado, continua validado como e-mail.
+export const optionalContactEmailSchema = z.string().trim().pipe(z.union([z.literal(""), z.string().email()])).optional();
+export const isValidOptionalContactEmail = (value: string | null | undefined) => optionalContactEmailSchema.safeParse(value ?? undefined).success;
+
 export const contactSchema = z.object({
   name: z.string().min(2),
   phone: z.string().min(8),
-  email: z.string().email(),
+  email: optionalContactEmailSchema,
   clientId: z.string(),
   ownerSellerId: z.string().optional()
 });
@@ -155,7 +159,7 @@ export const clientContactSchema = z.object({
   role: z.string().min(2).optional(),
   department: z.string().min(2).optional(),
   phone: z.string().min(8),
-  email: z.string().email(),
+  email: optionalContactEmailSchema,
   isPrimary: z.boolean().optional(),
   notes: z.string().max(2000).optional()
 });

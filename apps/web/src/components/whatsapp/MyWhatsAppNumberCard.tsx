@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { CheckCircle2, QrCode, Smartphone, Unplug } from "lucide-react";
+import { CheckCircle2, CircleDot, QrCode, Smartphone, Unplug } from "lucide-react";
 import api from "../../lib/apiClient";
 import {
   WHATSAPP_STATUS_LABELS,
@@ -8,9 +8,12 @@ import {
   whatsappReasonLabel,
   type OwnWhatsAppConnection
 } from "../../lib/whatsappConnection";
+import { formatBrazilDayMonth, type WhatsAppMessagesSummary } from "../../lib/whatsappMessages";
+import { UNLINKED_SECTION_ID } from "./UnlinkedConversationsCard";
 
-// "Meu número": cada usuário conecta o número comercial de WhatsApp ao CRM lendo um QR (Fase A).
-// Nenhuma mensagem é lida, gravada ou enviada por aqui.
+// "Meu número": cada usuário conecta o número comercial de WhatsApp ao CRM lendo um QR (Fase A). Com o número
+// conectado, mostra se a gravação das conversas (Fase B) está ligada e desde quando, com o aviso de que as
+// conversas ficam registradas, e o contador da fila "Conversas não vinculadas". Nada é enviado por aqui.
 
 const POLL_INTERVAL_MS = 5_000;
 
@@ -19,6 +22,7 @@ const apiMessage = (error: unknown, fallback: string) =>
 
 type ViewProps = {
   connection: Extract<OwnWhatsAppConnection, { enabled: true }>;
+  summary?: WhatsAppMessagesSummary | null;
   busy: boolean;
   onConnect: () => void;
   onDisconnect: () => void;
@@ -32,7 +36,37 @@ const statusTone: Record<string, string> = {
 };
 
 /** Parte visual, sem rede: usada pelo cartão e pelos testes. */
-export function MyWhatsAppNumberView({ connection, busy, onConnect, onDisconnect }: ViewProps) {
+function RecordingStatus({ summary, connected }: { summary: WhatsAppMessagesSummary; connected: boolean }) {
+  const since = formatBrazilDayMonth(summary.recording.since);
+  const count = summary.unlinkedCount;
+  return (
+    <div className="mt-3 space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm" data-whatsapp-recording={summary.recording.enabled ? "on" : "off"}>
+      {connected ? (
+        <p className={`flex items-center gap-2 font-semibold ${summary.recording.enabled ? "text-emerald-700" : "text-slate-600"}`}>
+          <CircleDot size={14} aria-hidden="true" />
+          Gravação das conversas {summary.recording.enabled ? "ligada" : "desligada"}
+          {since ? ` desde ${since}` : ""}
+        </p>
+      ) : null}
+      {connected && summary.recording.enabled ? (
+        <p className="text-slate-700">
+          As conversas deste número (enviadas pelo app do celular e recebidas) ficam registradas no CRM, na linha do tempo do cliente.
+        </p>
+      ) : null}
+      <p className="text-slate-700">
+        {count ? (
+          <a href={`#${UNLINKED_SECTION_ID}`} className="font-semibold text-emerald-700 underline-offset-2 hover:underline">
+            {count === 1 ? "1 conversa não vinculada" : `${count} conversas não vinculadas`}
+          </a>
+        ) : (
+          "Nenhuma conversa aguardando vínculo."
+        )}
+      </p>
+    </div>
+  );
+}
+
+export function MyWhatsAppNumberView({ connection, summary, busy, onConnect, onDisconnect }: ViewProps) {
   const { status } = connection;
   const reason = whatsappReasonLabel(connection.statusReason);
   const canConnect = connection.phoneConfigured && connection.configured && status !== "CONNECTED" && status !== "PENDING_QR";
@@ -75,6 +109,8 @@ export function MyWhatsAppNumberView({ connection, busy, onConnect, onDisconnect
         </p>
       ) : null}
 
+      {summary && (status === "CONNECTED" || summary.unlinkedCount > 0) ? <RecordingStatus summary={summary} connected={status === "CONNECTED"} /> : null}
+
       {status === "PENDING_QR" ? (
         <div className="mt-4 flex flex-col items-center gap-3 sm:flex-row sm:items-start">
           {connection.qrDataUrl ? (
@@ -110,8 +146,9 @@ export function MyWhatsAppNumberView({ connection, busy, onConnect, onDisconnect
 }
 
 /** Cartão completo: busca o status, atualiza o QR a cada 5 s enquanto aguarda e some com a flag desligada. */
-export default function MyWhatsAppNumberCard() {
+export default function MyWhatsAppNumberCard({ queueVersion = 0 }: { queueVersion?: number }) {
   const [connection, setConnection] = useState<OwnWhatsAppConnection | null>(null);
+  const [summary, setSummary] = useState<WhatsAppMessagesSummary | null>(null);
   const [busy, setBusy] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -126,6 +163,21 @@ export default function MyWhatsAppNumberCard() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // Gravação e fila: relido ao mudar o status do número e quando a fila muda (vincular/descartar).
+  const enabled = connection?.enabled === true;
+  const connectionStatus = connection?.enabled === true ? connection.status : null;
+  useEffect(() => {
+    if (!enabled) return undefined;
+    let active = true;
+    api
+      .get<WhatsAppMessagesSummary>("/whatsapp/messages/summary")
+      .then((response) => active && setSummary(response.data))
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [enabled, connectionStatus, queueVersion]);
 
   const waiting = connection?.enabled === true && connection.status === "PENDING_QR";
   useEffect(() => {
@@ -164,5 +216,5 @@ export default function MyWhatsAppNumberCard() {
     }
   };
 
-  return <MyWhatsAppNumberView connection={connection} busy={busy} onConnect={connect} onDisconnect={disconnect} />;
+  return <MyWhatsAppNumberView connection={connection} summary={summary} busy={busy} onConnect={connect} onDisconnect={disconnect} />;
 }

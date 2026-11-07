@@ -3,6 +3,7 @@ import { isWhatsAppEvolutionConfigured, isWhatsAppEvolutionEnabled, isWhatsAppMe
 import { rebuildClientPhoneIndex } from "../services/whatsappMessages/clientPhoneIndex.js";
 import { runWhatsAppMessagesMaintenance } from "../services/whatsappMessages/whatsappMessagesMaintenance.js";
 import { reconcileWebhookSubscriptions } from "../services/whatsappMessages/whatsappWebhookSubscriptions.js";
+import { syncRecordingState } from "../services/whatsappMessages/whatsappRecordingState.js";
 
 // WhatsApp Fase B, de hora em hora:
 // - limpeza: fila "não vinculadas" vencida (7 dias) e retenção das mensagens vinculadas (sempre roda,
@@ -45,6 +46,10 @@ export const startWhatsAppMessagesScheduler = async () => {
   if (started) return;
   started = true;
   logApiEvent("INFO", "[whatsapp scheduler] initialized", { intervalMs: INTERVAL_MS });
+  // "Gravação ligada/desligada desde": a flag só muda com a API reiniciando, então basta conferir na subida.
+  await syncRecordingState()
+    .then(({ changed, state }) => logApiEvent("INFO", "[whatsapp] recording state", { enabled: state.enabled, changed }))
+    .catch((error) => logApiEvent("WARN", "[whatsapp] recording state sync failed", { error: errorName(error) }));
   await whatsappMessagesTick().catch((error) => logApiEvent("ERROR", "[whatsapp scheduler] tick failed", { error: errorName(error) }));
   timer = setInterval(() => {
     void whatsappMessagesTick().catch((error) => logApiEvent("ERROR", "[whatsapp scheduler] tick failed", { error: errorName(error) }));

@@ -243,8 +243,9 @@ Desligado por padrão: exige `COMMUNICATIONS_ENABLED`, `WHATSAPP_EVOLUTION_ENABL
 - Conteúdo só no PostgreSQL do CRM (`CommunicationMessage.textContent`), portanto também nos backups do banco.
 - Mensagens vinculadas: `WHATSAPP_MESSAGES_RETENTION_MONTHS` (padrão 24); o job de hora em hora apaga as mais
   antigas e as conversas vinculadas que ficaram vazias. Só o provedor Evolution é tocado.
-- Visibilidade (B2): vendedor vê as conversas dos clientes da carteira dele; gerente e diretor veem tudo. A
-  conversa pertence ao cliente, não ao vendedor. Nada vai para a IA externa nesta fase.
+- Visibilidade (B2, detalhes em [Quem vê](#quem-vê)): vendedor vê as conversas dos clientes da carteira dele;
+  gerente e diretor veem tudo. A conversa pertence ao cliente, não ao vendedor. Nada vai para a IA externa
+  nesta fase.
 - Log só com códigos e contagens (evento, resultado, motivo, vínculo, direção, usuário, duração). **Nunca** texto,
   legenda, nome do contato, número, JID, id da mensagem ou `apikey`; teste garante.
 
@@ -265,4 +266,59 @@ Desligado por padrão: exige `COMMUNICATIONS_ENABLED`, `WHATSAPP_EVOLUTION_ENABL
    das instâncias conectadas e reconstrói o índice.
 3. Com um número de teste: mensagem recebida, enviada pelo app, editada e apagada, e conferir o formato do
    evento de edição (`protocolMessage` com a chave da original), que só foi lido no código-fonte do Evolution.
+
+## Fase B2 — telas e rotas das conversas
+
+Leitura das conversas gravadas no B1, fila "não vinculadas", vínculo manual e descarte. **Sem envio** e **sem
+`TimelineEvent`**: os cartões vêm das próprias mensagens. Sem migration (usa as colunas do B1 e a tabela
+`AppConfig`). A leitura não depende da flag de gravação: o que já foi gravado fica visível dentro da retenção.
+
+### Quem vê
+
+- Gerente e diretor: tudo do próprio tenant.
+- Vendedor: conversas dos clientes da carteira atual dele (`Client.ownerSellerId`).
+- Dono da oportunidade que não é dono do cliente: só pela rota e pela tela da oportunidade, e só desde a
+  criação dela. O link "Ver histórico completo no cliente" aparece só para quem abre o cliente.
+- Fila "não vinculadas": cada usuário vê só a do próprio número, inclusive gerente e diretor.
+- Número do contato: mascarado nos cartões (`(DD) ****-NNNN`); completo só na fila, para o dono do número.
+
+### Rotas (`/whatsapp`, autenticadas)
+
+| Rota | O que faz |
+|---|---|
+| `GET /clients/:clientId/days?before=AAAA-MM-DD&take=20` | Cartões por conversa e dia de Brasília (UTC-3), mais recente primeiro. `take` até 60; `nextBefore` pagina por dia. |
+| `GET /opportunities/:opportunityId/days` | O mesmo, só com mensagens desde a criação da oportunidade, mais `clientId`, `since` e `canOpenClient`. |
+| `GET /conversations/:conversationId/messages?day=AAAA-MM-DD` | Mensagens de um cartão (até 300 por página, `cursor`; `opportunityId` limita à criação dela): direção, tipo, texto, hora, origem (`app` = "via app", `received` = "recebida"), `edited` e `deletedInWhatsApp`. Nunca devolve número, id externo ou nome do contato no WhatsApp. |
+| `GET /unlinked?cursor=&take=20` | Fila do próprio número (`take` até 50): número completo, nome no WhatsApp, última mensagem (até 120 caracteres), dias para expirar, `unlinked`/`ambiguous` e `total`. |
+| `POST /unlinked/:conversationId/link` `{ clientId }` | Vincula (só o dono do número). Vendedor só a cliente da carteira dele; gerente e diretor a qualquer cliente ativo do tenant. |
+| `POST /unlinked/:conversationId/discard` | Apaga a conversa e as mensagens (só o dono). Se o contato escrever de novo, ela volta para a fila. |
+| `GET /messages/summary` | Cartão Meu número: gravação ligada/desligada desde quando e o tamanho da fila. |
+
+- **Cartões:** a varredura lê só data, direção e conversa de até 3.000 mensagens por página; o dia mais antigo
+  de uma varredura cortada volta na página seguinte. Num dia com mais de 3.000 mensagens de um cliente, o
+  cartão mostra só a contagem lida (as mensagens abrem todas, paginadas).
+- **Vincular:** grava `clientId`, `tenantId`, `linkStatus = linked`, `linkSource = manual`, `linkedById` e
+  `linkedAt`, limpa a expiração e o nome do WhatsApp e passa o tenant para as mensagens já gravadas. O telefone
+  vira **contato do cliente** (nome do WhatsApp ou "Contato WhatsApp", telefone formatado, e-mail vazio, dono =
+  dono da carteira do cliente), salvo quando já está no índice deste cliente ou num contato dele, comparado na
+  regra compartilhada (`exists`), ou quando a conversa é ambígua ou o telefone está no índice de outro cliente
+  ativo (`skipped_ambiguous`). Contato criado atualiza o índice em segundo plano (com a gravação ligada).
+- **Corrida:** vincular e descartar só mexem em conversa ainda sem cliente; a segunda ação recebe 409 ou 404.
+- **"Desde dd/mm":** na subida da API, se o estado em `AppConfig` (`whatsapp_messages_recording_state`) for
+  diferente da flag, grava o novo estado com a data da subida. Ligada e número conectado depois da ligação =
+  data da conexão. O primeiro registro marca o início do acompanhamento, não a data de uma ligação anterior.
+
+### Telas
+
+- **Linha do tempo do cliente e da oportunidade:** cartões "WhatsApp · dd/mm" intercalados por data com os
+  eventos (as duas listas são paginadas; nada mais antigo que o último item carregado de cada uma aparece
+  antes da hora). Ao abrir, as mensagens do dia com "via app"/"recebida", "editada" e "apagada no WhatsApp"
+  (do vendedor); apagada do contato aparece como "[mensagem apagada]".
+- **`/whatsapp` → Conversas não vinculadas** (só com fila): número, nome no WhatsApp, última mensagem ("Você:"
+  quando enviada), "expira em N dias", "mais de um cliente", Vincular (busca de cliente) e Descartar (com
+  confirmação).
+- **Meu número:** com o número conectado, "Gravação das conversas ligada/desligada desde dd/mm" e o aviso de que
+  as conversas ficam registradas no CRM; contador da fila com link para ela.
+- **Contato do cliente:** e-mail opcional no formulário e na API (`contactSchema`, `clientContactSchema`); se
+  informado, continua validado como e-mail.
 

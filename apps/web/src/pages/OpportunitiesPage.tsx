@@ -11,6 +11,7 @@ import { useAuth } from "../context/AuthContext";
 import { triggerDashboardRefresh } from "../lib/dashboardRefresh";
 import TimelineEventList, { TimelineEventItem } from "../components/TimelineEventList";
 import TimelineIntelligenceCard from "../components/TimelineIntelligenceCard";
+import { useWhatsAppDayCards } from "../components/whatsapp/WhatsAppDayCard";
 import CreateOpportunityModal from "../components/opportunities/CreateOpportunityModal";
 import OpportunityImportModal from "../components/opportunities/OpportunityImportModal";
 import DeleteOpportunityConfirmModal from "../components/opportunities/DeleteOpportunityConfirmModal";
@@ -454,6 +455,8 @@ export default function OpportunitiesPage() {
   const [loadingPipelineEvents, setLoadingPipelineEvents] = useState(false);
   const [loadingMorePipelineEvents, setLoadingMorePipelineEvents] = useState(false);
   const [pipelineEventsCursor, setPipelineEventsCursor] = useState<string | null>(null);
+  // WhatsApp Fase B2: conversas do cliente desde a criação da oportunidade, intercaladas na timeline.
+  const pipelineWhatsapp = useWhatsAppDayCards(isPipelineDrawerOpen && selectedOpportunity ? `/whatsapp/opportunities/${selectedOpportunity.id}/days` : null);
   const [isQuickActionLoading, setIsQuickActionLoading] = useState<"ganho" | "perdido" | null>(null);
   // Menus ⋯ da lista/card e menu "Encerrar" do drawer têm estados separados: abrir um nunca abre o outro.
   const [openCloseMenuId, setOpenCloseMenuId] = useState<string | null>(null);
@@ -2631,12 +2634,25 @@ export default function OpportunitiesPage() {
                   loading={loadingPipelineEvents}
                   loadingMore={loadingMorePipelineEvents}
                   hasMore={Boolean(pipelineEventsCursor)}
-                  onLoadMore={() => void loadMorePipelineEvents()}
+                  onLoadMore={() => {
+                    void loadMorePipelineEvents();
+                    void pipelineWhatsapp.loadMore();
+                  }}
+                  whatsapp={{ cards: pipelineWhatsapp.cards, hasMore: pipelineWhatsapp.hasMore, opportunityId: selectedOpportunity.id }}
                   emptyMessage="Sem eventos registrados para esta oportunidade."
                   loadingMessage="Carregando timeline..."
                   compact
                 />
               </div>
+              {pipelineWhatsapp.cards.length && pipelineWhatsapp.canOpenClient ? (
+                <button
+                  type="button"
+                  onClick={() => navigate(`/clientes/${selectedOpportunity.clientId}`)}
+                  className="mt-2 text-xs font-semibold text-emerald-700 underline-offset-2 hover:underline"
+                >
+                  Ver histórico completo no cliente
+                </button>
+              ) : null}
             </div>
           </aside>
         </div>

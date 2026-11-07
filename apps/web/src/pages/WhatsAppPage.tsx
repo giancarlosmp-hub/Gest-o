@@ -6,6 +6,7 @@ import api from "../lib/apiClient";
 import { AI_REQUEST_TIMEOUT_MS } from "../lib/aiRequest";
 import { buildWhatsAppUrl } from "../lib/whatsappLink";
 import MyWhatsAppNumberCard from "../components/whatsapp/MyWhatsAppNumberCard";
+import UnlinkedConversationsCard from "../components/whatsapp/UnlinkedConversationsCard";
 
 type Client = {
   id: string;
@@ -35,6 +36,8 @@ export default function WhatsAppPage() {
   const [generating, setGenerating] = useState(false);
   const [registering, setRegistering] = useState(false);
   const [lastGeneration, setLastGeneration] = useState<GeneratedMessage | null>(null);
+  // WhatsApp Fase B2: vincular ou descartar na fila atualiza o contador do cartão "Meu número".
+  const [queueVersion, setQueueVersion] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -125,7 +128,8 @@ export default function WhatsAppPage() {
         <p className="mt-1 text-sm text-slate-600">Gere, edite, copie e abra o WhatsApp. Nenhuma mensagem é enviada automaticamente.</p>
       </header>
 
-      <MyWhatsAppNumberCard />
+      <MyWhatsAppNumberCard queueVersion={queueVersion} />
+      <UnlinkedConversationsCard onChanged={() => setQueueVersion((value) => value + 1)} />
 
       <div className="grid overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm md:grid-cols-[340px_1fr]">
         <aside className="border-r border-slate-200">

@@ -21,7 +21,7 @@ const testPlugin: Plugin = {
       'import { MyWhatsAppNumberView } from "/src/components/whatsapp/MyWhatsAppNumberCard.tsx";',
       'export * from "/src/lib/whatsappConnection.ts";',
       "const noop = () => undefined;",
-      "export const render = (connection) => renderToStaticMarkup(createElement(MyWhatsAppNumberView, { connection, busy: false, onConnect: noop, onDisconnect: noop }));"
+      "export const render = (connection, summary = null) => renderToStaticMarkup(createElement(MyWhatsAppNumberView, { connection, summary, busy: false, onConnect: noop, onDisconnect: noop }));"
     ].join("\n");
   }
 };
@@ -68,7 +68,7 @@ const textOf = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, "
 
 try {
   const mod = await server.ssrLoadModule("virtual:my-whatsapp-number-render");
-  const render = mod.render as (connection: unknown) => string;
+  const render = mod.render as (connection: unknown, summary?: unknown) => string;
 
   // 1) Não conectado: botão de conectar e o número esperado.
   const idle = render(base);
@@ -114,8 +114,27 @@ try {
   assert.equal(mod.whatsappCanDisconnect("CONNECTED"), true);
   assert.equal(mod.whatsappCanDisconnect("DISCONNECTED"), false);
 
-  // 7) Nenhum texto de envio de mensagem no cartão.
-  for (const html of [idle, pending, connected]) assert.doesNotMatch(textOf(html), /Enviar|enviar mensagem/i);
+  // 7) Fase B2: gravação ligada/desligada desde dd/mm (Brasília), aviso de registro e contador da fila.
+  const connectedBase = { ...base, status: "CONNECTED", connectedPhone: "(11) 90000-0001" };
+  const recordingOn = render(connectedBase, { recording: { enabled: true, since: "2026-11-10T01:00:00.000Z" }, unlinkedCount: 3 });
+  assert.match(recordingOn, /data-whatsapp-recording="on"/);
+  assert.match(textOf(recordingOn), /Gravação das conversas ligada desde 09\/11/);
+  assert.match(textOf(recordingOn), /ficam registradas no CRM/);
+  assert.match(textOf(recordingOn), /3 conversas não vinculadas/);
+  assert.match(recordingOn, /href="#conversas-nao-vinculadas"/);
+  const recordingOff = render(connectedBase, { recording: { enabled: false, since: "2026-11-08T12:00:00.000Z" }, unlinkedCount: 0 });
+  assert.match(textOf(recordingOff), /Gravação das conversas desligada desde 08\/11/);
+  assert.doesNotMatch(textOf(recordingOff), /ficam registradas/);
+  assert.match(textOf(recordingOff), /Nenhuma conversa aguardando vínculo/);
+  assert.match(textOf(render(connectedBase, { recording: { enabled: true, since: null }, unlinkedCount: 1 })), /Gravação das conversas ligada As conversas.* 1 conversa não vinculada/);
+  // Não conectado: nada de gravação; com fila, só o contador.
+  assert.doesNotMatch(textOf(render(base, { recording: { enabled: true, since: null }, unlinkedCount: 0 })), /Gravação|aguardando vínculo/);
+  const idleWithQueue = textOf(render(base, { recording: { enabled: true, since: null }, unlinkedCount: 2 }));
+  assert.doesNotMatch(idleWithQueue, /Gravação/);
+  assert.match(idleWithQueue, /2 conversas não vinculadas/);
+
+  // 8) Nenhum texto de envio de mensagem no cartão.
+  for (const html of [idle, pending, connected, recordingOn]) assert.doesNotMatch(textOf(html), /Enviar|enviar mensagem/i);
 
   console.log("my whatsapp number card tests passed");
 } finally {

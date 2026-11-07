@@ -1,3 +1,20 @@
+# WhatsApp Fase B2: telas e rotas das conversas — código pronto, aguardando merge — 07/11/2026
+
+- Linha do tempo do cliente e da oportunidade com cartões "WhatsApp · dd/mm" (conversa e dia de Brasília),
+  intercalados por data; ao abrir, as mensagens com "via app"/"recebida", "editada" e "apagada no WhatsApp".
+  Na oportunidade, só desde a criação dela, com "Ver histórico completo no cliente". Sem `TimelineEvent`.
+- Escopo: gerente/diretor no tenant; vendedor pela carteira atual do cliente; dono da oportunidade só pela
+  oportunidade. Número mascarado nos cartões.
+- `/whatsapp`: fila **Conversas não vinculadas** do próprio número (número completo, nome no WhatsApp, última
+  mensagem, dias para expirar, Vincular e Descartar). Vincular grava o telefone como contato do cliente sem
+  duplicar; conversa ambígua não cria contato. Vendedor só vincula à carteira dele.
+- **Meu número:** gravação ligada/desligada desde dd/mm (estado da flag em `AppConfig`, gravado na subida),
+  aviso de registro e contador da fila.
+- E-mail do contato do cliente opcional no formulário e na API (validado quando informado).
+- Sem migration. A gravação continua desligada (`WHATSAPP_EVOLUTION_MESSAGES_ENABLED=false`). Detalhes em
+  [communications/whatsapp-evolution.md](communications/whatsapp-evolution.md#fase-b2--telas-e-rotas-das-conversas);
+  pendências em `TD-WHATSAPP-MESSAGES`.
+
 # WhatsApp Fase B1: gravação das conversas (backend) — código pronto, aguardando merge — 07/11/2026
 
 - Mensagens do número comercial conectado (recebidas e enviadas, inclusive pelo app do celular, "via app")
