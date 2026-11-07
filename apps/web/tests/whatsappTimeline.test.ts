@@ -101,12 +101,14 @@ try {
   assert.match(textOf(closed), /número de Vendedor Ficticio A/);
   assert.match(closed, /aria-expanded="false"/);
 
-  // 4) Aberto: origem, editada, apagada pelo vendedor (mantida com marca) e do contato ("[mensagem apagada]").
+  // 4) Aberto: origem, editada, editada cifrada (texto novo indisponível), apagada pelo vendedor (mantida com
+  // marca) e do contato ("[mensagem apagada]").
   const messages = [
-    { id: "m1", direction: "inbound", type: "TEXT", text: "Pergunta ficticia", at: "2026-11-05T16:00:00.000Z", origin: "received", edited: false, deletedInWhatsApp: false },
-    { id: "m2", direction: "outbound", type: "TEXT", text: "Resposta ficticia", at: "2026-11-05T16:05:00.000Z", origin: "app", edited: true, deletedInWhatsApp: false },
-    { id: "m3", direction: "outbound", type: "TEXT", text: "Texto ficticio apagado", at: "2026-11-05T16:10:00.000Z", origin: "app", edited: false, deletedInWhatsApp: true },
-    { id: "m4", direction: "inbound", type: "TEXT", text: "[mensagem apagada]", at: "2026-11-05T16:20:00.000Z", origin: "received", edited: false, deletedInWhatsApp: true }
+    { id: "m1", direction: "inbound", type: "TEXT", text: "Pergunta ficticia", at: "2026-11-05T16:00:00.000Z", origin: "received", edited: false, editedTextUnavailable: false, deletedInWhatsApp: false },
+    { id: "m2", direction: "outbound", type: "TEXT", text: "Resposta ficticia", at: "2026-11-05T16:05:00.000Z", origin: "app", edited: true, editedTextUnavailable: false, deletedInWhatsApp: false },
+    { id: "m3", direction: "outbound", type: "TEXT", text: "Texto ficticio apagado", at: "2026-11-05T16:10:00.000Z", origin: "app", edited: false, editedTextUnavailable: false, deletedInWhatsApp: true },
+    { id: "m4", direction: "inbound", type: "TEXT", text: "[mensagem apagada]", at: "2026-11-05T16:20:00.000Z", origin: "received", edited: false, editedTextUnavailable: false, deletedInWhatsApp: true },
+    { id: "m5", direction: "inbound", type: "TEXT", text: "Texto ficticio original", at: "2026-11-05T16:30:00.000Z", origin: "received", edited: false, editedTextUnavailable: true, deletedInWhatsApp: false }
   ];
   const open = mod.renderCard({ card: card("2026-11-05", "2026-11-05T18:00:00.000Z"), open: true, messages, hasMore: true });
   const openText = textOf(open);
@@ -116,6 +118,8 @@ try {
   assert.match(openText, /Texto ficticio apagado 13:10 via app apagada no WhatsApp/);
   assert.match(openText, /\[mensagem apagada\] 13:20 recebida/);
   assert.doesNotMatch(openText, /\[mensagem apagada\] 13:20 recebida apagada no WhatsApp/);
+  assert.match(openText, /Texto ficticio original 13:30 recebida \(editada no WhatsApp – texto novo não disponível\)/);
+  assert.equal((openText.match(/texto novo não disponível/g) ?? []).length, 1, "só na mensagem marcada");
   assert.match(openText, /Carregar mais mensagens/);
   assert.equal((open.match(/data-whatsapp-direction="outbound"/g) ?? []).length, 2);
   assert.match(textOf(mod.renderCard({ card: card("2026-11-05", "2026-11-05T18:00:00.000Z"), open: true, error: true })), /Não foi possível carregar as mensagens/);

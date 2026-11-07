@@ -32,6 +32,8 @@ export type WhatsAppMessageItem = {
   at: string | null;
   origin: "app" | "received";
   edited: boolean;
+  /** Edição cifrada no WhatsApp: o texto mostrado é o original, o novo não é legível. */
+  editedTextUnavailable: boolean;
   deletedInWhatsApp: boolean;
 };
 

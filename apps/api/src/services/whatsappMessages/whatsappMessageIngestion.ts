@@ -14,6 +14,9 @@ import { PrismaWhatsAppMessageStore, type ConversationRow, type ConversationUpda
 //   guarda o anterior e editedAt em metadata; nunca cria linha. Apagada (messages.delete ou REVOKE no
 //   upsert): do vendedor, mantém o texto com a marca; do contato, o texto vira "[mensagem apagada]" e o
 //   texto anterior da edição sai junto. Original não gravada: ignorada.
+// - Edição cifrada (secretEncryptedMessage MESSAGE_EDIT no upsert): o texto novo não é legível (o segredo da
+//   original não é guardado). Só marca a original com editedInWhatsAppAt em metadata, mantendo o texto;
+//   original apagada ou já marcada: nada muda. A apagada pelo contato perde a marca junto com o texto.
 // - Tipo desconhecido ("[mensagem não suportada]"): WARN só com os nomes dos campos de data.message.
 // - Relógio: messageTimestamp do WhatsApp; ausente ou mais de 5 min no futuro, vale a hora de chegada.
 // O resultado nunca traz texto, nome, número, JID ou id da mensagem: só códigos para log.
@@ -48,9 +51,10 @@ export class WhatsAppMessageIngestion {
     const parsed = parseEvolutionMessageEvent(payload);
     if (parsed.kind === "ignored") return { status: "ignored", event: "other", reason: parsed.reason };
     const connection = await this.store.findConnectedInstance(parsed.instance);
-    if (!connection) return { status: "unknown_instance", event: parsed.kind };
+    if (!connection) return { status: "unknown_instance", event: parsed.kind === "edit_without_text" ? "edit" : parsed.kind };
     if (parsed.kind === "upsert") return this.upsert(parsed, connection, now);
     if (parsed.kind === "edit") return this.edit(parsed, connection.account, connection.userId, now);
+    if (parsed.kind === "edit_without_text") return this.editWithoutText(parsed, connection.account, connection.userId, now);
     return this.delete(parsed, connection.account, connection.userId, now);
   }
 
@@ -178,6 +182,16 @@ export class WhatsAppMessageIngestion {
     return { status: "updated", event: "edit", userId };
   }
 
+  private async editWithoutText(parsed: Extract<ParsedEvolutionEvent, { kind: "edit_without_text" }>, account: string, userId: string, now: Date): Promise<IngestionResult> {
+    const message = await this.store.findMessage(account, parsed.targetMessageId);
+    if (!message) return { status: "not_found", event: "edit", userId, reason: "text_unavailable" };
+    if (message.metadata.deletedInWhatsAppAt) return { status: "ignored", event: "edit", userId, reason: "already_deleted" };
+    // Reentrega (ou outra edição cifrada da mesma mensagem): a marca já existe.
+    if (message.metadata.editedInWhatsAppAt) return { status: "duplicate", event: "edit", userId, reason: "text_unavailable" };
+    await this.store.updateMessage(message.id, { metadata: { ...message.metadata, editedInWhatsAppAt: now.toISOString() } });
+    return { status: "updated", event: "edit", userId, reason: "text_unavailable" };
+  }
+
   private async delete(parsed: Extract<ParsedEvolutionEvent, { kind: "delete" }>, account: string, userId: string, now: Date): Promise<IngestionResult> {
     const message = await this.store.findMessage(account, parsed.targetMessageId);
     if (!message) return { status: "not_found", event: "delete", userId };
@@ -189,7 +203,7 @@ export class WhatsAppMessageIngestion {
       return { status: "updated", event: "delete", userId, direction: "outbound" };
     }
     // Do contato: o texto sai (também o anterior à edição), fica só o aviso.
-    const { editedAt: _editedAt, previousText: _previousText, ...withoutEdit } = metadata;
+    const { editedAt: _editedAt, previousText: _previousText, editedInWhatsAppAt: _editedInWhatsAppAt, ...withoutEdit } = metadata;
     await this.store.updateMessage(message.id, { textContent: DELETED_BY_CONTACT_TEXT, mediaMetadata: null, metadata: withoutEdit });
     return { status: "updated", event: "delete", userId, direction: "inbound" };
   }

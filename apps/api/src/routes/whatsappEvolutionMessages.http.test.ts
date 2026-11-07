@@ -154,10 +154,12 @@ try {
   const rowsBeforeProtocol = memory.messages.length;
   assert.deepEqual((await post(notice(`${KEY_ID}-AVISO-SEM-ORIGINAL`, { protocolMessage: editOf(`${KEY_ID}-NUNCA-GRAVADA`) }))).json, { status: "not_found" });
   assert.deepEqual((await post(notice(`${KEY_ID}-AVISO-TEMPORARIAS`, { protocolMessage: { type: 3, ephemeralExpiration: 604_800 } }))).json, { status: "ignored" });
+  // secretEncryptedMessage de outro tipo (EVENT_EDIT = 1): continua ignorado.
   assert.deepEqual(
-    (await post(notice(`${KEY_ID}-AVISO-CIFRADO`, { secretEncryptedMessage: { targetMessageKey: { remoteJid: `${CONTACT}@s.whatsapp.net`, fromMe: true, id: `${KEY_ID}-ED-solto` }, encPayload: binary(48, 12), encIv: binary(12, 13), secretEncType: 2 } }))).json,
+    (await post(notice(`${KEY_ID}-AVISO-CIFRADO-EVENTO`, { secretEncryptedMessage: { targetMessageKey: { remoteJid: `${CONTACT}@s.whatsapp.net`, fromMe: true, id: `${KEY_ID}-ED-solto` }, encPayload: binary(48, 12), encIv: binary(12, 13), secretEncType: 1 } }))).json,
     { status: "ignored" }
   );
+  assert.equal(textOf(`${KEY_ID}-ED-solto`)?.metadata.editedInWhatsAppAt, undefined);
   // Revogação no upsert: do contato vira "[mensagem apagada]" (sai o texto anterior da edição); do vendedor
   // mantém o texto com a marca.
   assert.deepEqual((await post(notice(`${KEY_ID}-AVISO-REVOGA-1`, { protocolMessage: { key: { remoteJid: `${CONTACT}@s.whatsapp.net`, fromMe: false, id: `${KEY_ID}-ED-solto` }, type: 0 } }))).json, { status: "updated" });
@@ -173,6 +175,38 @@ try {
   assert.equal(memory.messages.length, rowsBeforeProtocol + 1, "só a mensagem do vendedor entrou");
   assert.equal(memory.messages.some((row) => row.externalMessageId.includes("-AVISO-")), false);
   assert.equal(memory.messages.some((row) => row.type === "UNKNOWN"), false, "nenhum aviso virou UNKNOWN");
+
+  // 5b2) Edição cifrada (confirmada em produção): secretEncryptedMessage MESSAGE_EDIT (2) no upsert. Sem o
+  // segredo da original não há texto novo: marca a original (editedInWhatsAppAt) e mantém o texto.
+  const encryptedEdit = (noticeId: string, targetId: string, fromMe: boolean) => {
+    const event = upsert(noticeId, {
+      secretEncryptedMessage: { targetMessageKey: { remoteJid: `${CONTACT}@s.whatsapp.net`, fromMe, id: targetId }, encPayload: binary(64, 21), encIv: binary(12, 22), secretEncType: 2 },
+      messageContextInfo: contextInfo
+    });
+    return { ...event, data: { ...event.data, messageType: "secretEncryptedMessage" } };
+  };
+  assert.deepEqual((await post(original(`${KEY_ID}-CIF-RECEBIDA`))).json, { status: "stored" });
+  assert.deepEqual((await post(original(`${KEY_ID}-CIF-ENVIADA`, true))).json, { status: "stored" });
+  const rowsBeforeEncrypted = memory.messages.length;
+  for (const [id, fromMe] of [[`${KEY_ID}-CIF-RECEBIDA`, false], [`${KEY_ID}-CIF-ENVIADA`, true]] as const) {
+    assert.deepEqual((await post(encryptedEdit(`${KEY_ID}-CIF-AVISO-${fromMe}`, id, fromMe))).json, { status: "updated" }, id);
+    assert.equal(textOf(id)?.textContent, TEXT, "texto mantido");
+    assert.equal(textOf(id)?.type, "TEXT");
+    const markedAt = textOf(id)?.metadata.editedInWhatsAppAt;
+    assert.equal(typeof markedAt, "string");
+    assert.equal(textOf(id)?.metadata.previousText, undefined);
+    assert.equal(textOf(id)?.metadata.editedAt, undefined);
+    assert.deepEqual((await post(encryptedEdit(`${KEY_ID}-CIF-AVISO-${fromMe}`, id, fromMe))).json, { status: "duplicate" }, `${id}: reentrega`);
+    assert.equal(textOf(id)?.metadata.editedInWhatsAppAt, markedAt, "reentrega não muda a marca");
+  }
+  assert.deepEqual((await post(encryptedEdit(`${KEY_ID}-CIF-AVISO-SEM-ORIGINAL`, `${KEY_ID}-CIF-NUNCA-GRAVADA`, false))).json, { status: "not_found" });
+  // Original já apagada (revogada acima): nada muda.
+  const deletedBefore = { ...textOf(`${KEY_ID}-ED-VENDEDOR`)?.metadata };
+  assert.deepEqual((await post(encryptedEdit(`${KEY_ID}-CIF-AVISO-APAGADA`, `${KEY_ID}-ED-VENDEDOR`, true))).json, { status: "ignored" });
+  assert.deepEqual(textOf(`${KEY_ID}-ED-VENDEDOR`)?.metadata, deletedBefore);
+  assert.equal(memory.messages.length, rowsBeforeEncrypted, "nenhuma linha nova");
+  assert.equal(memory.messages.some((row) => row.externalMessageId.includes("-CIF-AVISO")), false);
+  assert.equal(logs.some((line) => line.includes('"reason":"text_unavailable"')), true, "log com o motivo, sem ids");
 
   // 5c) Tipo realmente desconhecido: grava "[mensagem não suportada]" e loga WARN só com os nomes dos campos.
   assert.deepEqual((await post(upsert(`${KEY_ID}-TIPO-NOVO`, { tipoNovoFicticioMessage: { texto: UNKNOWN_VALUE, url: "https://mmg.invalid/novo" }, messageContextInfo: contextInfo }))).json, { status: "stored" });
@@ -190,7 +224,7 @@ try {
   assert.match(logged, /"status":"stored"/);
   assert.match(logged, /\[whatsapp\] message event failed/);
   assert.match(logged, /P2024/);
-  for (const forbidden of [TEXT, CAPTION, PUSH_NAME, CONTACT, "900000201", `${CONTACT}@s.whatsapp.net`, "s.whatsapp.net", KEY_ID, "FALHA-ID", "RAJADA-", INSTANCE_TOKEN, SECRET, "mmg.invalid", "5511900000001", FILE_NAME, "-REAL-", "-CITADA", EDITED_TEXT, UNKNOWN_VALUE, "-AVISO-", "-ED-", "-TIPO-NOVO", "-NUNCA-GRAVADA"]) {
+  for (const forbidden of [TEXT, CAPTION, PUSH_NAME, CONTACT, "900000201", `${CONTACT}@s.whatsapp.net`, "s.whatsapp.net", KEY_ID, "FALHA-ID", "RAJADA-", INSTANCE_TOKEN, SECRET, "mmg.invalid", "5511900000001", FILE_NAME, "-REAL-", "-CITADA", EDITED_TEXT, UNKNOWN_VALUE, "-AVISO-", "-ED-", "-TIPO-NOVO", "-NUNCA-GRAVADA", "-CIF-"]) {
     assert.equal(logged.includes(forbidden), false, `log sem ${forbidden}`);
   }
 

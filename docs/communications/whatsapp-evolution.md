@@ -237,12 +237,18 @@ Desligado por padrão: exige `COMMUNICATIONS_ENABLED`, `WHATSAPP_EVOLUTION_ENABL
   em `editedMessage.message` ou em `ephemeralMessage.message`: o Evolution v2.3.7 só desvia para
   `MESSAGES_EDITED` o `protocolMessage` de primeiro nível). Reentrega com o mesmo texto não muda nada.
   Original ainda não gravada: ignorada.
+- **Editada cifrada (confirmado em produção):** o WhatsApp manda a edição dentro de `MESSAGES_UPSERT` como
+  `secretEncryptedMessage` com `secretEncType` 2 (`MESSAGE_EDIT` no Baileys 7.0.0-rc.9) e a chave da original
+  em `targetMessageKey.id`. O texto novo vem cifrado com o `messageSecret` da original, que o CRM **não guarda**
+  (decisão: não decifrar). A original ganha só `metadata.editedInWhatsAppAt`: o texto fica, sem
+  `previousText`, e o cartão mostra "(editada no WhatsApp – texto novo não disponível)". Reentrega, original
+  apagada ou original não gravada: nada muda (log `[whatsapp] message event` com motivo `text_unavailable`,
+  sem conteúdo nem ids). Outro `secretEncType` (`EVENT_EDIT` 1, `UNKNOWN` 0) é ignorado (`secret_encrypted`).
 - **Apagada:** do vendedor, mantém o texto com `metadata.deletedInWhatsAppAt` ("apagada no WhatsApp"); do
-  contato, o texto vira `[mensagem apagada]` e saem a marca de edição e o texto anterior. Chega por
+  contato, o texto vira `[mensagem apagada]` e saem as marcas de edição e o texto anterior. Chega por
   `MESSAGES_DELETE` ou como `protocolMessage` type 0 (`REVOKE`) dentro de `MESSAGES_UPSERT`.
 - **Avisos de protocolo:** qualquer outro `protocolMessage` no upsert é ignorado (não vira mensagem), assim como
-  `secretEncryptedMessage` (edição cifrada com o segredo da original, que o Baileys 7.0.0-rc.9 não abre: o
-  texto anterior fica, sem marca de edição).
+  `secretEncryptedMessage` que não seja `MESSAGE_EDIT`.
 - **Tipo desconhecido:** gravado como `[mensagem não suportada]`, com log `WARN [whatsapp] unsupported message
   type` só com os nomes dos campos de primeiro nível de `data.message` (nunca valores), para identificar
   formatos novos.
@@ -327,8 +333,9 @@ Leitura das conversas gravadas no B1, fila "não vinculadas", vínculo manual e 
 
 - **Linha do tempo do cliente e da oportunidade:** cartões "WhatsApp · dd/mm" intercalados por data com os
   eventos (as duas listas são paginadas; nada mais antigo que o último item carregado de cada uma aparece
-  antes da hora). Ao abrir, as mensagens do dia com "via app"/"recebida", "editada" e "apagada no WhatsApp"
-  (do vendedor); apagada do contato aparece como "[mensagem apagada]".
+  antes da hora). Ao abrir, as mensagens do dia com "via app"/"recebida", "editada", "(editada no WhatsApp –
+  texto novo não disponível)" (edição cifrada) e "apagada no WhatsApp" (do vendedor); apagada do contato aparece
+  como "[mensagem apagada]".
 - **`/whatsapp` → Conversas não vinculadas** (só com fila): número, nome no WhatsApp, última mensagem ("Você:"
   quando enviada), "expira em N dias", "mais de um cliente", Vincular (busca de cliente) e Descartar (com
   confirmação).
