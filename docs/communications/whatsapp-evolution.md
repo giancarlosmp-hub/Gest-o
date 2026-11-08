@@ -18,7 +18,8 @@ CRM; D) resumo diário aos vendedores.
   hora (logout), o status vira `REJECTED_WRONG_NUMBER` e **o número lido não é gravado**.
 - O QR vem do Evolution a cada consulta e **nunca é gravado**.
 - O nome da instância no Evolution é opaco (`crm-` + 24 hex aleatórios): nunca telefone, nome ou id.
-- Não existe rota de envio. O cliente do Evolution não tem método de envio. Nada de envio em massa.
+- Envio só na [Fase D](#fase-d--resumo-diário-aos-vendedores): um único método no cliente do Evolution, que só
+  aceita o celular de um usuário ativo do CRM. Nunca para cliente, nada de envio em massa.
 - Desligado por padrão: só funciona com `COMMUNICATIONS_ENABLED=true` **e** `WHATSAPP_EVOLUTION_ENABLED=true`.
 
 ## Arquitetura
@@ -422,3 +423,69 @@ tentativas, data e modelo não saem.
 Repassadas à API pelo `docker-compose.production.yml`. Para ligar: criar a chave na conta da Groq (com ZDR
 ligado), pôr a chave e `WHATSAPP_TRANSCRIPTION_ENABLED=true` no arquivo de env protegido e recriar a API pelo
 fluxo oficial, com a aprovação de sempre.
+
+## Fase D — resumo diário aos vendedores
+
+Nos dias úteis, cada vendedor ativo recebe no WhatsApp comercial dele um resumo da própria carteira, enviado do
+número conectado de um diretor ou gerente (o remetente). **Desligado por padrão.** Sem migration e sem variável
+nova: a configuração fica no `AppConfig` e o link do CRM usa o `FRONTEND_URL` que a API já recebe. Só funciona com
+a Fase A ligada e configurada.
+
+### Conteúdo
+
+- Reativações abertas (automação de inativos recentes); as criadas nas últimas 24 h aparecem como "NOVA".
+- Oportunidades lançadas nas últimas 24 h (sem as da automação, que já estão acima).
+- Follow-ups vencidos e de hoje (etapa aberta; "hoje" é o dia de Brasília).
+- Só oportunidades do vendedor, de cliente não arquivado. Cada item: cliente, cidade/UF, etapa e data do
+  follow-up; até 10 por seção, com "+N no CRM" e o link do CRM. Os nomes dos clientes vão no texto (aprovado:
+  são clientes da carteira do próprio vendedor).
+- **Vendedor sem nada: não recebe mensagem** (fica "sem itens" no painel).
+- Ponto de extensão para um bloco opcional "Dicas do gerente comercial" (`managerTips` no formatador). Hoje
+  ninguém preenche; a IA fica para uma etapa seguinte.
+
+### Trava do destino
+
+- O único envio do sistema é `EvolutionClient.sendTextToCrmUser` (`POST /message/sendText/{instância}`). O
+  destino tem de ser o objeto emitido por `resolveCrmUserRecipient`, que lê o usuário na hora: ativo, celular
+  válido em `User.phone` e **fora do índice de telefones de cliente** (`ClientPhoneIndex`, inclusive cliente
+  arquivado). O objeto vale 2 minutos; um objeto montado à mão, ou uma cópia dele, é recusado antes da rede.
+- Teste estático: só o resumo diário chama o envio, e só o cliente do Evolution conhece `/message/...`.
+- Celular do usuário também cadastrado em cliente: recusado (`phone_matches_client`). O painel e a prévia
+  mostram "O celular deste usuário também está cadastrado em cliente(s) – corrija o cadastro", sem expor o
+  cliente. O índice é reconstruído pela Fase B; com a gravação desligada ele pode estar desatualizado.
+
+### Envio
+
+- Agendador a cada 5 minutos (`bootstrap.ts`). Segunda a sexta, a partir do horário configurado (padrão 07:30,
+  Brasília), numa janela de 3 horas. Feriados não são tratados.
+- Remetente conferido antes de qualquer envio: diretor ou gerente ativo, `WhatsAppConnection` `CONNECTED` e
+  instância `open` no Evolution. Indisponível: nada sai, o dia fica "remetente indisponível" com o código e a tela
+  mostra o alerta; se reconectar dentro da janela, a rodada seguinte envia.
+- Uma vez por vendedor por dia: a linha `whatsappDailySummary.day.<dia>.<usuário>` do `AppConfig` (chave única) é
+  criada como "enviando" antes do envio. API reiniciada no meio: fica "enviando" (incerto) e não repete.
+- Intervalo aleatório de 8 a 20 s entre envios e "digitando" de 1,2 s.
+- Resultado: enviado (2xx com id); não enviado (número sem WhatsApp, instância inexistente, chave recusada,
+  conexão recusada); **incerto** (timeout, 5xx, resposta desconhecida, 2xx sem id), registrado só com o código.
+  Só "conexão recusada" tenta de novo, até 3 vezes. Instância inexistente ou chave recusada encerra a rodada.
+- Linhas diárias com mais de 30 dias são apagadas.
+
+### Tela (Configurações → Automações Comerciais)
+
+Ligar/desligar, horário, remetente (com o status da conexão), seções, situação de hoje por vendedor, **Ver
+prévia** (não envia) e **Enviar teste para mim** (manda o resumo de um vendedor ao celular de quem clicou, pelo
+remetente, marcado `[Teste]`, 1 por minuto). Diretor edita; gerente vê, faz prévia e testa.
+
+### A confirmar no primeiro teste em produção
+
+O código não mostra, e não foi possível confirmar fora de produção, a resposta do Evolution v2.3.7 para envio com
+a instância desconectada, nem o evento que o envio pela API gera no webhook. A resposta desconhecida fica
+"incerto" com o código; o evento, qualquer que seja, cai na regra de número interno (abaixo). Confirmar com o
+"Enviar teste para mim".
+
+### Linha do tempo e log
+
+- O resumo não vira conversa: a ingestão ignora mensagem cujo contato é um `User.phone` ou o número conectado de
+  outro usuário (`internal_number`), nos dois lados (cópia enviada no número do remetente e recebida no do
+  vendedor). Teste garante.
+- Log só com contagens e códigos (`sent`, `uncertain`, `connection_refused`, `sender_not_connected`…): sem texto,
+  nomes, números ou ids. A situação de cada vendedor fica só no `AppConfig` e aparece na tela.

@@ -1687,6 +1687,25 @@ Pendente:
   gate de preview do schema (`scripts/production-schema-preview.sh`) só aceita valor novo de enum em minúsculas.
   Padronizar exige mudar o gate em PR próprio.
 
+### TD-WHATSAPP-DAILY-SUMMARY — WhatsApp Fase D (resumo diário aos vendedores)
+
+**Aberto, baixo.** Pronto e desligado por padrão
+([communications/whatsapp-evolution.md](communications/whatsapp-evolution.md#fase-d--resumo-diário-aos-vendedores)).
+Pendente:
+
+- **Consolidado para gerente/diretor:** uma mensagem só com contagens por vendedor, sem nomes de clientes, e quem
+  não recebeu. Fica para depois.
+- **Feriados:** só sábado e domingo ficam de fora; não há lista de feriados.
+- **A confirmar no "Enviar teste para mim" em produção:** a resposta do Evolution v2.3.7 para envio com a instância
+  desconectada (hoje vira "incerto" com o código) e o evento gerado no webhook pelo envio via API (a regra de
+  número interno já ignora).
+- Destino recusado (sem celular, celular de cliente) não é reavaliado no mesmo dia: corrigido o cadastro, o
+  vendedor recebe no dia útil seguinte.
+- A checagem "celular de cliente" usa o `ClientPhoneIndex`, reconstruído pela Fase B; com a gravação desligada o
+  índice pode estar desatualizado.
+- O agendador sobe só no `bootstrap.ts` (produção), como os outros jobs do WhatsApp; `server.ts` (desenvolvimento)
+  não o inicia.
+
 ### TD-TIMELINE-EVENTS-OWNER-FILTER — histórico some quando o cliente muda de vendedor
 
 **Aberto, médio.** `GET /events` filtra por `TimelineEvent.ownerSellerId` (`sellerWhere`): para o vendedor, eventos

@@ -1,3 +1,16 @@
+# WhatsApp Fase D: resumo diário aos vendedores — código pronto, aguardando merge — 07/11/2026
+
+- Dias úteis, 07:30 de Brasília (configurável): cada vendedor recebe no WhatsApp comercial dele reativações
+  abertas (novas em 24 h destacadas), oportunidades lançadas em 24 h e follow-ups vencidos e de hoje, até 10 por
+  seção com "+N no CRM" e link. Vendedor sem nada não recebe.
+- Sai do número conectado de um diretor ou gerente; só para o `User.phone` de usuário ativo, nunca para cliente
+  (trava no `EvolutionClient`, com teste). Remetente desconectado: nada sai e a tela avisa.
+- Uma vez por vendedor por dia (trava no `AppConfig`), intervalo aleatório, incerto nunca repete.
+- Desligado por padrão. Sem migration e sem variável nova. Tela em Configurações → Automações Comerciais, com
+  prévia e "Enviar teste para mim". Detalhes em
+  [communications/whatsapp-evolution.md](communications/whatsapp-evolution.md#fase-d--resumo-diário-aos-vendedores);
+  pendências em `TD-WHATSAPP-DAILY-SUMMARY`.
+
 # WhatsApp: transcrição dos áudios — em produção; ligada em 07/11/2026 (chave no env protegido) — 07/11/2026
 
 - Áudios recebidos e enviados pelo app viram texto no cartão "WhatsApp · dd/mm" (`🎤 0:42` + selo "transcrição
