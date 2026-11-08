@@ -31,7 +31,7 @@ export type EvolutionSendResult =
   | { kind: "uncertain"; code: string };
 
 /** Limite do texto enviado (o resumo fica bem abaixo disso). */
-export const MAX_SEND_TEXT_LENGTH = 4_000;
+export const MAX_SEND_TEXT_LENGTH = 8_000;
 
 const CONNECT_REFUSED_CODES = new Set(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN"]);
 

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { MAX_SEND_TEXT_LENGTH } from "../whatsappConnection/evolutionClient.js";
 import { formatDailySummary, plainText, type DailySummaryData, type DailySummaryItem } from "./dailySummaryFormat.js";
 
 // WhatsApp Fase D: texto do resumo diário. Só dados fictícios.
@@ -74,5 +75,14 @@ const partial = formatDailySummary(
   { crmUrl: null }
 )!;
 assert.match(partial, /• Cliente sem nome – SP – desconhecida$/m);
+
+// 6) Pior caso (4 seções cheias, nomes e cidades longos, 3 dicas longas): cabe no limite do envio.
+const longItem = item("N".repeat(200), { city: "C".repeat(200), state: "UF", stage: "negociacao", isNew: true });
+const full = { total: 999, newCount: 999, items: Array.from({ length: 30 }, () => longItem) };
+const worst = formatDailySummary(
+  { sellerName: "V".repeat(200), dayKey: "2026-11-09", sections: { reactivations: full, newOpportunities: full, overdueFollowUps: full, todayFollowUps: full } },
+  { crmUrl: `https://${"c".repeat(100)}.invalid`, managerTips: ["D".repeat(1_000), "D".repeat(1_000), "D".repeat(1_000)] }
+)!;
+assert(worst.length < MAX_SEND_TEXT_LENGTH, `pior caso com ${worst.length} caracteres`);
 
 console.log("dailySummaryFormat.test.ts: ok");
