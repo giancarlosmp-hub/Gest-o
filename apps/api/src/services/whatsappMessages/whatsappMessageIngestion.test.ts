@@ -115,6 +115,9 @@ assert.equal(messageOf("M-8").tenantId, "tenant-a");
 assert.deepEqual(await ingestion.handle(upsert("M-9", "5521900000002", "Interna ficticia"), NOW), { status: "ignored", event: "upsert", userId: "seller-a", reason: "internal_number" });
 assert.equal((await ingestion.handle(upsert("M-10", ACCOUNT, "Para mim"), NOW)).reason, "internal_number");
 assert.equal(memory.messages.some((row) => row.externalMessageId === "M-9" || row.externalMessageId === "M-10"), false);
+// Fase D: o resumo diário sai do número do gerente (fromMe) para o celular de um usuário do CRM: também ignorado.
+assert.equal((await ingestion.handle(upsert("M-10b", "5521900000002", "Resumo ficticio", { fromMe: true }), NOW)).reason, "internal_number");
+assert.equal(memory.messages.some((row) => row.externalMessageId === "M-10b"), false);
 
 // 12) Grupo e status: ignorados pelo parser, nada gravado.
 const group = { ...upsert("M-11", "5511900000101", "x"), data: { ...upsert("M-11", "5511900000101", "x").data, key: { remoteJid: "120363000000000000@g.us", fromMe: false, id: "M-11" } } };

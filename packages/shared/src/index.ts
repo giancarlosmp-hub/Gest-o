@@ -713,3 +713,4 @@ export type KnowledgeDocumentCategory = z.infer<typeof KnowledgeDocumentCategory
 export type KnowledgeDocumentSourceType = z.infer<typeof KnowledgeDocumentSourceTypeEnum>;
 export type KnowledgeDocumentCreateInput = z.infer<typeof knowledgeDocumentCreateSchema>;
 export type KnowledgeDocumentUpdateInput = z.infer<typeof knowledgeDocumentUpdateSchema>;
+export * from "./whatsappDailySummary.js";

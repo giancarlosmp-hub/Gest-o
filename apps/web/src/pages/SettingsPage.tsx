@@ -11,6 +11,7 @@ import TechnicalCulturesPanel from "../components/settings/TechnicalCulturesPane
 import ErpIntegrationPanel from "../components/settings/ErpIntegrationPanel";
 import SellerTerritoriesPanel from "../components/settings/SellerTerritoriesPanel";
 import CommercialAutomationsPanel from "../components/settings/CommercialAutomationsPanel";
+import WhatsAppDailySummaryPanel from "../components/settings/WhatsAppDailySummaryPanel";
 import KnowledgeBasePanel from "../components/settings/KnowledgeBasePanel";
 import { buildUserAdminFields } from "../components/settings/userAdminFields";
 
@@ -56,7 +57,7 @@ const SETTINGS_SECTIONS: Array<{ id: SettingsSection; label: string; description
   {
     id: "commercial-automations",
     label: "Automações Comerciais",
-    description: "Reativação de inativos recentes, com teto diário e simulação antes de ligar.",
+    description: "Reativação de inativos recentes e resumo diário no WhatsApp dos vendedores.",
     icon: Bot
   },
   {
@@ -181,7 +182,10 @@ export default function SettingsPage() {
       ) : activeSection === "seller-territories" ? (
         <SellerTerritoriesPanel />
       ) : activeSection === "commercial-automations" ? (
-        <CommercialAutomationsPanel canEdit={user.role === "diretor"} />
+        <div className="space-y-4">
+          <CommercialAutomationsPanel canEdit={user.role === "diretor"} />
+          <WhatsAppDailySummaryPanel canEdit={user.role === "diretor"} />
+        </div>
       ) : (
         <div id="usuarios" className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
           <CrudSimplePage

@@ -3,7 +3,8 @@ import { once } from "node:events";
 import { createServer, type IncomingMessage } from "node:http";
 import { env } from "../../config/env.js";
 import { EVOLUTION_MESSAGE_WEBHOOK_EVENTS, EVOLUTION_WEBHOOK_SECRET_HEADER, EVOLUTION_WEBHOOK_URL, evolutionWebhookEvents } from "./config.js";
-import { EvolutionClient, EvolutionUnavailableError, explicitWebhookEvents, pickQrDataUrl } from "./evolutionClient.js";
+import { EvolutionClient, EvolutionUnavailableError, explicitWebhookEvents, MAX_SEND_TEXT_LENGTH, pickQrDataUrl } from "./evolutionClient.js";
+import { CRM_USER_RECIPIENT_TTL_MS, isCrmUserRecipient, resolveCrmUserRecipient, type CrmUserRecipient } from "./crmUserRecipient.js";
 
 // Cliente da Evolution API contra um Evolution falso em localhost. Chave, segredo e QR fictícios.
 type Recorded = { method: string; url: string; headers: IncomingMessage["headers"]; body: any };
@@ -30,7 +31,8 @@ const client = new EvolutionClient({
   webhookSecret: "segredo-ficticio",
   timeoutMs: 300,
   createTimeoutMs: 300,
-  mediaTimeoutMs: 300
+  mediaTimeoutMs: 300,
+  sendTimeoutMs: 300
 });
 const respond = (status: number, body: unknown, delayMs?: number) => {
   nextResponse = { status, body, delayMs };
@@ -148,9 +150,9 @@ try {
   env.whatsappEvolutionMessagesEnabled = false;
   assert.deepEqual([...evolutionWebhookEvents()], ["CONNECTION_UPDATE"], "gravação desligada volta a só conexão");
 
-  // 8) O cliente não tem nenhum método de envio; o único de mídia é a leitura do áudio a transcrever.
+  // 8) O único método de envio é sendTextToCrmUser; o único de mídia é a leitura do áudio a transcrever.
   const methods = Object.getOwnPropertyNames(EvolutionClient.prototype);
-  assert.deepEqual(methods.filter((name) => /send|message|text|media/i.test(name)), ["getMediaBase64"]);
+  assert.deepEqual(methods.filter((name) => /send|message|text|media/i.test(name)).sort(), ["getMediaBase64", "sendTextToCrmUser"]);
 
   // 9) Áudio para transcrever: mensagem inteira (key + message), sem conversão, base64 devolvido.
   const audioRef = {
@@ -171,6 +173,80 @@ try {
   await assert.rejects(client.getMediaBase64("crm-ficticio", audioRef, 100), /media_too_large/);
   respond(500, {});
   await assert.rejects(client.getMediaBase64("crm-ficticio", audioRef, 100), EvolutionUnavailableError);
+
+  // 10) Envio (Fase D): só para o destino emitido por resolveCrmUserRecipient (usuário ativo do CRM).
+  const users: Record<string, { id: string; isActive: boolean; phone: string | null }> = {
+    "user-ativo": { id: "user-ativo", isActive: true, phone: "(11) 90000-0101" },
+    "user-inativo": { id: "user-inativo", isActive: false, phone: "(11) 90000-0102" },
+    "user-sem-celular": { id: "user-sem-celular", isActive: true, phone: null },
+    "user-fixo": { id: "user-fixo", isActive: true, phone: "(11) 3000-0103" },
+    "user-celular-de-cliente": { id: "user-celular-de-cliente", isActive: true, phone: "11900000104" }
+  };
+  const clientPhones = new Set(["5511900000104"]);
+  const fakeDb = {
+    user: { findUnique: async (args: any) => users[args.where.id] ?? null },
+    clientPhoneIndex: { count: async (args: any) => (clientPhones.has(args.where.phone) ? 1 : 0) }
+  };
+  const resolve = (id: string) => resolveCrmUserRecipient(id, fakeDb);
+  assert.deepEqual(await resolve("user-inexistente"), { ok: false, reason: "user_not_found" });
+  assert.deepEqual(await resolve("user-inativo"), { ok: false, reason: "user_inactive" });
+  assert.deepEqual(await resolve("user-sem-celular"), { ok: false, reason: "no_phone" });
+  assert.deepEqual(await resolve("user-fixo"), { ok: false, reason: "invalid_phone" });
+  assert.deepEqual(await resolve("user-celular-de-cliente"), { ok: false, reason: "phone_matches_client" });
+  const resolved = await resolve("user-ativo");
+  assert(resolved.ok);
+  const recipient = resolved.recipient;
+  assert.deepEqual({ ...recipient }, { userId: "user-ativo", phone: "5511900000101" });
+  assert(Object.isFrozen(recipient), "destino imutável");
+
+  // Destino forjado (mesmo formato, com cast), vencido ou texto inválido: recusado antes da rede.
+  const sentBefore = recorded.length;
+  const forged = { userId: "user-ativo", phone: "5511900000999" } as CrmUserRecipient;
+  await assert.rejects(client.sendTextToCrmUser("crm-ficticio", forged, "Olá"), /whatsapp_recipient_not_crm_user/);
+  await assert.rejects(client.sendTextToCrmUser("crm-ficticio", { ...recipient }, "Olá"), /whatsapp_recipient_not_crm_user/, "cópia do destino");
+  assert.equal(isCrmUserRecipient(recipient, Date.now() + CRM_USER_RECIPIENT_TTL_MS + 1), false, "destino vencido");
+  const expired = await resolveCrmUserRecipient("user-ativo", fakeDb, () => Date.now() - CRM_USER_RECIPIENT_TTL_MS - 1);
+  assert(expired.ok);
+  await assert.rejects(client.sendTextToCrmUser("crm-ficticio", expired.recipient, "Olá"), /whatsapp_recipient_not_crm_user/);
+  await assert.rejects(client.sendTextToCrmUser("crm-ficticio", recipient, "   "), /whatsapp_text_invalid/);
+  await assert.rejects(client.sendTextToCrmUser("crm-ficticio", recipient, "x".repeat(MAX_SEND_TEXT_LENGTH + 1)), /whatsapp_text_invalid/);
+  assert.equal(recorded.length, sentBefore, "nada chegou ao Evolution");
+
+  // Aceito: número do destino (nunca outro), sem pré-visualização de link.
+  respond(201, { key: { remoteJid: "5511900000101@s.whatsapp.net", fromMe: true, id: "MSG-FICTICIA-1" }, status: "PENDING" });
+  assert.deepEqual(await client.sendTextToCrmUser("crm-ficticio", recipient, "Resumo fictício"), { kind: "sent" });
+  assert.equal(last().method, "POST");
+  assert.equal(last().url, "/message/sendText/crm-ficticio");
+  assert.equal(last().headers.apikey, "chave-ficticia");
+  assert.deepEqual(last().body, { number: "5511900000101", text: "Resumo fictício", delay: 1_200, linkPreview: false });
+
+  // Respostas: sem id = incerto; número sem WhatsApp e instância inexistente = não saiu; desconhecidas = incerto.
+  respond(201, { status: "PENDING" });
+  assert.deepEqual(await client.sendTextToCrmUser("crm-ficticio", recipient, "x"), { kind: "uncertain", code: "no_message_id" });
+  respond(400, { status: 400, error: "Bad Request", response: { message: [{ jid: "5511900000101@s.whatsapp.net", exists: false, number: "5511900000101" }] } });
+  assert.deepEqual(await client.sendTextToCrmUser("crm-ficticio", recipient, "x"), { kind: "not_sent", code: "number_not_on_whatsapp", retryable: false });
+  respond(404, { response: { message: ['The "crm-ficticio" instance does not exist'] } });
+  assert.deepEqual(await client.sendTextToCrmUser("crm-ficticio", recipient, "x"), { kind: "not_sent", code: "instance_not_found", retryable: false });
+  respond(400, { response: { message: ["Connection Closed"] } });
+  assert.deepEqual(await client.sendTextToCrmUser("crm-ficticio", recipient, "x"), { kind: "uncertain", code: "http_400" });
+  respond(500, { response: { message: ["Connection Closed"] } });
+  assert.deepEqual(await client.sendTextToCrmUser("crm-ficticio", recipient, "x"), { kind: "uncertain", code: "http_500" });
+  respond(401, { error: "Unauthorized" });
+  assert.deepEqual(await client.sendTextToCrmUser("crm-ficticio", recipient, "x"), { kind: "not_sent", code: "unauthorized", retryable: false });
+  respond(201, {}, 1_000);
+  assert.deepEqual(await client.sendTextToCrmUser("crm-ficticio", recipient, "x"), { kind: "uncertain", code: "timeout" }, "timeout pode ter saído");
+  // Conexão recusada (porta fechada): a requisição não saiu e pode ser repetida.
+  const closed = createServer();
+  closed.listen(0, "127.0.0.1");
+  await once(closed, "listening");
+  const closedPort = (closed.address() as { port: number }).port;
+  closed.close();
+  await once(closed, "close");
+  const refused = new EvolutionClient({ baseUrl: `http://127.0.0.1:${closedPort}`, apiKey: "x", webhookSecret: "y", timeoutMs: 2_000 });
+  await assert.rejects(refused.connect("crm-ficticio"), (error: unknown) => error instanceof EvolutionUnavailableError && error.connectRefused);
+  const refusedRecipient = await resolve("user-ativo");
+  assert(refusedRecipient.ok);
+  assert.deepEqual(await refused.sendTextToCrmUser("crm-ficticio", refusedRecipient.recipient, "x"), { kind: "not_sent", code: "connection_refused", retryable: true });
 
   console.log("evolutionClient.test.ts: ok");
 } finally {

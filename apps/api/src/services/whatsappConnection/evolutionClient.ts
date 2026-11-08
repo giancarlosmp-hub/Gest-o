@@ -1,17 +1,39 @@
 import { env } from "../../config/env.js";
 import { EVOLUTION_MESSAGE_WEBHOOK_EVENTS, EVOLUTION_WEBHOOK_SECRET_HEADER, EVOLUTION_WEBHOOK_URL, evolutionWebhookEvents } from "./config.js";
+import { isCrmUserRecipient, type CrmUserRecipient } from "./crmUserRecipient.js";
 
 // Cliente mínimo da Evolution API v2.3.7: criar instância (com QR), consultar estado, ler o número
 // conectado, apagar a instância, (Fase B) ajustar os eventos do webhook da instância e baixar o áudio a
-// transcrever. Não existe nenhum método de envio de mensagem.
-// Nada aqui grava log: QR, chave, número e mídia nunca passam pelo logger.
+// transcrever e (Fase D) enviar texto. O único envio é sendTextToCrmUser, que só aceita como destino o
+// celular de um usuário ativo do CRM (crmUserRecipient.ts): nunca um número solto, nunca um cliente.
+// Nada aqui grava log: QR, chave, número, texto e mídia nunca passam pelo logger.
 
 export class EvolutionUnavailableError extends Error {
-  constructor(readonly reason: string) {
+  /** A conexão nem chegou a ser aberta (recusada, nome não resolvido): a requisição não saiu. */
+  readonly connectRefused: boolean;
+
+  constructor(readonly reason: string, options: { connectRefused?: boolean } = {}) {
     super(`Evolution API indisponível (${reason})`);
     this.name = "EvolutionUnavailableError";
+    this.connectRefused = options.connectRefused ?? false;
   }
 }
+
+/**
+ * Resultado de um envio:
+ * - sent: o Evolution aceitou (2xx com id da mensagem);
+ * - not_sent: certeza de que não saiu (retryable só quando a conexão nem abriu);
+ * - uncertain: timeout, erro do servidor ou resposta desconhecida — pode ter saído; só o código é registrado.
+ */
+export type EvolutionSendResult =
+  | { kind: "sent" }
+  | { kind: "not_sent"; code: string; retryable: boolean }
+  | { kind: "uncertain"; code: string };
+
+/** Limite do texto enviado (o resumo fica bem abaixo disso). */
+export const MAX_SEND_TEXT_LENGTH = 8_000;
+
+const CONNECT_REFUSED_CODES = new Set(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN"]);
 
 export type EvolutionConnectResult = { kind: "open" } | { kind: "qr"; qrDataUrl: string | null } | { kind: "not_found" };
 export type EvolutionState = "open" | "connecting" | "close" | "not_found" | "unknown";
@@ -21,6 +43,8 @@ type EvolutionClientOptions = {
   apiKey: string;
   webhookSecret: string;
   timeoutMs?: number;
+  /** Envio de texto: o Evolution espera o "digitando" (delay) antes de mandar. */
+  sendTimeoutMs?: number;
   /** A criação espera o QR (cerca de 5 s no Evolution). */
   createTimeoutMs?: number;
   /** Download de mídia (o Evolution tenta de novo depois de 5 s). */
@@ -63,6 +87,10 @@ const webhookConfig = (webhookSecret: string, events: readonly string[]) => ({
 const isMissingInstance = (status: number, json: unknown) =>
   status === 404 || (status === 400 && /does not exist/i.test(JSON.stringify(json ?? "")));
 
+/** 400 do envio para número sem WhatsApp: response.message = [{ exists: false, ... }]. */
+const isNumberNotOnWhatsApp = (status: number, json: any) =>
+  status === 400 && Array.isArray(json?.response?.message) && json.response.message.some((item: any) => item && typeof item === "object" && item.exists === false);
+
 export class EvolutionClient {
   private readonly baseUrl: string;
 
@@ -81,7 +109,9 @@ export class EvolutionClient {
       });
     } catch (error) {
       const name = (error as { name?: string } | null)?.name;
-      throw new EvolutionUnavailableError(name === "TimeoutError" || name === "AbortError" ? "timeout" : "network");
+      if (name === "TimeoutError" || name === "AbortError") throw new EvolutionUnavailableError("timeout");
+      const code = (error as { cause?: { code?: unknown } } | null)?.cause?.code;
+      throw new EvolutionUnavailableError("network", { connectRefused: typeof code === "string" && CONNECT_REFUSED_CODES.has(code) });
     }
     const text = await response.text().catch(() => "");
     let json: any = null;
@@ -183,6 +213,35 @@ export class EvolutionClient {
     if (typeof base64 !== "string" || !base64) throw new EvolutionUnavailableError("media_empty");
     if (base64.length > maxBase64Length) throw new EvolutionUnavailableError("media_too_large");
     return { base64, mimetype: typeof json?.mimetype === "string" ? json.mimetype : null };
+  }
+
+  /**
+   * Fase D: envia um texto (POST /message/sendText) ao celular de um usuário ativo do CRM. O destino tem de
+   * ser o objeto emitido por resolveCrmUserRecipient; qualquer outra coisa é recusada antes da rede. Sem
+   * pré-visualização de link; "digitando" curto antes de mandar. Nunca grava log.
+   */
+  async sendTextToCrmUser(instanceName: string, recipient: CrmUserRecipient, text: string): Promise<EvolutionSendResult> {
+    if (!isCrmUserRecipient(recipient)) throw new Error("whatsapp_recipient_not_crm_user");
+    if (typeof text !== "string" || !text.trim() || text.length > MAX_SEND_TEXT_LENGTH) throw new Error("whatsapp_text_invalid");
+    let response: { status: number; json: any };
+    try {
+      response = await this.request(
+        "POST",
+        `/message/sendText/${encodeURIComponent(instanceName)}`,
+        { number: recipient.phone, text, delay: 1_200, linkPreview: false },
+        this.options.sendTimeoutMs ?? 20_000
+      );
+    } catch (error) {
+      if (!(error instanceof EvolutionUnavailableError)) throw error;
+      if (error.connectRefused) return { kind: "not_sent", code: "connection_refused", retryable: true };
+      if (error.reason === "unauthorized") return { kind: "not_sent", code: "unauthorized", retryable: false };
+      return { kind: "uncertain", code: error.reason };
+    }
+    const { status, json } = response;
+    if (status >= 200 && status < 300) return typeof json?.key?.id === "string" && json.key.id ? { kind: "sent" } : { kind: "uncertain", code: "no_message_id" };
+    if (isMissingInstance(status, json)) return { kind: "not_sent", code: "instance_not_found", retryable: false };
+    if (isNumberNotOnWhatsApp(status, json)) return { kind: "not_sent", code: "number_not_on_whatsapp", retryable: false };
+    return { kind: "uncertain", code: `http_${status}` };
   }
 
   /** Desconecta (logout) e apaga a instância e a sessão. Instância inexistente já é o resultado esperado. */
