@@ -4,13 +4,15 @@ import {
   type WhatsAppDailySummaryConfig,
   type WhatsAppDailySummaryRunState,
   type WhatsAppDailySummarySections,
-  type WhatsAppDailySummarySellerDay
+  type WhatsAppDailySummarySellerDay,
+  type WhatsAppDailySummaryTipsStatus
 } from "@salesforce-pro/shared";
 import api from "../../lib/apiClient";
 import { getApiErrorMessage } from "../../lib/apiError";
 
 // WhatsApp Fase D: resumo diário da carteira no WhatsApp de cada vendedor, enviado pelo número de um diretor
-// ou gerente. Diretor edita; gerente vê, faz prévia e envia teste para si.
+// ou gerente. Diretor edita; gerente vê, faz prévia e envia teste para si. Opcional: dicas do gerente comercial
+// escritas pela IA (desligadas por padrão); a prévia mostra as dicas e a situação delas.
 
 type Props = { canEdit: boolean };
 
@@ -27,7 +29,8 @@ type Overview = {
   sellers: Array<{ userId: string; name: string; recipient: Recipient; today: WhatsAppDailySummarySellerDay | null }>;
 };
 
-type Preview = { text: string | null; empty: boolean; recipient: Recipient };
+type TipsView = { status: WhatsAppDailySummaryTipsStatus; message: string };
+type Preview = { text: string | null; empty: boolean; recipient: Recipient; tips?: TipsView };
 type TestResult = { result: "sent" | "not_sent" | "uncertain"; code: string | null };
 
 const SECTION_LABELS: Array<[keyof WhatsAppDailySummarySections, string]> = [
@@ -61,6 +64,34 @@ const testResultMessage = (result: TestResult) => {
   if (result.result === "uncertain") return `O WhatsApp não confirmou o envio (código ${result.code}). Confira se a mensagem chegou.`;
   return `Não enviado (código ${result.code}).`;
 };
+
+export function ManagerTipsOption({ checked, disabled, onChange }: { checked: boolean; disabled: boolean; onChange: (checked: boolean) => void }) {
+  return (
+    <label className="flex items-start gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm lg:col-span-2">
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.checked)}
+        className="mt-1 h-4 w-4 shrink-0 rounded border-slate-300 text-brand-700 focus:ring-brand-600 disabled:cursor-not-allowed"
+      />
+      <span className="min-w-0">
+        <span className="block font-medium text-slate-800">Dicas do gerente comercial (IA)</span>
+        <span className="mt-1 block text-xs text-slate-500">
+          Até 3 dicas curtas da IA no fim do resumo, assinadas “— Claude, gerente comercial”. A IA recebe só códigos e dados
+          das oportunidades (etapa, dias, valor, cultura/produto, última compra e UF), nunca nome, telefone, documento ou
+          cidade do cliente. Se a IA falhar, demorar ou a resposta não passar na conferência, o resumo sai sem as dicas.
+        </span>
+      </span>
+    </label>
+  );
+}
+
+/** Situação das dicas na prévia (nada quando desligadas). */
+export function TipsStatusNote({ tips }: { tips: TipsView | undefined }) {
+  if (!tips || tips.status === "off") return null;
+  return <p className={`text-xs ${tips.status === "ok" ? "text-emerald-700" : "text-amber-700"}`}>{tips.message}</p>;
+}
 
 export default function WhatsAppDailySummaryPanel({ canEdit }: Props) {
   const [overview, setOverview] = useState<Overview | null>(null);
@@ -232,6 +263,12 @@ export default function WhatsAppDailySummaryPanel({ canEdit }: Props) {
             <p className="text-xs text-slate-500">Até 10 itens por seção, com “+N no CRM” e o link do CRM.</p>
           </div>
 
+          <ManagerTipsOption
+            checked={config.managerTips}
+            disabled={!editable}
+            onChange={(checked) => setConfig((current) => ({ ...current, managerTips: checked }))}
+          />
+
           {canEdit ? (
             <div className="space-y-2 lg:col-span-2">
               {saveError && <p className="text-sm text-red-700">{saveError}</p>}
@@ -314,12 +351,13 @@ export default function WhatsAppDailySummaryPanel({ canEdit }: Props) {
             </div>
             <p className="text-xs text-slate-500">
               A prévia não envia nada. O teste manda o resumo do vendedor escolhido para o seu próprio WhatsApp, pelo remetente
-              configurado (salve antes de testar).
+              configurado (salve antes de testar). Com as dicas ligadas, a prévia e o teste também chamam a IA.
             </p>
             {testMessage && <p className={`text-xs ${testMessage.error ? "text-red-700" : "text-emerald-700"}`}>{testMessage.text}</p>}
             {preview && (
               <div className="space-y-2">
                 {!preview.recipient.ok && <p className="rounded-md border border-red-200 bg-red-50 p-2 text-xs text-red-800">{preview.recipient.message}</p>}
+                <TipsStatusNote tips={preview.tips} />
                 {preview.text ? (
                   <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-md bg-slate-50 p-3 font-sans text-xs text-slate-800">{preview.text}</pre>
                 ) : preview.recipient.ok || preview.empty ? (
