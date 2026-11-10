@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import { Role, WhatsAppConnectionStatus } from "@prisma/client";
 import {
   WHATSAPP_CRM_RECIPIENT_REFUSAL_MESSAGES,
+  WHATSAPP_DAILY_SUMMARY_TIPS_MESSAGES,
   whatsappDailySummaryConfigSchema,
   whatsappDailySummarySellerSchema
 } from "@salesforce-pro/shared";
@@ -32,6 +33,7 @@ import {
 // WhatsApp Fase D: tela do resumo diário (Configurações → Automações Comerciais).
 // - diretor e gerente veem configuração, situação do dia, prévia e "Enviar teste para mim"; só diretor salva;
 // - a prévia nunca envia; o teste vai só para o celular de quem clicou (usuário ativo do CRM), pelo remetente;
+// - com as dicas ligadas, a prévia e o teste chamam a IA (contam no teto de quem clicou); a prévia diz a situação;
 // - log só com o resultado e o código.
 export const whatsappDailySummaryRoutes = createAsyncRouter();
 
@@ -104,8 +106,13 @@ whatsappDailySummaryRoutes.post("/daily-summary/preview", authorize(Role.diretor
   const seller = await findActiveSeller(sellerId);
   if (!seller) return res.status(404).json({ message: "Vendedor ativo não encontrado.", code: "seller_not_found" });
   const config = await loadDailySummaryConfig();
-  const { text } = await buildDailySummaryMessage(seller, config, new Date(), { round: createDailySummaryTipsRound(), usageKey: req.user!.id });
-  return res.json({ text, empty: text === null, recipient: await recipientView(seller.id) });
+  const { text, tips } = await buildDailySummaryMessage(seller, config, new Date(), { round: createDailySummaryTipsRound(), usageKey: req.user!.id });
+  return res.json({
+    text,
+    empty: text === null,
+    recipient: await recipientView(seller.id),
+    tips: { status: tips, message: WHATSAPP_DAILY_SUMMARY_TIPS_MESSAGES[tips] }
+  });
 });
 
 const testText = (sellerName: string, text: string | null) =>
