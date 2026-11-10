@@ -13,6 +13,21 @@ export type DailySummaryItem = {
   followUpDate: Date | null;
   /** Criada nas últimas 24 h (destacada nas reativações). */
   isNew: boolean;
+  /** Só com as dicas ligadas: dados para a IA (o texto do resumo não usa). */
+  tipFacts?: DailySummaryTipFacts;
+};
+
+/** Dados de uma oportunidade para as dicas do gerente comercial. Nada aqui vai para a IA sem anonimizar. */
+export type DailySummaryTipFacts = {
+  opportunityId: string;
+  value: number;
+  lastContactAt: Date | null;
+  /** Última troca de etapa registrada (OpportunityChangeLog) ou, sem ela, a criação: aproximado. */
+  stageSince: Date;
+  crop: string | null;
+  /** Produto ofertado e nomes dos itens da oportunidade. */
+  products: string[];
+  lastPurchaseDate: Date | null;
 };
 
 export type DailySummarySection = { total: number; newCount: number; items: DailySummaryItem[] };
