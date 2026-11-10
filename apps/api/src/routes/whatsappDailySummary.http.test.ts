@@ -62,7 +62,7 @@ const logs: string[] = [];
 const originals = { info: console.info, warn: console.warn, error: console.error };
 for (const level of ["info", "warn", "error"] as const) console[level] = (...args: unknown[]) => void logs.push(args.map((arg) => (typeof arg === "string" ? arg : JSON.stringify(arg))).join(" "));
 
-const config = { enabled: true, sendTime: "07:45", senderUserId: "manager-a", sections: { reactivations: true, newOpportunities: true, overdueFollowUps: true, todayFollowUps: false } };
+const config = { enabled: true, sendTime: "07:45", senderUserId: "manager-a", sections: { reactivations: true, newOpportunities: true, overdueFollowUps: true, todayFollowUps: false }, managerTips: false };
 
 try {
   env.communicationsEnabled = true;
@@ -105,6 +105,11 @@ try {
   assert.deepEqual([badSender.status, badSender.json.code], [400, "sender_not_allowed"]);
   assert.equal((await call("director-a", "PUT", "/daily-summary/config", { ...config, sendTime: "7:45" })).status, 400);
   assert.equal((await call("director-a", "PUT", "/daily-summary/config", { ...config, extra: true })).status, 400);
+  assert.equal((await call("director-a", "PUT", "/daily-summary/config", { ...config, managerTips: "sim" })).status, 400);
+  // Corpo antigo, sem managerTips: aceito, com as dicas desligadas.
+  const { managerTips: _omitted, ...legacyBody } = config;
+  const legacy = await call("director-a", "PUT", "/daily-summary/config", legacyBody);
+  assert.deepEqual([legacy.status, legacy.json.managerTips], [200, false]);
   const saved = await call("director-a", "PUT", "/daily-summary/config", config);
   assert.deepEqual([saved.status, saved.json], [200, config]);
   assert.deepEqual(JSON.parse(tables.appConfig.find((row) => row.key === DAILY_SUMMARY_CONFIG_KEY)!.value), config);

@@ -17,8 +17,10 @@ assert.deepEqual(parseDailySummaryConfig("{quebrado"), DEFAULT_WHATSAPP_DAILY_SU
 assert.deepEqual(parseDailySummaryConfig(JSON.stringify({ enabled: true, sendTime: "25:00" })), DEFAULT_WHATSAPP_DAILY_SUMMARY_CONFIG, "horário inválido volta ao padrão");
 assert.deepEqual(
   parseDailySummaryConfig(JSON.stringify({ enabled: true, sendTime: "08:15", senderUserId: "manager-x", sections: { todayFollowUps: false } })),
-  { enabled: true, sendTime: "08:15", senderUserId: "manager-x", sections: { ...DEFAULT_WHATSAPP_DAILY_SUMMARY_CONFIG.sections, todayFollowUps: false } }
+  { enabled: true, sendTime: "08:15", senderUserId: "manager-x", sections: { ...DEFAULT_WHATSAPP_DAILY_SUMMARY_CONFIG.sections, todayFollowUps: false }, managerTips: false }
 );
+assert.equal(parseDailySummaryConfig(JSON.stringify({ ...DEFAULT_WHATSAPP_DAILY_SUMMARY_CONFIG, managerTips: true })).managerTips, true);
+assert.equal(DEFAULT_WHATSAPP_DAILY_SUMMARY_CONFIG.managerTips, false, "dicas desligadas por padrão");
 
 const MONDAY_0730 = new Date("2026-11-09T10:30:00.000Z");
 const at = (iso: string) => new Date(iso);
