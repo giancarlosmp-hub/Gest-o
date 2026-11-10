@@ -1,7 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 
 // Apoio dos testes da Fase B2 do WhatsApp (não é carregado pela aplicação): Prisma em memória para usuários,
-// tenant, clientes, oportunidades, contatos, índice de telefones, conversas, mensagens e AppConfig, com um
+// tenant, clientes, oportunidades (com itens e histórico de alterações), contatos, índice de telefones, conversas, mensagens e AppConfig, com um
 // filtro "where" pequeno (igualdade, null, in, not, gte/gt/lt/lte, OR, relações por id). Só dados fictícios.
 
 type Row = Record<string, any>;
@@ -19,6 +19,8 @@ export function createWhatsAppConversationsTestDb(prisma: PrismaClient) {
     ],
     client: [],
     opportunity: [],
+    opportunityItem: [],
+    opportunityChangeLog: [],
     contact: [],
     clientPhoneIndex: [],
     communicationConversation: [],

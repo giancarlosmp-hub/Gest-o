@@ -5,7 +5,7 @@ import { INACTIVE_RECENT_AUTOMATION_ORIGIN } from "../commercialAutomationsServi
 import { brazilDayKeyOf, loadDailySummaryData } from "./dailySummaryData.js";
 
 // WhatsApp Fase D: o que entra no resumo de um vendedor. Prisma em memória, só dados fictícios.
-const { tables } = createWhatsAppConversationsTestDb(prisma);
+const { tables, calls } = createWhatsAppConversationsTestDb(prisma);
 
 // 09/11/2026 (segunda), 07:30 em Brasília = 10:30 UTC.
 const now = new Date("2026-11-09T10:30:00.000Z");
@@ -83,6 +83,37 @@ try {
   const crowded = await loadDailySummaryData({ id: "seller-c", name: "Vendedor Ficticio C" }, all, now);
   assert.equal(crowded.sections.overdueFollowUps!.total, 14);
   assert.equal(crowded.sections.overdueFollowUps!.items.length, 10);
+
+  // Sem dicas: nada de tipFacts e nenhuma leitura de itens ou histórico.
+  assert.equal(data.sections.overdueFollowUps!.items[0].tipFacts, undefined);
+  assert.equal(calls.filter((call) => call.model === "opportunityItem" || call.model === "opportunityChangeLog").length, 0);
+
+  // Com dicas: valor, último contato, cultura, produtos (ofertado + itens), última compra e última troca de etapa.
+  tables.client.push({ id: "client-tips", name: "Cliente Ficticio Dicas", city: "Cidade D", state: "PR", isArchived: false, lastPurchaseDate: null, financialProfile: { DATA_ULTFATURA: "2026-03-15" } });
+  opp({ id: "tips-opp", ownerSellerId: "seller-d", clientId: "client-tips", stage: "proposta", followUpDate: day("2026-11-05"), value: 30_000, lastContactAt: hoursAgo(100), crop: "Aveia", productOffered: "Aveia Ficticia Ofertada" });
+  tables.opportunityItem.push(
+    { id: "line-2", opportunityId: "tips-opp", lineNumber: 2, productNameSnapshot: "Produto Ficticio Dois" },
+    { id: "line-1", opportunityId: "tips-opp", lineNumber: 1, productNameSnapshot: "Produto Ficticio Um" },
+    { id: "line-other", opportunityId: "react-new", lineNumber: 1, productNameSnapshot: "Produto De Outra" }
+  );
+  tables.opportunityChangeLog.push(
+    { id: "log-1", opportunityId: "tips-opp", field: "stage", createdAt: hoursAgo(200) },
+    { id: "log-2", opportunityId: "tips-opp", field: "stage", createdAt: hoursAgo(50) },
+    { id: "log-3", opportunityId: "tips-opp", field: "value", createdAt: hoursAgo(1) }
+  );
+  const withTips = await loadDailySummaryData({ id: "seller-d", name: "Vendedor Ficticio D" }, all, now, prisma, { tipFacts: true });
+  assert.deepEqual(withTips.sections.overdueFollowUps!.items[0].tipFacts, {
+    opportunityId: "tips-opp",
+    value: 30_000,
+    lastContactAt: hoursAgo(100),
+    stageSince: hoursAgo(50),
+    crop: "Aveia",
+    products: ["Aveia Ficticia Ofertada", "Produto Ficticio Um", "Produto Ficticio Dois"],
+    lastPurchaseDate: new Date("2026-03-15")
+  });
+  // Sem troca de etapa registrada: vale a criação.
+  const noLog = await loadDailySummaryData(seller, all, now, prisma, { tipFacts: true });
+  assert.deepEqual(noLog.sections.overdueFollowUps!.items[0].tipFacts!.stageSince, hoursAgo(72));
 } finally {
   await prisma.$disconnect().catch(() => undefined);
 }

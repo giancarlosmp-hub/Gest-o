@@ -44,8 +44,8 @@ export type DailySummaryFormatOptions = {
   /** Endereço do CRM (FRONTEND_URL); sem ele, a mensagem sai sem link. */
   crmUrl: string | null;
   /**
-   * Ponto de extensão: bloco opcional "Dicas do gerente comercial" (etapa seguinte, gerado por IA). Hoje
-   * ninguém preenche. Só complementa: um resumo sem itens continua sem envio, mesmo com dicas.
+   * Bloco opcional "Dicas do gerente comercial" (gerado pela IA e já conferido), com a assinatura posta pelo CRM.
+   * Só complementa: um resumo sem itens continua sem envio, mesmo com dicas.
    */
   managerTips?: readonly string[] | null;
 };
@@ -62,7 +62,8 @@ const STAGE_LABELS: Record<string, string> = {
 
 const MAX_NAME_LENGTH = 60;
 const MAX_TIPS = 3;
-const MAX_TIP_LENGTH = 280;
+const MAX_TIP_LENGTH = 320;
+const MANAGER_TIPS_SIGNATURE = "— Claude, gerente comercial";
 
 /** Texto de cadastro numa linha só, sem marcação do WhatsApp (* _ ~ `) e com tamanho limitado. */
 export function plainText(value: string | null | undefined, maxLength = MAX_NAME_LENGTH): string {
@@ -123,7 +124,7 @@ export function formatDailySummary(data: DailySummaryData, options: DailySummary
   if (blocks.length === 0) return null;
 
   const tips = (options.managerTips ?? []).map((tip) => plainText(tip, MAX_TIP_LENGTH)).filter(Boolean).slice(0, MAX_TIPS);
-  if (tips.length) blocks.push(["*Dicas do gerente comercial*", ...tips.map((tip) => `• ${tip}`)].join("\n"));
+  if (tips.length) blocks.push(["*Dicas do gerente comercial*", ...tips.map((tip) => `• ${tip}`), MANAGER_TIPS_SIGNATURE].join("\n"));
 
   const base = crmBase(options.crmUrl);
   if (base) {
