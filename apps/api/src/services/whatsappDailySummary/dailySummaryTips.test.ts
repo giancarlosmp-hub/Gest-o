@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
+import type { AiChatRequest } from "../ai/aiProvider.js";
+import type { AiService } from "../ai/aiService.js";
 import type { DailySummaryData, DailySummaryItem, DailySummaryTipFacts } from "./dailySummaryFormat.js";
 import {
   buildDailySummaryTipsInput,
+  createDailySummaryTipsRound,
   DAILY_SUMMARY_TIPS_SYSTEM_PROMPT,
+  DAILY_SUMMARY_TIPS_USAGE_BUCKET,
   dailySummaryTipsUserMessage,
+  generateDailySummaryTips,
   MAX_TIP_CODES,
   validateDailySummaryTips
 } from "./dailySummaryTips.js";
@@ -140,5 +145,69 @@ assert.equal(reason(answer(["Lembre C3 do plantio de soja."])), "culture_not_in_
 assert.equal(reason(answer(["Ofereça sorgo a C1."])), "culture_not_in_data");
 assert.equal(reason(answer(["Confirme as aveias de C2 e o milho de C3."])), "ok", "plural e culturas dos dados");
 assert.equal(reason(""), "invalid_format");
+
+// 4) Chamada da IA (IA falsa): prompt próprio, balde do resumo, JSON; disjuntor por rodada; log sem conteúdo.
+{
+  const requests: Array<{ request: AiChatRequest; userId: string | null | undefined }> = [];
+  let status = { enabled: true, configured: true };
+  let reply: (() => Promise<{ content: string } | null>) = async () => ({ content: answer(["Ligue hoje para C2 e retome a aveia."]) });
+  const ai = {
+    getStatus: () => status as ReturnType<AiService["getStatus"]>,
+    chat: async (request: AiChatRequest, options: { userId?: string | null } = {}) => {
+      requests.push({ request, userId: options.userId });
+      const result = await reply();
+      return result ? ({ ...result, model: "modelo-ficticio", elapsedMs: 1, provider: "ficticio" } as Awaited<ReturnType<AiService["chat"]>>) : null;
+    }
+  };
+  const logs: string[] = [];
+  const log = (level: string, message: string, meta: Record<string, unknown>) => void logs.push(JSON.stringify({ level, message, meta }));
+  const run = (round = createDailySummaryTipsRound()) => generateDailySummaryTips(data, now, { round, usageKey: DAILY_SUMMARY_TIPS_USAGE_BUCKET }, ai, log);
+
+  assert.deepEqual(await run(), { status: "ok", tips: ["Ligue hoje para Agropecuaria Ficticia Alfa Ltda e retome a aveia."] });
+  const sent = requests[0];
+  assert.equal(sent.userId, "resumo-diario");
+  assert.equal(sent.request.system, DAILY_SUMMARY_TIPS_SYSTEM_PROMPT);
+  assert.equal(sent.request.responseFormat, "json_object");
+  assert.equal(sent.request.maxTokens, 600);
+  assert.equal(sent.request.messages[0].content, message);
+
+  // Resposta reprovada: descartada, sem desligar a rodada.
+  reply = async () => ({ content: answer(["Ofereça desconto a C9."]) });
+  const round = createDailySummaryTipsRound();
+  assert.deepEqual(await run(round), { status: "discarded", tips: [] });
+  assert.equal(round.aiDown, false);
+
+  // Falha da IA (null): sem dicas e o disjuntor desliga a rodada; o próximo vendedor nem chama a IA.
+  reply = async () => null;
+  assert.deepEqual(await run(round), { status: "ai_failed", tips: [] });
+  assert.equal(round.aiDown, true);
+  const before = requests.length;
+  reply = async () => ({ content: answer(["Ligue para C1."]) });
+  assert.deepEqual(await run(round), { status: "round_skipped", tips: [] });
+  assert.equal(requests.length, before, "rodada desligada não chama a IA");
+  // Rodada nova volta a tentar.
+  assert.equal((await run()).status, "ok");
+
+  // Erro inesperado: sem dicas, nunca lança.
+  reply = async () => Promise.reject(new TypeError("falha ficticia"));
+  assert.deepEqual(await run(), { status: "ai_failed", tips: [] });
+
+  // IA desligada ou não configurada: nem chama.
+  status = { enabled: false, configured: true };
+  const calls = requests.length;
+  assert.deepEqual(await run(), { status: "ai_unavailable", tips: [] });
+  assert.equal(requests.length, calls);
+
+  // Sem itens com dados: nada a pedir, sem log.
+  const quiet = logs.length;
+  assert.deepEqual(await generateDailySummaryTips({ ...data, sections: {} }, now, { round: createDailySummaryTipsRound(), usageKey: "x" }, ai, log), { status: "no_summary", tips: [] });
+  assert.equal(logs.length, quiet);
+
+  const all = logs.join("\n");
+  assert.match(all, /\[whatsapp daily summary\] tips/);
+  assert.match(all, /"reason":"unknown_code"/);
+  assert.match(all, /"codes":3/);
+  assert.doesNotMatch(all, /Ficticia|Ficticio|Ligue|aveia|desconto|C2|48000/i, "log só com situação, motivo e contagens");
+}
 
 console.log("dailySummaryTips.test.ts: ok");

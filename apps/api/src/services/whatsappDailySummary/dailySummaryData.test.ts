@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { prisma } from "../../config/prisma.js";
 import { createWhatsAppConversationsTestDb } from "../whatsappMessages/whatsappConversationsTestDb.js";
 import { INACTIVE_RECENT_AUTOMATION_ORIGIN } from "../commercialAutomationsService.js";
-import { brazilDayKeyOf, loadDailySummaryData } from "./dailySummaryData.js";
+import { DEFAULT_WHATSAPP_DAILY_SUMMARY_CONFIG } from "@salesforce-pro/shared";
+import { brazilDayKeyOf, buildDailySummaryMessage, loadDailySummaryData } from "./dailySummaryData.js";
+import type { DailySummaryData } from "./dailySummaryFormat.js";
+import { createDailySummaryTipsRound, type generateDailySummaryTips } from "./dailySummaryTips.js";
 
 // WhatsApp Fase D: o que entra no resumo de um vendedor. Prisma em memória, só dados fictícios.
 const { tables, calls } = createWhatsAppConversationsTestDb(prisma);
@@ -114,6 +117,31 @@ try {
   // Sem troca de etapa registrada: vale a criação.
   const noLog = await loadDailySummaryData(seller, all, now, prisma, { tipFacts: true });
   assert.deepEqual(noLog.sections.overdueFollowUps!.items[0].tipFacts!.stageSince, hoursAgo(72));
+
+  // Mensagem: dicas desligadas não chamam a IA; ligadas entram no texto; sem itens, sem IA; sem dicas, texto igual.
+  const config = { ...DEFAULT_WHATSAPP_DAILY_SUMMARY_CONFIG, enabled: true };
+  const context = { round: createDailySummaryTipsRound(), usageKey: "resumo-diario" };
+  const generated: Array<DailySummaryData> = [];
+  let tipsResult: Awaited<ReturnType<typeof generateDailySummaryTips>> = { status: "ok", tips: ["Dica ficticia"] };
+  const generateTips: typeof generateDailySummaryTips = async (summary) => (generated.push(summary), tipsResult);
+
+  const off = await buildDailySummaryMessage(seller, config, now, context, { generateTips });
+  assert.equal(off.tips, "off");
+  assert.doesNotMatch(off.text!, /Dicas do gerente/);
+  assert.equal(generated.length, 0);
+
+  const on = await buildDailySummaryMessage(seller, { ...config, managerTips: true }, now, context, { generateTips });
+  assert.equal(on.tips, "ok");
+  assert.match(on.text!, /\*Dicas do gerente comercial\*\n• Dica ficticia\n— Claude, gerente comercial/);
+  assert(generated[0].sections.overdueFollowUps!.items[0].tipFacts, "a IA recebe os dados das dicas");
+
+  tipsResult = { status: "ai_failed", tips: [] };
+  const failed = await buildDailySummaryMessage(seller, { ...config, managerTips: true }, now, context, { generateTips });
+  assert.deepEqual(failed, { text: off.text, tips: "ai_failed" }, "sem dicas, o resumo sai igual");
+
+  const nothing = await buildDailySummaryMessage({ id: "seller-sem-nada", name: "Vendedor Ficticio Vazio" }, { ...config, managerTips: true }, now, context, { generateTips });
+  assert.deepEqual(nothing, { text: null, tips: "no_summary" });
+  assert.equal(generated.length, 2, "sem itens, a IA não é chamada");
 } finally {
   await prisma.$disconnect().catch(() => undefined);
 }

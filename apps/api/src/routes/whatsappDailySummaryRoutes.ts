@@ -20,7 +20,8 @@ import {
   loadDailySummaryConfig,
   saveDailySummaryConfig
 } from "../services/whatsappDailySummary/dailySummaryConfig.js";
-import { buildDailySummaryText } from "../services/whatsappDailySummary/dailySummaryData.js";
+import { buildDailySummaryMessage } from "../services/whatsappDailySummary/dailySummaryData.js";
+import { createDailySummaryTipsRound } from "../services/whatsappDailySummary/dailySummaryTips.js";
 import {
   checkDailySummarySender,
   DAILY_SUMMARY_SENDER_MESSAGES,
@@ -103,7 +104,7 @@ whatsappDailySummaryRoutes.post("/daily-summary/preview", authorize(Role.diretor
   const seller = await findActiveSeller(sellerId);
   if (!seller) return res.status(404).json({ message: "Vendedor ativo não encontrado.", code: "seller_not_found" });
   const config = await loadDailySummaryConfig();
-  const text = await buildDailySummaryText(seller, config.sections, new Date());
+  const { text } = await buildDailySummaryMessage(seller, config, new Date(), { round: createDailySummaryTipsRound(), usageKey: req.user!.id });
   return res.json({ text, empty: text === null, recipient: await recipientView(seller.id) });
 });
 
@@ -128,7 +129,7 @@ whatsappDailySummaryRoutes.post("/daily-summary/test-send", authorize(Role.diret
     return res.status(409).json({ message: `Seu cadastro não pode receber o teste: ${WHATSAPP_CRM_RECIPIENT_REFUSAL_MESSAGES[recipient.reason]}`, code: recipient.reason });
   }
   lastTestSendAt.set(userId, Date.now());
-  const text = await buildDailySummaryText(seller, config.sections, new Date());
+  const { text } = await buildDailySummaryMessage(seller, config, new Date(), { round: createDailySummaryTipsRound(), usageKey: userId });
   const result = await sendDailySummaryText(sender.instanceName, recipient.recipient, testText(seller.name, text));
   const code = result.kind === "sent" ? null : result.code;
   logApiEvent(result.kind === "sent" ? "INFO" : "WARN", "[whatsapp daily summary] test send", { result: result.kind, code });

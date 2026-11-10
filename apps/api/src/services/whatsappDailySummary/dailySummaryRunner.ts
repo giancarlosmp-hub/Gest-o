@@ -15,8 +15,9 @@ import {
   sendTimeMinutes,
   type DailySummaryStore
 } from "./dailySummaryConfig.js";
-import { buildDailySummaryText } from "./dailySummaryData.js";
+import { buildDailySummaryMessage } from "./dailySummaryData.js";
 import { checkDailySummarySender, sendDailySummaryText, type DailySummarySenderCheck } from "./dailySummarySender.js";
+import { createDailySummaryTipsRound, DAILY_SUMMARY_TIPS_USAGE_BUCKET, type DailySummaryTipsRound } from "./dailySummaryTips.js";
 
 // WhatsApp Fase D: uma rodada do resumo diário (o agendador chama a cada poucos minutos).
 // - só em dia útil, a partir do horário configurado (Brasília) e dentro da janela de DAILY_SUMMARY_WINDOW_MINUTES;
@@ -24,7 +25,9 @@ import { checkDailySummarySender, sendDailySummaryText, type DailySummarySenderC
 // - cada vendedor uma vez por dia: a linha do AppConfig é criada antes do envio (trava);
 // - intervalo aleatório entre envios; só "conexão recusada" tenta de novo (até MAX_ATTEMPTS), o resto não
 //   repete para nunca duplicar;
-// - vendedor sem nada: não envia, fica "empty"; destino recusado: "refused" com o motivo.
+// - vendedor sem nada: não envia, fica "empty"; destino recusado: "refused" com o motivo;
+// - dicas do gerente comercial (se ligadas): geradas na montagem do texto, com orçamento curto; a primeira falha
+//   da IA na rodada desliga as dicas para os demais vendedores (disjuntor), sem atrasar nem bloquear o envio.
 // Log só com contagens e códigos: sem texto, nomes, números ou ids.
 
 export const MAX_ATTEMPTS = 3;
@@ -39,7 +42,7 @@ export type DailySummaryRunnerDeps = {
   loadConfig(): Promise<WhatsAppDailySummaryConfig>;
   listSellers(): Promise<DailySummarySeller[]>;
   checkSender(senderUserId: string | null): Promise<DailySummarySenderCheck>;
-  buildText(seller: DailySummarySeller, config: WhatsAppDailySummaryConfig, now: Date): Promise<string | null>;
+  buildText(seller: DailySummarySeller, config: WhatsAppDailySummaryConfig, now: Date, tipsRound: DailySummaryTipsRound): Promise<string | null>;
   resolveRecipient(userId: string): Promise<CrmUserRecipientResolution>;
   send(instanceName: string, recipient: CrmUserRecipient, text: string): Promise<EvolutionSendResult>;
   store: DailySummaryStore;
@@ -117,10 +120,11 @@ export async function runDailySummaryTick(now: Date, deps: DailySummaryRunnerDep
   let processed = 0;
   let sentBefore = false;
   let senderLost: string | null = null;
+  const tipsRound = createDailySummaryTipsRound();
   for (const seller of pending) {
     const previous = days.get(seller.id);
     const attempts = previous?.attempts ?? 0;
-    const text = await deps.buildText(seller, config, now);
+    const text = await deps.buildText(seller, config, now, tipsRound);
     if (text === null) {
       await record(seller.id, { status: "empty", code: null, attempts, at: now.toISOString() });
       processed += 1;
@@ -170,7 +174,8 @@ export function createDailySummaryRunnerDeps(): DailySummaryRunnerDeps {
     listSellers: () =>
       prisma.user.findMany({ where: { role: Role.vendedor, isActive: true }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
     checkSender: (senderUserId) => checkDailySummarySender(senderUserId),
-    buildText: (seller, config, now) => buildDailySummaryText(seller, config.sections, now),
+    buildText: async (seller, config, now, tipsRound) =>
+      (await buildDailySummaryMessage(seller, config, now, { round: tipsRound, usageKey: DAILY_SUMMARY_TIPS_USAGE_BUCKET })).text,
     resolveRecipient: (userId) => resolveCrmUserRecipient(userId),
     send: (instanceName, recipient, text) => sendDailySummaryText(instanceName, recipient, text),
     store: appConfigDailySummaryStore(),

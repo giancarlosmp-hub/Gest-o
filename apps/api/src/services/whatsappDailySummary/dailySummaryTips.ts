@@ -1,8 +1,12 @@
-import { WHATSAPP_DAILY_SUMMARY_MAX_ITEMS_PER_SECTION } from "@salesforce-pro/shared";
+import { WHATSAPP_DAILY_SUMMARY_MAX_ITEMS_PER_SECTION, type WhatsAppDailySummaryTipsStatus } from "@salesforce-pro/shared";
+import { logApiEvent } from "../../utils/logger.js";
 import { parseAiJsonObject } from "../ai/aiResponseParser.js";
+import { aiService as defaultAiService, type AiService } from "../ai/aiService.js";
+import { runAiFlow } from "../ai/aiTimeBudget.js";
 import { DAILY_SUMMARY_SECTION_ORDER, plainText, type DailySummaryData, type DailySummarySectionKey } from "./dailySummaryFormat.js";
 
-// Resumo diário: bloco "Dicas do gerente comercial" escrito pela IA. Funções puras (sem banco, sem rede, sem log).
+// Resumo diário: bloco "Dicas do gerente comercial" escrito pela IA. Montagem e conferência são funções puras; só
+// generateDailySummaryTips chama a IA.
 // Privacidade: o modelo gratuito registra os dados. A IA nunca recebe nome, documento, telefone, cidade nem região
 // do cliente: só um código por oportunidade (C1, C2…), etapa, dias, valor, cultura/produto, data da última compra
 // (reativação) e a UF. O CRM troca os códigos pelos nomes depois de conferir a resposta.
@@ -171,4 +175,77 @@ export function validateDailySummaryTips(content: string, input: DailySummaryTip
     }
   }
   return { ok: true, tips: tips.map((tip) => tip.replace(CODE_PATTERN, (_code, digits: string) => input.names.get(`C${Number(digits)}`)!)) };
+}
+
+/** Balde próprio no teto diário de chamadas de IA (não divide com a IA Comercial da gestão). */
+export const DAILY_SUMMARY_TIPS_USAGE_BUCKET = "resumo-diario";
+const TIPS_MAX_OUTPUT = 600;
+const TIPS_TEMPERATURE = 0.3;
+
+/** Disjuntor de uma rodada de envio: depois de uma falha da IA, os demais vendedores saem sem dicas. */
+export type DailySummaryTipsRound = { aiDown: boolean };
+export const createDailySummaryTipsRound = (): DailySummaryTipsRound => ({ aiDown: false });
+
+export type DailySummaryTipsContext = {
+  round: DailySummaryTipsRound;
+  /** Quem conta no teto diário de IA: o balde do resumo no envio, o usuário na prévia e no teste. */
+  usageKey: string;
+};
+
+export type DailySummaryTipsResult = { status: WhatsAppDailySummaryTipsStatus; tips: string[] };
+
+type TipsAi = Pick<AiService, "chat" | "getStatus">;
+type TipsLog = (level: "INFO" | "WARN", message: string, data: Record<string, unknown>) => void;
+
+/**
+ * Dicas do resumo, ou nenhuma. Nunca lança: IA desligada, falha, demora (orçamento de 8 s), teto ou resposta
+ * reprovada = sem dicas, e o resumo sai normalmente. Log só com a situação, o motivo e contagens.
+ */
+export async function generateDailySummaryTips(
+  data: DailySummaryData,
+  now: Date,
+  context: DailySummaryTipsContext,
+  ai: TipsAi = defaultAiService,
+  log: TipsLog = (level, message, meta) => logApiEvent(level, message, meta)
+): Promise<DailySummaryTipsResult> {
+  let codes = 0;
+  const finish = (status: WhatsAppDailySummaryTipsStatus, tips: string[] = [], extra: Record<string, unknown> = {}): DailySummaryTipsResult => {
+    log(status === "ok" ? "INFO" : "WARN", "[whatsapp daily summary] tips", { result: status, codes, tips: tips.length, ...extra });
+    return { status, tips };
+  };
+  try {
+    if (context.round.aiDown) return finish("round_skipped");
+    const input = buildDailySummaryTipsInput(data, now);
+    if (!input) return { status: "no_summary", tips: [] };
+    codes = input.names.size;
+    const status = ai.getStatus();
+    if (!status.enabled || !status.configured) {
+      context.round.aiDown = true;
+      return finish("ai_unavailable");
+    }
+    const response = await runAiFlow(
+      "daily-summary-tips",
+      () =>
+        ai.chat(
+          {
+            system: DAILY_SUMMARY_TIPS_SYSTEM_PROMPT,
+            messages: [{ role: "user", content: dailySummaryTipsUserMessage(input) }],
+            temperature: TIPS_TEMPERATURE,
+            maxTokens: TIPS_MAX_OUTPUT,
+            responseFormat: "json_object"
+          },
+          { userId: context.usageKey }
+        ),
+      (result) => (result ? "ai" : "deterministic")
+    );
+    if (!response) {
+      context.round.aiDown = true;
+      return finish("ai_failed");
+    }
+    const validation = validateDailySummaryTips(response.content, input);
+    return validation.ok ? finish("ok", validation.tips) : finish("discarded", [], { reason: validation.reason });
+  } catch (error) {
+    context.round.aiDown = true;
+    return finish("ai_failed", [], { error: error instanceof Error ? error.name : "unknown" });
+  }
 }

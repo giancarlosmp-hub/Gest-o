@@ -1,9 +1,15 @@
 import { OpportunityStage, type Prisma } from "@prisma/client";
-import { WHATSAPP_DAILY_SUMMARY_MAX_ITEMS_PER_SECTION, type WhatsAppDailySummarySections } from "@salesforce-pro/shared";
+import {
+  WHATSAPP_DAILY_SUMMARY_MAX_ITEMS_PER_SECTION,
+  type WhatsAppDailySummaryConfig,
+  type WhatsAppDailySummarySections,
+  type WhatsAppDailySummaryTipsStatus
+} from "@salesforce-pro/shared";
 import { env } from "../../config/env.js";
 import { prisma as defaultPrisma } from "../../config/prisma.js";
 import { inactiveRecentAutomationOpportunityWhere, resolvePurchaseDate } from "../commercialAutomationsService.js";
 import { formatDailySummary, type DailySummaryData, type DailySummaryItem, type DailySummarySection, type DailySummaryTipFacts } from "./dailySummaryFormat.js";
+import { generateDailySummaryTips, type DailySummaryTipsContext } from "./dailySummaryTips.js";
 
 // WhatsApp Fase D: o que entra no resumo de um vendedor. Só oportunidades dele (ownerSellerId), de cliente
 // não arquivado:
@@ -118,13 +124,24 @@ async function completeTipFacts(data: DailySummaryData, db: SummaryDb) {
   }
 }
 
-/** Texto do resumo do vendedor (link do CRM pelo FRONTEND_URL), ou null quando não há nada a enviar. */
-export async function buildDailySummaryText(
+export type DailySummaryMessage = { text: string | null; tips: WhatsAppDailySummaryTipsStatus };
+
+/**
+ * Texto do resumo do vendedor (link do CRM pelo FRONTEND_URL), ou null quando não há nada a enviar. Com as dicas
+ * ligadas e itens no resumo, pede as dicas à IA; sem dicas (qualquer motivo), o texto sai igual, sem o bloco.
+ */
+export async function buildDailySummaryMessage(
   seller: { id: string; name: string },
-  sections: WhatsAppDailySummarySections,
+  config: WhatsAppDailySummaryConfig,
   now: Date,
-  db: SummaryDb = defaultPrisma
-): Promise<string | null> {
-  const data = await loadDailySummaryData(seller, sections, now, db);
-  return formatDailySummary(data, { crmUrl: env.frontendUrl || null });
+  tips: DailySummaryTipsContext,
+  deps: { db?: SummaryDb; generateTips?: typeof generateDailySummaryTips } = {}
+): Promise<DailySummaryMessage> {
+  const data = await loadDailySummaryData(seller, config.sections, now, deps.db ?? defaultPrisma, { tipFacts: config.managerTips });
+  const crmUrl = env.frontendUrl || null;
+  const text = formatDailySummary(data, { crmUrl });
+  if (!config.managerTips) return { text, tips: "off" };
+  if (text === null) return { text, tips: "no_summary" };
+  const result = await (deps.generateTips ?? generateDailySummaryTips)(data, now, tips);
+  return { text: result.tips.length ? formatDailySummary(data, { crmUrl, managerTips: result.tips }) : text, tips: result.status };
 }

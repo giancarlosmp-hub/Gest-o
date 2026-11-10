@@ -5,6 +5,7 @@ import { EvolutionUnavailableError, type EvolutionSendResult } from "../whatsapp
 import { brazilClock, parseDailySummaryConfig, sendTimeMinutes, type DailySummaryStore } from "./dailySummaryConfig.js";
 import { MAX_ATTEMPTS, MAX_EXTRA_INTERVAL_MS, MIN_INTERVAL_MS, runDailySummaryTick, type DailySummaryRunnerDeps } from "./dailySummaryRunner.js";
 import { checkDailySummarySender, sendDailySummaryText } from "./dailySummarySender.js";
+import type { DailySummaryTipsRound } from "./dailySummaryTips.js";
 
 // WhatsApp Fase D: rodada do resumo diário com dependências falsas. Só dados fictícios.
 
@@ -42,6 +43,7 @@ function harness(options: { texts?: Record<string, string | null>; refusals?: Re
   const sends: Array<{ instance: string; userId: string; phone: string; text: string }> = [];
   const sleeps: number[] = [];
   const logs: string[] = [];
+  const tipsRounds: Array<{ sellerId: string; round: DailySummaryTipsRound }> = [];
   const calls = { listSellers: 0, checkSender: 0, cleanup: 0, createConflicts: new Set<string>() };
   const results = options.results ?? {};
   let sender: Awaited<ReturnType<DailySummaryRunnerDeps["checkSender"]>> = { ok: true, userId: "manager-x", instanceName: "crm-instancia-ficticia" };
@@ -77,7 +79,10 @@ function harness(options: { texts?: Record<string, string | null>; refusals?: Re
     loadConfig: async () => config,
     listSellers: async () => (calls.listSellers++, sellers),
     checkSender: async () => (calls.checkSender++, sender),
-    buildText: async (seller) => (seller.id in texts ? texts[seller.id] : `Resumo ficticio de ${seller.name}`),
+    buildText: async (seller, _config, _now, round) => {
+      tipsRounds.push({ sellerId: seller.id, round });
+      return seller.id in texts ? texts[seller.id] : `Resumo ficticio de ${seller.name}`;
+    },
     resolveRecipient: async (userId) =>
       options.refusals?.[userId] ?? { ok: true, recipient: { userId, phone: `55119000001${userId.slice(-1).charCodeAt(0) % 100}` } as CrmUserRecipient },
     send: async (instance, recipient, text) => {
@@ -95,6 +100,7 @@ function harness(options: { texts?: Record<string, string | null>; refusals?: Re
     sends,
     sleeps,
     logs,
+    tipsRounds,
     calls,
     deps,
     get run() {
@@ -165,11 +171,15 @@ const assertCleanLogs = (h: Harness) => {
   assert.deepEqual(h.run?.counts, { sending: 0, sent: 1, uncertain: 1, failed: 1, empty: 1, refused: 1 });
   assert.equal(h.calls.cleanup, 1, "limpeza uma vez no primeiro dia");
   assertCleanLogs(h);
+  // Dicas: um disjuntor por rodada, o mesmo para todos os vendedores dela.
+  assert.equal(h.tipsRounds.length, 5);
+  assert(h.tipsRounds.every((entry) => entry.round === h.tipsRounds[0].round && entry.round.aiDown === false));
 
   // 4) Rodada seguinte no mesmo dia: só a conexão recusada tenta de novo; enviado, incerto, vazio e recusado não.
   await runDailySummaryTick(at("2026-11-09T10:35:00.000Z"), h.deps);
   assert.deepEqual(h.sends.map((send) => send.userId), ["seller-a", "seller-d", "seller-e", "seller-e"]);
   assert.deepEqual([h.day("seller-e")?.status, h.day("seller-e")?.attempts], ["sent", 2]);
+  assert.notEqual(h.tipsRounds.at(-1)!.round, h.tipsRounds[0].round, "rodada nova, disjuntor novo");
   assert.equal(h.calls.cleanup, 1, "limpeza não repete no mesmo dia");
   await runDailySummaryTick(at("2026-11-09T10:40:00.000Z"), h.deps);
   assert.equal(h.sends.length, 4, "nada mais a enviar");

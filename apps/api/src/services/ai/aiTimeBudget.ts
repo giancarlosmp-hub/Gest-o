@@ -16,7 +16,10 @@ export type AiFlow =
   | "timeline-intelligence"
   | "agenda-intelligence"
   | "commercial-planning"
-  | "opportunity-draft";
+  | "opportunity-draft"
+  // Dicas do gerente comercial no resumo diário do WhatsApp: roda no agendador e na prévia, com orçamento curto
+  // para nunca atrasar o envio.
+  | "daily-summary-tips";
 
 export const AI_FLOW_BUDGET_MS: Record<AiFlow, number> = {
   "crm-assistant": 12_000,
@@ -27,7 +30,8 @@ export const AI_FLOW_BUDGET_MS: Record<AiFlow, number> = {
   "timeline-intelligence": 12_000,
   "agenda-intelligence": 12_000,
   "commercial-planning": 12_000,
-  "opportunity-draft": 12_000
+  "opportunity-draft": 12_000,
+  "daily-summary-tips": 8_000
 };
 // Folga entre o fim do orçamento e o timeout de resposta da API.
 export const AI_BUDGET_RESPONSE_MARGIN_MS = 3_000;
