@@ -1705,6 +1705,18 @@ Pendente:
   índice pode estar desatualizado.
 - O agendador sobe só no `bootstrap.ts` (produção), como os outros jobs do WhatsApp; `server.ts` (desenvolvimento)
   não o inicia.
+- **Dicas do gerente comercial (IA)**
+  ([detalhes](communications/whatsapp-evolution.md#dicas-do-gerente-comercial-ia)), desligadas por padrão:
+  - Limites do modelo gratuito do OpenRouter (requisições por minuto e por dia) **não confirmados**: conferir no
+    painel do OpenRouter antes de ligar. O uso esperado é 1 chamada por vendedor por dia, com disjuntor por rodada.
+  - Nome comercial de produto inventado pela IA **não é detectado**: a conferência só pega culturas de uma lista fixa
+    fora dos dados, preço/desconto/prazo e código inexistente.
+  - "Dias na etapa" é **aproximado**: não há coluna com a data da troca de etapa; usa a última troca registrada no
+    `OpportunityChangeLog` (a tela de rascunho e a automação não gravam) ou, sem ela, a criação.
+  - O produto da última compra não existe no CRM (`Sale` não tem cliente nem produto); a reativação vai só com a
+    data.
+  - Os testes do resumo diário da API (`test:whatsapp-daily-summary:unit`) não rodam no CI hoje; só o teste da tela
+    (`test:whatsapp-link`).
 
 ### TD-TIMELINE-EVENTS-OWNER-FILTER — histórico some quando o cliente muda de vendedor
 

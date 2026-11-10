@@ -45,6 +45,18 @@ const evolution = createServer(async (req, res) => {
 evolution.listen(0, "127.0.0.1");
 await once(evolution, "listening");
 
+// IA falsa compatível com OpenAI: guarda o corpo recebido e responde com uma dica que cita C1.
+const aiRequests: any[] = [];
+let aiContent = JSON.stringify({ dicas: ["Ligue hoje para C1 e retome a proposta parada."] });
+const fakeAi = createServer(async (req, res) => {
+  let raw = "";
+  for await (const chunk of req) raw += chunk;
+  aiRequests.push(JSON.parse(raw));
+  res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ choices: [{ message: { content: aiContent }, finish_reason: "stop" }] }));
+});
+fakeAi.listen(0, "127.0.0.1");
+await once(fakeAi, "listening");
+
 const server = app.listen(0);
 await once(server, "listening");
 const port = (server.address() as { port: number }).port;
@@ -62,7 +74,7 @@ const logs: string[] = [];
 const originals = { info: console.info, warn: console.warn, error: console.error };
 for (const level of ["info", "warn", "error"] as const) console[level] = (...args: unknown[]) => void logs.push(args.map((arg) => (typeof arg === "string" ? arg : JSON.stringify(arg))).join(" "));
 
-const config = { enabled: true, sendTime: "07:45", senderUserId: "manager-a", sections: { reactivations: true, newOpportunities: true, overdueFollowUps: true, todayFollowUps: false } };
+const config = { enabled: true, sendTime: "07:45", senderUserId: "manager-a", sections: { reactivations: true, newOpportunities: true, overdueFollowUps: true, todayFollowUps: false }, managerTips: false };
 
 try {
   env.communicationsEnabled = true;
@@ -105,6 +117,11 @@ try {
   assert.deepEqual([badSender.status, badSender.json.code], [400, "sender_not_allowed"]);
   assert.equal((await call("director-a", "PUT", "/daily-summary/config", { ...config, sendTime: "7:45" })).status, 400);
   assert.equal((await call("director-a", "PUT", "/daily-summary/config", { ...config, extra: true })).status, 400);
+  assert.equal((await call("director-a", "PUT", "/daily-summary/config", { ...config, managerTips: "sim" })).status, 400);
+  // Corpo antigo, sem managerTips: aceito, com as dicas desligadas.
+  const { managerTips: _omitted, ...legacyBody } = config;
+  const legacy = await call("director-a", "PUT", "/daily-summary/config", legacyBody);
+  assert.deepEqual([legacy.status, legacy.json.managerTips], [200, false]);
   const saved = await call("director-a", "PUT", "/daily-summary/config", config);
   assert.deepEqual([saved.status, saved.json], [200, config]);
   assert.deepEqual(JSON.parse(tables.appConfig.find((row) => row.key === DAILY_SUMMARY_CONFIG_KEY)!.value), config);
@@ -122,7 +139,44 @@ try {
   assert.deepEqual([emptyPreview.json.text, emptyPreview.json.empty], [null, true]);
   assert.equal(emptyPreview.json.recipient.message, WHATSAPP_CRM_RECIPIENT_REFUSAL_MESSAGES.phone_matches_client);
   assert.equal((await call("manager-a", "POST", "/daily-summary/preview", { sellerId: "manager-a" })).status, 404);
+  assert.deepEqual(preview.json.tips, { status: "off", message: "Dicas do gerente comercial desligadas." });
   assert.equal(evolutionRequests.length, 0, "a prévia nunca fala com o Evolution");
+
+  // 4b) Dicas ligadas. IA desligada (AI_CHAT_ENABLED): texto igual, situação na prévia, sem chamada. O provedor
+  //     é criado na primeira chamada, então a IA falsa é configurada antes.
+  env.aiChatEnabled = false;
+  env.aiProvider = "openrouter";
+  env.aiBaseUrl = `http://127.0.0.1:${(fakeAi.address() as { port: number }).port}`;
+  env.aiApiKey = "chave-ficticia-ia";
+  env.aiModel = "modelo-ficticio";
+  env.aiTimeoutMs = 30_000;
+  const plainText = preview.json.text;
+  assert.equal((await call("director-a", "PUT", "/daily-summary/config", { ...config, managerTips: true })).json.managerTips, true);
+  const aiOff = await call("manager-a", "POST", "/daily-summary/preview", { sellerId: "seller-a" });
+  assert.deepEqual([aiOff.json.text, aiOff.json.tips.status], [plainText, "ai_unavailable"]);
+  assert.equal(aiRequests.length, 0);
+  // IA ligada (falsa): bloco de dicas com o código trocado pelo nome; a IA recebe só o código, sem nome nem cidade.
+  env.aiChatEnabled = true;
+  const withTips = await call("manager-a", "POST", "/daily-summary/preview", { sellerId: "seller-a" });
+  assert.equal(withTips.json.tips.status, "ok");
+  assert.equal(
+    withTips.json.text,
+    plainText.replace("\n\nVer no CRM", "\n\n*Dicas do gerente comercial*\n• Ligue hoje para Cliente Ficticio A e retome a proposta parada.\n— Claude, gerente comercial\n\nVer no CRM")
+  );
+  assert.equal(aiRequests.length, 1);
+  const aiBody = JSON.stringify(aiRequests[0]);
+  assert.match(aiBody, /C1/);
+  assert.match(aiBody, /follow_up_vencido/);
+  assert.doesNotMatch(aiBody, /Cliente Ficticio|Cidade Ficticia|Vendedor Ficticio|client-a|opp-1|seller-a/, "a IA não recebe nome, cidade nem ids");
+  // Resposta reprovada (código inexistente): descartada, texto igual.
+  aiContent = JSON.stringify({ dicas: ["Ligue para C7."] });
+  const discarded = await call("manager-a", "POST", "/daily-summary/preview", { sellerId: "seller-a" });
+  assert.deepEqual([discarded.json.text, discarded.json.tips.status], [plainText, "discarded"]);
+  // Vendedor sem itens: a IA não é chamada.
+  const emptyWithTips = await call("manager-a", "POST", "/daily-summary/preview", { sellerId: "seller-b" });
+  assert.deepEqual([emptyWithTips.json.text, emptyWithTips.json.tips.status], [null, "no_summary"]);
+  assert.equal(aiRequests.length, 2);
+  aiContent = JSON.stringify({ dicas: ["Ligue hoje para C1 e retome a proposta parada."] });
 
   // 5) Teste: vai só para o celular de quem clicou, pela instância do remetente, marcado como teste.
   const sent = await call("manager-a", "POST", "/daily-summary/test-send", { sellerId: "seller-a" });
@@ -131,6 +185,7 @@ try {
   assert.equal(sendRequest.url, "/message/sendText/crm-ficticio-gerente");
   assert.equal(sendRequest.body.number, "5511900000201", "celular de quem pediu o teste, nunca o do vendedor");
   assert.match(sendRequest.body.text, /^\[Teste\] Bom dia, Vendedor!/);
+  assert.match(sendRequest.body.text, /\*Dicas do gerente comercial\*\n• Ligue hoje para Cliente Ficticio A/, "o teste leva as dicas");
   const again = await call("manager-a", "POST", "/daily-summary/test-send", { sellerId: "seller-a" });
   assert.deepEqual([again.status, again.json.code], [429, "test_send_cooldown"]);
 
@@ -159,11 +214,13 @@ try {
   // Log sem texto, nomes ou números.
   const all = logs.join("\n");
   assert.match(all, /test send/);
-  assert.doesNotMatch(all, /Vendedor Ficticio|Cliente Ficticio|Bom dia|5511900000|90000-02/);
+  assert.match(all, /\[whatsapp daily summary\] tips/);
+  assert.doesNotMatch(all, /Vendedor Ficticio|Cliente Ficticio|Bom dia|5511900000|90000-02|Ligue|proposta parada|C7/);
 } finally {
   Object.assign(console, originals);
   server.close();
   evolution.close();
+  fakeAi.close();
   await prisma.$disconnect().catch(() => undefined);
 }
 

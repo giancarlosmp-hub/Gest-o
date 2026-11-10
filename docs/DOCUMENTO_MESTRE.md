@@ -1760,3 +1760,19 @@ Schema preview/apply só é necessário quando o Prisma mudou ou não existe evi
 equivalente; este incidente não autoriza reaplicação. `CONFIRM` nasce no dispatch protegido, passa
 pelo entrypoint e chega ao deploy como `PRODUCTION_CUTOVER`; tentativas com marcador stale exigem
 explicitamente `PRODUCTION_CUTOVER_REAUTHORIZED`, sem alterar os demais gates.
+
+# WhatsApp Fase D: dicas do gerente comercial com IA no resumo diário (10/11/2026)
+
+O resumo diário dos vendedores ganhou um bloco opcional "Dicas do gerente comercial": até 3 dicas curtas para o
+dia, escritas pela IA já integrada com a persona "Claude, gerente comercial", assinadas pelo CRM. Liga/desliga
+próprio no painel, **desligado por padrão**; sem migration e sem variável nova. Detalhes em
+[communications/whatsapp-evolution.md](communications/whatsapp-evolution.md#dicas-do-gerente-comercial-ia).
+
+Decisões aprovadas: a IA recebe só códigos `C1`…`C12` (máximo 12) e dados da oportunidade (etapa, dias, valor,
+cultura/produto, data da última compra nas reativações e UF; nunca região, cidade, nome, telefone ou documento); o
+CRM troca os códigos pelos nomes; qualquer falha na conferência descarta todas as dicas; geração na hora do envio,
+com orçamento de 8 s, disjuntor por rodada e balde próprio `resumo-diario` no teto diário de IA. Falha, demora ou
+limite da IA nunca atrasa nem bloqueia o envio: o resumo sai sem o bloco.
+
+Pendências registradas em `TD-WHATSAPP-DAILY-SUMMARY` ([TECH_DEBT.md](TECH_DEBT.md)): limites do modelo gratuito do
+OpenRouter não confirmados; nome comercial de produto inventado não é detectado; "dias na etapa" é aproximado.

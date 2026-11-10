@@ -61,9 +61,11 @@ assert.doesNotMatch(noLink, /Ver no CRM|https?:/);
 assert.doesNotMatch(noLink, /NOVA/);
 assert.doesNotMatch(formatDailySummary(data, { crmUrl: "javascript:alert(1)" })!, /Ver no CRM/);
 
-// 4) Ponto de extensão "Dicas do gerente comercial": antes dos links, no máximo 3, uma linha cada.
+// 4) "Dicas do gerente comercial": antes dos links, no máximo 3, uma linha cada (até 320 caracteres), com a
+//    assinatura posta pelo CRM.
 const withTips = formatDailySummary(data, { crmUrl: "https://crm.exemplo.invalid", managerTips: ["Dica *um*\ncom quebra", "", "Dica dois", "Dica três", "Dica quatro"] })!;
-assert.match(withTips, /\*Dicas do gerente comercial\*\n• Dica um com quebra\n• Dica dois\n• Dica três\n\nVer no CRM/);
+assert.match(withTips, /\*Dicas do gerente comercial\*\n• Dica um com quebra\n• Dica dois\n• Dica três\n— Claude, gerente comercial\n\nVer no CRM/);
+assert.match(formatDailySummary(data, { crmUrl: null, managerTips: ["D".repeat(400)] })!, new RegExp(`• ${"D".repeat(319)}…\\n— Claude, gerente comercial$`));
 assert.doesNotMatch(withTips, /Dica quatro/);
 assert.doesNotMatch(formatDailySummary(data, { crmUrl: null })!, /Dicas do gerente/, "sem dicas, sem bloco");
 

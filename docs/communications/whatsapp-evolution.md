@@ -440,8 +440,40 @@ a Fase A ligada e configurada.
   follow-up; até 10 por seção, com "+N no CRM" e o link do CRM. Os nomes dos clientes vão no texto (aprovado:
   são clientes da carteira do próprio vendedor).
 - **Vendedor sem nada: não recebe mensagem** (fica "sem itens" no painel).
-- Ponto de extensão para um bloco opcional "Dicas do gerente comercial" (`managerTips` no formatador). Hoje
-  ninguém preenche; a IA fica para uma etapa seguinte.
+- Opcional: bloco "Dicas do gerente comercial", escrito pela IA (abaixo). Desligado por padrão.
+
+### Dicas do gerente comercial (IA)
+
+Até 3 dicas curtas e práticas para o dia (o que priorizar, como abordar conforme a etapa, argumento de fechamento,
+calendário agrícola do mês), escritas pela persona "Claude, gerente comercial" (sementes de inverno e verão,
+revendas e produtores do PR/SC/MS), no fim do resumo e antes do link. Liga/desliga próprio no painel ("Dicas do
+gerente comercial (IA)"), **desligado por padrão**, no mesmo `AppConfig` (`managerTips`); configuração antiga sem o
+campo vale desligado. Usa a IA já configurada (`AI_PROVIDER`, `AI_BASE_URL`, `AI_MODEL`, `AI_CHAT_ENABLED`): sem
+migration e sem variável nova. Código em `apps/api/src/services/whatsappDailySummary/dailySummaryTips.ts`.
+
+- **Privacidade (o modelo gratuito registra os dados):** a IA recebe só um código por oportunidade (`C1`…`C12`, na
+  ordem do resumo), a seção, a etapa, o valor, os dias de follow-up vencido, desde o último contato e na etapa, a
+  cultura e os produtos (ofertado e itens), a data da última compra (só nas reativações), a UF, o dia e o mês.
+  Nunca nome, documento, telefone, cidade, região, ids nem o nome do vendedor. O CRM troca os códigos pelos nomes
+  depois da conferência. O prompt de sistema é próprio (não o prompt mestre) e o filtro central da IA continua
+  valendo.
+- **Conferência:** a resposta tem de ser `{"dicas": [...]}` com 1 a 3 textos de até 250 caracteres. Descarta
+  **todas** as dicas se houver código inexistente, preço, valor em reais, percentual, desconto, promoção, brinde,
+  prazo, parcelamento ou condição de pagamento, ou cultura de uma lista fixa (soja, milho, trigo, aveia…) que não
+  esteja nos dados. A assinatura "— Claude, gerente comercial" é posta pelo CRM, não pela IA. Com os nomes, cada
+  dica fica com até 320 caracteres no texto.
+- **Tempo e limite:** as dicas são geradas na montagem do texto de cada vendedor, com orçamento de 8 s (fluxo
+  `daily-summary-tips`). Disjuntor por rodada: a primeira falha da IA (erro, demora, limite, IA desligada) deixa
+  os demais vendedores da rodada sem dicas, sem nova chamada. Vendedor sem itens não chama a IA. Uma chamada por
+  vendedor por dia, no balde `resumo-diario` do teto diário de IA (`ai.usage`, padrão 50); a prévia e o teste
+  contam no teto de quem clicou. Sem dicas, por qualquer motivo, o resumo sai igual e na hora.
+- **Prévia:** mostra o texto com as dicas e a situação (`ok`, `ai_unavailable`, `ai_failed`, `discarded`…).
+- **Log:** `[whatsapp daily summary] tips` só com a situação, o motivo do descarte e contagens (códigos e dicas);
+  os logs `[AI]` existentes só têm números. Nunca o prompt, a resposta ou dados de cliente.
+- **Limitações conhecidas:** os limites do modelo gratuito do OpenRouter (requisições por minuto e por dia) não
+  estão confirmados; um nome comercial de produto inventado pela IA não é detectado (só culturas da lista fixa);
+  "dias na etapa" é aproximado (última troca de etapa no `OpportunityChangeLog`, que a tela de rascunho e a
+  automação não gravam; sem ela, a data de criação). O produto da última compra não existe no CRM e não vai.
 
 ### Trava do destino
 
@@ -471,7 +503,8 @@ a Fase A ligada e configurada.
 
 ### Tela (Configurações → Automações Comerciais)
 
-Ligar/desligar, horário, remetente (com o status da conexão), seções, situação de hoje por vendedor, **Ver
+Ligar/desligar, horário, remetente (com o status da conexão), seções, dicas do gerente comercial (IA), situação de
+hoje por vendedor, **Ver
 prévia** (não envia) e **Enviar teste para mim** (manda o resumo de um vendedor ao celular de quem clicou, pelo
 remetente, marcado `[Teste]`, 1 por minuto). Diretor edita; gerente vê, faz prévia e testa.
 

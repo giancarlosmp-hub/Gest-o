@@ -32,7 +32,7 @@
     "test:proposals-no-response": "npx tsx tests/proposalsNoResponse.test.ts",
     "test:seller-week":"npx tsx tests/sellerWeek.test.ts && npx tsx tests/sellerDashboardLayout.test.ts",
     "test:erp-payment-method-eligibility": "npx tsx tests/erpPaymentMethodEligibility.test.ts",
-    "test:whatsapp-link": "npx tsx tests/whatsappLink.test.ts && npx tsx tests/usersSettingsPage.test.ts && npx tsx tests/myWhatsAppNumberCard.test.ts && npx tsx tests/whatsappTimeline.test.ts && npx tsx tests/unlinkedConversations.test.ts",
+    "test:whatsapp-link": "npx tsx tests/whatsappLink.test.ts && npx tsx tests/usersSettingsPage.test.ts && npx tsx tests/myWhatsAppNumberCard.test.ts && npx tsx tests/whatsappTimeline.test.ts && npx tsx tests/unlinkedConversations.test.ts && npx tsx tests/whatsappDailySummaryTips.test.ts",
     "test:desktop-layout": "node ./scripts/verify-desktop-layout.mjs"
   },
   "dependencies": {
