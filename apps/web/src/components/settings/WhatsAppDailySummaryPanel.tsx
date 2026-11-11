@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   DEFAULT_WHATSAPP_DAILY_SUMMARY_CONFIG,
+  WHATSAPP_DAILY_SUMMARY_TIPS_MODEL_LABELS,
+  WHATSAPP_DAILY_SUMMARY_TIPS_MODELS,
   type WhatsAppDailySummaryConfig,
+  type WhatsAppDailySummaryTipsModel,
   type WhatsAppDailySummaryRunState,
   type WhatsAppDailySummarySections,
   type WhatsAppDailySummarySellerDay,
@@ -82,6 +85,30 @@ export function ManagerTipsOption({ checked, disabled, onChange }: { checked: bo
           das oportunidades (etapa, dias, valor, cultura/produto, última compra e UF), nunca nome, telefone, documento ou
           cidade do cliente. Se a IA falhar, demorar ou a resposta não passar na conferência, o resumo sai sem as dicas.
         </span>
+      </span>
+    </label>
+  );
+}
+
+/** Modelo da Groq para as dicas (só vale com a chave da Groq no servidor; sem ela, a IA do CRM). */
+export function ManagerTipsModelSelect({ value, disabled, onChange }: { value: WhatsAppDailySummaryTipsModel; disabled: boolean; onChange: (model: WhatsAppDailySummaryTipsModel) => void }) {
+  return (
+    <label className="space-y-1 text-sm lg:col-span-2">
+      <span className="font-medium text-slate-700">Modelo das dicas (Groq)</span>
+      <select
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value as WhatsAppDailySummaryTipsModel)}
+        className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 disabled:cursor-not-allowed disabled:bg-slate-100"
+      >
+        {WHATSAPP_DAILY_SUMMARY_TIPS_MODELS.map((model) => (
+          <option key={model} value={model}>
+            {WHATSAPP_DAILY_SUMMARY_TIPS_MODEL_LABELS[model]}
+          </option>
+        ))}
+      </select>
+      <span className="block text-xs text-slate-500">
+        Usado quando a chave da Groq está configurada no servidor. Sem ela, as dicas usam a IA atual do CRM.
       </span>
     </label>
   );
@@ -268,6 +295,13 @@ export default function WhatsAppDailySummaryPanel({ canEdit }: Props) {
             disabled={!editable}
             onChange={(checked) => setConfig((current) => ({ ...current, managerTips: checked }))}
           />
+          {config.managerTips && (
+            <ManagerTipsModelSelect
+              value={config.managerTipsModel}
+              disabled={!editable}
+              onChange={(model) => setConfig((current) => ({ ...current, managerTipsModel: model }))}
+            />
+          )}
 
           {canEdit ? (
             <div className="space-y-2 lg:col-span-2">

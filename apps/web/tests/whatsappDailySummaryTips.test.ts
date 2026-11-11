@@ -18,11 +18,12 @@ const testPlugin: Plugin = {
     return [
       'import { createElement } from "react";',
       'import { renderToStaticMarkup } from "react-dom/server";',
-      'import { ManagerTipsOption, TipsStatusNote } from "/src/components/settings/WhatsAppDailySummaryPanel.tsx";',
+      'import { ManagerTipsModelSelect, ManagerTipsOption, TipsStatusNote } from "/src/components/settings/WhatsAppDailySummaryPanel.tsx";',
       'export { DEFAULT_WHATSAPP_DAILY_SUMMARY_CONFIG, WHATSAPP_DAILY_SUMMARY_TIPS_MESSAGES } from "@salesforce-pro/shared";',
       "const noop = () => undefined;",
       "export const renderOption = (checked, disabled) => renderToStaticMarkup(createElement(ManagerTipsOption, { checked, disabled, onChange: noop }));",
-      "export const renderNote = (tips) => renderToStaticMarkup(createElement(TipsStatusNote, { tips }));"
+      "export const renderNote = (tips) => renderToStaticMarkup(createElement(TipsStatusNote, { tips }));",
+      "export const renderModel = (value, disabled) => renderToStaticMarkup(createElement(ManagerTipsModelSelect, { value, disabled, onChange: noop }));"
     ].join("\n");
   }
 };
@@ -58,6 +59,7 @@ try {
   const renderOption = mod.renderOption as (checked: boolean, disabled: boolean) => string;
   const renderNote = mod.renderNote as (tips: unknown) => string;
   const messages = mod.WHATSAPP_DAILY_SUMMARY_TIPS_MESSAGES as Record<string, string>;
+  const renderModel = mod.renderModel as (value: string, disabled: boolean) => string;
 
   // 1) Desligadas por padrão; a opção explica o que vai para a IA e o que acontece se ela falhar.
   assert.equal(mod.DEFAULT_WHATSAPP_DAILY_SUMMARY_CONFIG.managerTips, false);
@@ -69,6 +71,15 @@ try {
   assert.doesNotMatch(off, /checked=""/);
   assert.match(renderOption(true, false), /checked=""/);
   assert.match(renderOption(true, true), /disabled=""/, "gerente só vê");
+
+  // 1b) Modelo da Groq: padrão 120b, 20b como alternativa; sem a chave da Groq, a IA atual do CRM.
+  assert.equal(mod.DEFAULT_WHATSAPP_DAILY_SUMMARY_CONFIG.managerTipsModel, "openai/gpt-oss-120b");
+  const model = renderModel("openai/gpt-oss-20b", false);
+  assert.match(textOf(model), /Modelo das dicas \(Groq\)/);
+  assert.match(model, /<option value="openai\/gpt-oss-120b">GPT-OSS 120B \(padrão, mais qualidade\)<\/option>/);
+  assert.match(model, /<option value="openai\/gpt-oss-20b" selected="">GPT-OSS 20B/);
+  assert.match(textOf(model), /Sem ela, as dicas usam a IA atual do CRM/);
+  assert.match(renderModel("openai/gpt-oss-120b", true), /disabled=""/, "gerente só vê");
 
   // 2) Situação na prévia: nada quando desligadas; verde quando geradas; âmbar quando o resumo sai sem dicas.
   assert.equal(renderNote(undefined), "");
