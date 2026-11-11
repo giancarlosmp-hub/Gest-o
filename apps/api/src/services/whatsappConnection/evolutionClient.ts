@@ -1,12 +1,16 @@
 import { env } from "../../config/env.js";
 import { EVOLUTION_MESSAGE_WEBHOOK_EVENTS, EVOLUTION_WEBHOOK_SECRET_HEADER, EVOLUTION_WEBHOOK_URL, evolutionWebhookEvents } from "./config.js";
 import { isCrmUserRecipient, type CrmUserRecipient } from "./crmUserRecipient.js";
+import { isClientRecipient, type ClientRecipient } from "../whatsappConversations/clientRecipient.js";
 
 // Cliente mínimo da Evolution API v2.3.7: criar instância (com QR), consultar estado, ler o número
 // conectado, apagar a instância, (Fase B) ajustar os eventos do webhook da instância e baixar o áudio a
-// transcrever e (Fase D) enviar texto. O único envio é sendTextToCrmUser, que só aceita como destino o
-// celular de um usuário ativo do CRM (crmUserRecipient.ts): nunca um número solto, nunca um cliente.
-// Nada aqui grava log: QR, chave, número, texto e mídia nunca passam pelo logger.
+// transcrever e enviar texto. Há só dois envios, cada um com o próprio tipo de destino, emitido por um
+// único módulo e recusado pelo outro método:
+// - sendTextToCrmUser (Fase D, resumo diário): só o celular de um usuário ativo do CRM (crmUserRecipient.ts);
+// - sendTextToClient (Fase C, conversa pelo CRM): só o telefone de um cliente, pelo número do próprio
+//   remetente (whatsappConversations/clientRecipient.ts).
+// Nunca um número solto. Nada aqui grava log: QR, chave, número, texto e mídia nunca passam pelo logger.
 
 export class EvolutionUnavailableError extends Error {
   /** A conexão nem chegou a ser aberta (recusada, nome não resolvido): a requisição não saiu. */
@@ -30,8 +34,17 @@ export type EvolutionSendResult =
   | { kind: "not_sent"; code: string; retryable: boolean }
   | { kind: "uncertain"; code: string };
 
+/** Envio ao cliente (Fase C): o id devolvido pelo Evolution (key.id) casa a mensagem com o eco do webhook. */
+export type EvolutionClientSendResult =
+  | { kind: "sent"; messageId: string }
+  | { kind: "not_sent"; code: string; retryable: boolean }
+  | { kind: "uncertain"; code: string };
+
 /** Limite do texto enviado (o resumo fica bem abaixo disso). */
 export const MAX_SEND_TEXT_LENGTH = 8_000;
+
+/** Envio ao cliente (Fase C): termina antes do timeout da requisição da API (15 s) para nunca responder 408 com o envio em curso. */
+export const CLIENT_SEND_TIMEOUT_MS = 10_000;
 
 const CONNECT_REFUSED_CODES = new Set(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN"]);
 
@@ -45,6 +58,8 @@ type EvolutionClientOptions = {
   timeoutMs?: number;
   /** Envio de texto: o Evolution espera o "digitando" (delay) antes de mandar. */
   sendTimeoutMs?: number;
+  /** Envio ao cliente (Fase C): abaixo do timeout da requisição da API (15 s), para nunca responder antes do Evolution. */
+  clientSendTimeoutMs?: number;
   /** A criação espera o QR (cerca de 5 s no Evolution). */
   createTimeoutMs?: number;
   /** Download de mídia (o Evolution tenta de novo depois de 5 s). */
@@ -223,14 +238,26 @@ export class EvolutionClient {
   async sendTextToCrmUser(instanceName: string, recipient: CrmUserRecipient, text: string): Promise<EvolutionSendResult> {
     if (!isCrmUserRecipient(recipient)) throw new Error("whatsapp_recipient_not_crm_user");
     if (typeof text !== "string" || !text.trim() || text.length > MAX_SEND_TEXT_LENGTH) throw new Error("whatsapp_text_invalid");
+    const result = await this.#postSendText(instanceName, recipient.phone, text, this.options.sendTimeoutMs ?? 20_000);
+    return result.kind === "sent" ? { kind: "sent" } : result;
+  }
+
+  /**
+   * Fase C: envia um texto ao telefone de um cliente, pela instância do próprio remetente. O destino (com a
+   * instância) tem de ser o objeto emitido por resolveClientRecipient; qualquer outra coisa, inclusive o
+   * destino do resumo diário, é recusada antes da rede. Devolve o id da mensagem. Nunca grava log.
+   */
+  async sendTextToClient(recipient: ClientRecipient, text: string): Promise<EvolutionClientSendResult> {
+    if (!isClientRecipient(recipient)) throw new Error("whatsapp_recipient_not_client");
+    if (typeof text !== "string" || !text.trim() || text.length > MAX_SEND_TEXT_LENGTH) throw new Error("whatsapp_text_invalid");
+    return this.#postSendText(recipient.instanceName, recipient.phone, text, this.options.clientSendTimeoutMs ?? CLIENT_SEND_TIMEOUT_MS);
+  }
+
+  /** POST /message/sendText: privado de verdade (fora da classe não existe), chamado só pelos dois envios acima. */
+  async #postSendText(instanceName: string, phone: string, text: string, timeoutMs: number): Promise<EvolutionClientSendResult> {
     let response: { status: number; json: any };
     try {
-      response = await this.request(
-        "POST",
-        `/message/sendText/${encodeURIComponent(instanceName)}`,
-        { number: recipient.phone, text, delay: 1_200, linkPreview: false },
-        this.options.sendTimeoutMs ?? 20_000
-      );
+      response = await this.request("POST", `/message/sendText/${encodeURIComponent(instanceName)}`, { number: phone, text, delay: 1_200, linkPreview: false }, timeoutMs);
     } catch (error) {
       if (!(error instanceof EvolutionUnavailableError)) throw error;
       if (error.connectRefused) return { kind: "not_sent", code: "connection_refused", retryable: true };
@@ -238,7 +265,10 @@ export class EvolutionClient {
       return { kind: "uncertain", code: error.reason };
     }
     const { status, json } = response;
-    if (status >= 200 && status < 300) return typeof json?.key?.id === "string" && json.key.id ? { kind: "sent" } : { kind: "uncertain", code: "no_message_id" };
+    if (status >= 200 && status < 300) {
+      const messageId = json?.key?.id;
+      return typeof messageId === "string" && messageId ? { kind: "sent", messageId } : { kind: "uncertain", code: "no_message_id" };
+    }
     if (isMissingInstance(status, json)) return { kind: "not_sent", code: "instance_not_found", retryable: false };
     if (isNumberNotOnWhatsApp(status, json)) return { kind: "not_sent", code: "number_not_on_whatsapp", retryable: false };
     return { kind: "uncertain", code: `http_${status}` };

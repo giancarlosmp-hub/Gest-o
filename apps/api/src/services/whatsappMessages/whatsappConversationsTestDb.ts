@@ -1,8 +1,10 @@
-import type { PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 
 // Apoio dos testes da Fase B2 do WhatsApp (não é carregado pela aplicação): Prisma em memória para usuários,
 // tenant, clientes, oportunidades (com itens e histórico de alterações), contatos, índice de telefones, conversas, mensagens e AppConfig, com um
-// filtro "where" pequeno (igualdade, null, in, not, gte/gt/lt/lte, OR, relações por id). Só dados fictícios.
+// filtro "where" pequeno (igualdade, null, in, not, gte/gt/lt/lte, OR, relações por id). Chaves únicas compostas
+// (`a_b_c: {...}`) viram igualdade campo a campo; conversa e mensagem do Evolution são únicas como no banco
+// (P2002); `{ increment }` soma. Só dados fictícios.
 
 type Row = Record<string, any>;
 type Relation = { model: string; resolve: (row: Row) => Row | null | undefined };
@@ -126,32 +128,62 @@ export function createWhatsAppConversationsTestDb(prisma: PrismaClient) {
     return rows.map((row) => project(model, row, args.select, args.include)!);
   }
 
+  // Unicidade do banco nas conversas e mensagens (conflito = P2002, como o Prisma).
+  const uniqueKeys: Record<string, string[]> = {
+    communicationConversation: ["provider", "externalAccountId", "externalConversationKey"],
+    communicationMessage: ["provider", "externalAccountId", "externalMessageId"]
+  };
+  const assertUnique = (model: string, data: Row) => {
+    const fields = uniqueKeys[model];
+    if (!fields || fields.some((field) => data[field] === undefined)) return;
+    if (tables[model].some((row) => fields.every((field) => same(row[field], data[field])))) {
+      throw new Prisma.PrismaClientKnownRequestError("Unique constraint failed (teste)", { code: "P2002", clientVersion: "teste" });
+    }
+  };
+  // `provider_externalAccountId_externalMessageId: {...}` (findUnique/update do Prisma) vira igualdade campo a campo.
+  const flatWhere = (model: string, where: Row = {}) => {
+    const out: Row = {};
+    for (const [key, value] of Object.entries(where)) {
+      if (key.includes("_") && value && typeof value === "object" && !(value instanceof Date) && !relations[model]?.[key]) Object.assign(out, value);
+      else out[key] = value;
+    }
+    return out;
+  };
+  const applyData = (row: Row, data: Row) => {
+    for (const [key, value] of Object.entries(data)) {
+      if (value && typeof value === "object" && !(value instanceof Date) && "increment" in value) row[key] = (Number(row[key]) || 0) + Number(value.increment);
+      else row[key] = value;
+    }
+    row.updatedAt = new Date();
+  };
+
   const calls: Array<{ model: string; method: string; args: Row }> = [];
   const install = (model: string) => {
     const target = (prisma as any)[model];
     const log = (method: string, args: Row) => calls.push({ model, method, args });
     target.findMany = async (args: Row = {}) => (log("findMany", args), findMany(model, args));
     target.findFirst = async (args: Row = {}) => (log("findFirst", args), findMany(model, { ...args, take: 1 })[0] ?? null);
-    target.findUnique = async (args: Row = {}) => (log("findUnique", args), findMany(model, { ...args, take: 1 })[0] ?? null);
+    target.findUnique = async (args: Row = {}) => (log("findUnique", args), findMany(model, { ...args, where: flatWhere(model, args.where), take: 1 })[0] ?? null);
     target.count = async (args: Row = {}) => (log("count", args), tables[model].filter((row) => matches(model, row, args.where)).length);
     target.create = async (args: Row) => {
       log("create", args);
       const now = new Date();
+      assertUnique(model, args.data);
       const row = { id: `${model}-${++sequence}`, createdAt: now, updatedAt: now, ...args.data };
       tables[model].push(row);
       return project(model, row, args.select);
     };
     target.update = async (args: Row) => {
       log("update", args);
-      const row = tables[model].find((item) => matches(model, item, args.where));
+      const row = tables[model].find((item) => matches(model, item, flatWhere(model, args.where)));
       if (!row) throw new Error("registro inexistente");
-      Object.assign(row, args.data, { updatedAt: new Date() });
+      applyData(row, args.data);
       return project(model, row, args.select);
     };
     target.updateMany = async (args: Row) => {
       log("updateMany", args);
       const rows = tables[model].filter((row) => matches(model, row, args.where));
-      for (const row of rows) Object.assign(row, args.data, { updatedAt: new Date() });
+      for (const row of rows) applyData(row, args.data);
       return { count: rows.length };
     };
     target.deleteMany = async (args: Row = {}) => {
