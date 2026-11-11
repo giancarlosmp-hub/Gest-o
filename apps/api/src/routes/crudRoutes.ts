@@ -29,6 +29,7 @@ import {
   weeklyVisitMinimumSchema,
   planningVisitRadiusSchema,
   planningVisitRulesSchema,
+  commercialPolicySchema,
   arePlanningVisitTiersOrdered,
   PLANNING_VISIT_TIERS_ORDER_MESSAGE,
   commercialAutomationsConfigSchema,
@@ -132,6 +133,7 @@ import { getCommercialInsights, invalidateCommercialInsightsCache } from "../ser
 import { timelineIntelligenceService } from "../services/timelineIntelligenceService.js";
 import { planningIntelligenceService } from "../services/planningIntelligenceService.js";
 import { getPlanningVisitRadiusKm, parsePlanningVisitRadiusKm, PLANNING_VISIT_RADIUS_KEY } from "../services/planningVisitRadius.js";
+import { getCommercialPolicy, saveCommercialPolicy } from "../services/commercialPolicyConfig.js";
 import { getPlanningVisitRules, PLANNING_VISIT_OPPORTUNITY_KEY, PLANNING_VISIT_TIER1_KEY, PLANNING_VISIT_TIER2_KEY } from "../services/planningVisitRules.js";
 import { agendaIntelligenceService } from "../services/agendaIntelligenceService.js";
 import { getErpAutomaticSyncRuntimeStatus, refreshErpAutomaticSyncConfig, runAutomaticErpSyncNow, setErpAutomaticSyncEnabled } from "../jobs/erpSyncScheduler.js";
@@ -10473,6 +10475,15 @@ router.put("/settings/planning-visit-rules", authorize("diretor", "gerente"), va
   ];
   await prisma.$transaction(entries.map(([key, number]) => prisma.appConfig.upsert({ where: { key }, update: { value: String(number) }, create: { key, value: String(number) }, select: { value: true } })));
   return res.json(await getPlanningVisitRules());
+});
+
+// Política comercial: todos os perfis leem (a tela de itens precisa do limite e do aviso); só o diretor altera.
+router.get("/settings/commercial-policy", authorize("diretor", "gerente", "vendedor"), async (_req, res) => {
+  return res.json(await getCommercialPolicy());
+});
+
+router.put("/settings/commercial-policy", authorize("diretor"), validateBody(commercialPolicySchema), async (req, res) => {
+  return res.json(await saveCommercialPolicy(req.body));
 });
 
 router.get("/ai/commercial-insights", authorize("diretor", "gerente"), async (req, res) => {
