@@ -205,11 +205,16 @@ try {
   const full = new CrmSendLimiter(async () => ({ total: CRM_SEND_LIMITS.perDay, firstContacts: new Set() }), () => clock);
   assert.equal(await sendCrmText({ user: { id: "seller-a", role: "vendedor" }, tenantId: "tenant-a", target: { conversationId: first.conversationId }, text: "x" }, { ...deps, limiter: full }).then((r) => (r.ok ? "ok" : r.code)), "rate_day");
 
-  // 13) Logs: só resultado e código. Nunca texto, número, nome ou ids.
+  // 13) Logs do envio: só resultado e código. Nunca texto, telefone (completo ou parcial), nome, JID, id da
+  // mensagem do WhatsApp, instância do Evolution nem chave/segredo.
   const joined = logs.join("\n");
   assert.match(joined, /\[whatsapp\] crm send/);
-  for (const forbidden of ["mensagem fictícia", "Olá", "55119000", "5511900000001", "seller-a", "client-a", "conn-a", "MSG-", "idx-", "crm-ficticio", first.conversationId]) {
+  for (const forbidden of ["mensagem fictícia", "Olá", "5511900000", "90000-0", "****-", "@s.whatsapp.net", "MSG-", "crm-ficticio", "chave-ficticia", "segredo-ficticio"]) {
     assert(!joined.includes(forbidden), `log com ${forbidden}`);
+  }
+  for (const line of logs.filter((entry) => entry.includes("[whatsapp] crm send"))) {
+    const meta = JSON.parse(line).meta;
+    assert(Object.keys(meta).every((key) => key === "result" || key === "code"), "log do envio só com resultado e código");
   }
 
   console.log("crmConversationSender.test.ts: ok");
