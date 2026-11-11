@@ -1,4 +1,4 @@
-import { Bot, BrainCircuit, Database, Leaf, MapPinned, Settings2, Target, Users } from "lucide-react";
+import { BadgePercent, Bot, BrainCircuit, Database, Leaf, MapPinned, Settings2, Target, Users } from "lucide-react";
 import { Navigate, useLocation, useSearchParams } from "react-router-dom";
 import { useMemo } from "react";
 import { useAuth } from "../context/AuthContext";
@@ -11,11 +11,12 @@ import TechnicalCulturesPanel from "../components/settings/TechnicalCulturesPane
 import ErpIntegrationPanel from "../components/settings/ErpIntegrationPanel";
 import SellerTerritoriesPanel from "../components/settings/SellerTerritoriesPanel";
 import CommercialAutomationsPanel from "../components/settings/CommercialAutomationsPanel";
+import CommercialPolicyPanel from "../components/settings/CommercialPolicyPanel";
 import WhatsAppDailySummaryPanel from "../components/settings/WhatsAppDailySummaryPanel";
 import KnowledgeBasePanel from "../components/settings/KnowledgeBasePanel";
 import { buildUserAdminFields } from "../components/settings/userAdminFields";
 
-type SettingsSection = "kpis" | "discipline" | "users" | "technical-cultures" | "knowledge-base" | "erp-integration" | "seller-territories" | "commercial-automations";
+type SettingsSection = "kpis" | "discipline" | "users" | "technical-cultures" | "knowledge-base" | "erp-integration" | "seller-territories" | "commercial-automations" | "commercial-policy";
 
 const SETTINGS_SECTIONS: Array<{ id: SettingsSection; label: string; description: string; icon: typeof Target }> = [
   {
@@ -61,6 +62,12 @@ const SETTINGS_SECTIONS: Array<{ id: SettingsSection; label: string; description
     icon: Bot
   },
   {
+    id: "commercial-policy",
+    label: "Política Comercial",
+    description: "Preço do ERP travado, desconto máximo por perfil e aviso ao dar desconto.",
+    icon: BadgePercent
+  },
+  {
     id: "users",
     label: "Usuários",
     description: "Gerencie cadastro, permissões e manutenção de contas da operação comercial.",
@@ -80,6 +87,7 @@ function getSectionFromUrl(sectionParam: string | null, hash: string): SettingsS
   if (normalizedSection === "erp-integration" || normalizedSection === "integracao-erp") return "erp-integration";
   if (normalizedSection === "seller-territories" || normalizedSection === "territorios-comerciais") return "seller-territories";
   if (normalizedSection === "commercial-automations" || normalizedSection === "automacoes-comerciais") return "commercial-automations";
+  if (normalizedSection === "commercial-policy" || normalizedSection === "politica-comercial") return "commercial-policy";
 
   if (normalizedHash === "#usuarios" || normalizedHash === "#users") return "users";
   if (normalizedHash === "#kpis" || normalizedHash === "#kpis-atividades") return "kpis";
@@ -89,6 +97,7 @@ function getSectionFromUrl(sectionParam: string | null, hash: string): SettingsS
   if (normalizedHash === "#integracao-erp" || normalizedHash === "#erp-integration") return "erp-integration";
   if (normalizedHash === "#territorios-comerciais" || normalizedHash === "#seller-territories") return "seller-territories";
   if (normalizedHash === "#automacoes-comerciais" || normalizedHash === "#commercial-automations") return "commercial-automations";
+  if (normalizedHash === "#politica-comercial" || normalizedHash === "#commercial-policy") return "commercial-policy";
 
   return "kpis";
 }
@@ -132,7 +141,7 @@ export default function SettingsPage() {
       </div>
 
       <div className="rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
-        <nav className="grid gap-2 md:grid-cols-2 xl:grid-cols-8" aria-label="Seções de configurações">
+        <nav className="grid gap-2 md:grid-cols-2 xl:grid-cols-9" aria-label="Seções de configurações">
           {SETTINGS_SECTIONS.map((section) => {
             const Icon = section.icon;
             const isActive = activeSection === section.id;
@@ -186,6 +195,8 @@ export default function SettingsPage() {
           <CommercialAutomationsPanel canEdit={user.role === "diretor"} />
           <WhatsAppDailySummaryPanel canEdit={user.role === "diretor"} />
         </div>
+      ) : activeSection === "commercial-policy" ? (
+        <CommercialPolicyPanel canEdit={user.role === "diretor"} />
       ) : (
         <div id="usuarios" className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
           <CrudSimplePage
