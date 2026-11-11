@@ -43,3 +43,30 @@ export const loadErpUnitPrices = async (productIds: Array<string | null | undefi
 };
 
 export const ERP_PRICE_DIFFERS_LABEL = "Preço diferente do ERP atual";
+
+type ItemForErpOrder = { lineNumber: number; productId: string | null; unitPrice: number; discountType: string; discountTotal: number };
+
+const orderBlocked = (message: string) => Object.assign(new Error(message), { status: 400 });
+const linesOf = (items: ItemForErpOrder[]) => items.map((item) => item.lineNumber).join(", ");
+
+// Antes do pedido ERP: a tabela do pedido é a que precificou os itens, todo item está no preço atual do ERP e nenhum
+// item antigo tem desconto em R$. O ERP valida o próprio limite de desconto; o CRM não conta com ele.
+export const assertOpportunityItemsMatchErp = async (
+  opportunity: { priceTableCode?: string | null; items: ItemForErpOrder[] },
+  orderPriceTableCode: string | null | undefined
+) => {
+  const itemsTable = normalizeOpportunityPriceTableCode(opportunity.priceTableCode);
+  const orderTable = normalizeOpportunityPriceTableCode(orderPriceTableCode);
+  if (orderTable !== itemsTable) {
+    throw orderBlocked(`Tabela de preço do pedido (${orderTable}) diferente da tabela que precificou os itens (${itemsTable}). Gere o pedido com a tabela ${itemsTable}.`);
+  }
+  const erpPrices = await loadErpUnitPrices(opportunity.items.map((item) => item.productId), itemsTable);
+  const stale = opportunity.items.filter((item) => isErpPriceDifferent(item.unitPrice, item.productId ? erpPrices.get(item.productId) : undefined));
+  if (stale.length) {
+    throw orderBlocked(`${ERP_PRICE_DIFFERS_LABEL} no item ${linesOf(stale)}: edite o item para o preço voltar ao do ERP (item sem produto precisa ser excluído) antes de gerar o pedido.`);
+  }
+  const valueDiscount = opportunity.items.filter((item) => item.discountType === "value" && Number(item.discountTotal) > 0);
+  if (valueDiscount.length) {
+    throw orderBlocked(`Item ${linesOf(valueDiscount)} com desconto em R$: edite o item e informe o desconto em % antes de gerar o pedido.`);
+  }
+};
