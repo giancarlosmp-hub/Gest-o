@@ -21,6 +21,9 @@ export type ConnectedInstance = { userId: string; account: string };
 
 export type LinkStatus = "linked" | "unlinked" | "ambiguous";
 
+/** Quem vinculou: a ingestão pelo telefone ("auto"), a fila ("manual") ou o envio pelo CRM ("crm", Fase C). */
+export type LinkSource = "auto" | "manual" | "crm";
+
 export type ConversationRow = {
   id: string;
   clientId: string | null;
@@ -38,7 +41,7 @@ export type ConversationCreate = {
   clientId: string | null;
   tenantId: string | null;
   linkStatus: LinkStatus;
-  linkSource: "auto" | null;
+  linkSource: LinkSource | null;
   linkedAt: Date | null;
   unlinkedExpiresAt: Date | null;
   contactName: string | null;
@@ -49,7 +52,7 @@ export type ConversationUpdate = Partial<{
   clientId: string | null;
   tenantId: string | null;
   linkStatus: LinkStatus;
-  linkSource: "auto" | null;
+  linkSource: LinkSource | null;
   linkedAt: Date | null;
   unlinkedExpiresAt: Date | null;
   contactName: string | null;
@@ -58,6 +61,8 @@ export type ConversationUpdate = Partial<{
   lastInboundAt: Date;
   lastOutboundAt: Date;
   previewSanitized: string;
+  /** Não lidas do dono do número (Fase C): soma na recebida, zera na enviada (app ou CRM) e ao abrir. */
+  unreadCount: number | { increment: number };
 }>;
 
 export type MessageCreate = {
