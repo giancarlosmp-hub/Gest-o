@@ -1776,3 +1776,15 @@ limite da IA nunca atrasa nem bloqueia o envio: o resumo sai sem o bloco.
 
 Pendências registradas em `TD-WHATSAPP-DAILY-SUMMARY` ([TECH_DEBT.md](TECH_DEBT.md)): limites do modelo gratuito do
 OpenRouter não confirmados; nome comercial de produto inventado não é detectado; "dias na etapa" é aproximado.
+
+# Dicas do resumo diário na Groq (11/11/2026)
+
+Só o fluxo `daily-summary-tips` passou para a Groq (plano gratuito); o resto da IA do CRM continua no provedor de
+`AI_*`. Decisões aprovadas: reaproveitar a chave e o endereço da transcrição (`WHATSAPP_TRANSCRIPTION_API_KEY`,
+`WHATSAPP_TRANSCRIPTION_BASE_URL`, mesma conta Groq) por `groqTextConfig`, sem variável nova nem mudança no
+Compose; modelo no `AppConfig` do resumo (`openai/gpt-oss-120b` padrão, `openai/gpt-oss-20b` no painel); ramo
+`groq` no provedor compatível com OpenAI (JSON, `reasoning_effort: "low"`, `include_reasoning: false`,
+`max_completion_tokens`), sem mudar o OpenRouter; 429 sem nova tentativa dentro do orçamento de 8 s (o resumo sai
+sem dicas); sem a chave da Groq, as dicas usam o provedor atual. Log com o provedor e o modelo usados. Detalhes em
+[communications/whatsapp-evolution.md](communications/whatsapp-evolution.md#dicas-do-gerente-comercial-ia);
+pendências (limites e Zero Data Retention da Groq a confirmar na conta) em `TD-WHATSAPP-DAILY-SUMMARY`.

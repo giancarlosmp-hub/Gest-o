@@ -1707,16 +1707,23 @@ Pendente:
   não o inicia.
 - **Dicas do gerente comercial (IA)**
   ([detalhes](communications/whatsapp-evolution.md#dicas-do-gerente-comercial-ia)), desligadas por padrão:
-  - Limites do modelo gratuito do OpenRouter (requisições por minuto e por dia) **não confirmados**: conferir no
-    painel do OpenRouter antes de ligar. O uso esperado é 1 chamada por vendedor por dia, com disjuntor por rodada.
+  - Com a chave da Groq as dicas vão à Groq (11/11/2026). Limites do plano gratuito da Groq **não confirmados** pela
+    página oficial (a tabela publicada para gpt-oss: 30 por minuto, 1.000 por dia, 8 mil tokens por minuto, 200 mil
+    por dia): conferir em Settings → Limits da conta Groq. Sem a chave, valem os do modelo gratuito do OpenRouter,
+    também não confirmados. O uso esperado é 1 chamada por vendedor por dia, com disjuntor por rodada.
+  - Zero Data Retention da Groq: a ativar em Data Controls, se o plano gratuito permitir (a página diz "all
+    customers", sem citar o plano).
+  - O teto de saída das dicas (600) inclui o raciocínio do gpt-oss se a Groq o contar (a documentação não diz); com
+    `reasoning_effort: "low"` o risco de corte (`ai_truncated`) é menor, mas só o log `[AI] chat-success`
+    (`finishReason`, `reasoningUsage`) confirma.
   - Nome comercial de produto inventado pela IA **não é detectado**: a conferência só pega culturas de uma lista fixa
     fora dos dados, preço/desconto/prazo e código inexistente.
   - "Dias na etapa" é **aproximado**: não há coluna com a data da troca de etapa; usa a última troca registrada no
     `OpportunityChangeLog` (a tela de rascunho e a automação não gravam) ou, sem ela, a criação.
   - O produto da última compra não existe no CRM (`Sale` não tem cliente nem produto); a reativação vai só com a
     data.
-  - Os testes do resumo diário da API (`test:whatsapp-daily-summary:unit`) não rodam no CI hoje; só o teste da tela
-    (`test:whatsapp-link`).
+  - Os testes do resumo diário da API (`test:whatsapp-daily-summary:unit`) rodam no CI dentro de
+    `test:route-authorization`; o teste da tela roda em `test:whatsapp-link`.
 
 ### TD-TIMELINE-EVENTS-OWNER-FILTER — histórico some quando o cliente muda de vendedor
 

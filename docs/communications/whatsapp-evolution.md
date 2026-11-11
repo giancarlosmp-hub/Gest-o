@@ -448,10 +448,23 @@ Até 3 dicas curtas e práticas para o dia (o que priorizar, como abordar confor
 calendário agrícola do mês), escritas pela persona "Claude, gerente comercial" (sementes de inverno e verão,
 revendas e produtores do PR/SC/MS), no fim do resumo e antes do link. Liga/desliga próprio no painel ("Dicas do
 gerente comercial (IA)"), **desligado por padrão**, no mesmo `AppConfig` (`managerTips`); configuração antiga sem o
-campo vale desligado. Usa a IA já configurada (`AI_PROVIDER`, `AI_BASE_URL`, `AI_MODEL`, `AI_CHAT_ENABLED`): sem
-migration e sem variável nova. Código em `apps/api/src/services/whatsappDailySummary/dailySummaryTips.ts`.
+campo vale desligado. Sem migration e sem variável nova. Código em
+`apps/api/src/services/whatsappDailySummary/dailySummaryTips.ts`.
 
-- **Privacidade (o modelo gratuito registra os dados):** a IA recebe só um código por oportunidade (`C1`…`C12`, na
+- **Provedor (11/11/2026):** com a chave da Groq configurada, as dicas vão à **Groq** (plano gratuito), e só elas: o
+  resto da IA do CRM continua no provedor de `AI_*`. A chave e o endereço são os da transcrição dos áudios
+  (`WHATSAPP_TRANSCRIPTION_API_KEY` e `WHATSAPP_TRANSCRIPTION_BASE_URL`, mesma conta Groq), lidos por
+  `groqTextConfig` (`apps/api/src/services/ai/groqTextConfig.ts`); basta a chave existir, a transcrição não
+  precisa estar ligada. O modelo fica no `AppConfig` do resumo (`managerTipsModel`): `openai/gpt-oss-120b`
+  (padrão) ou `openai/gpt-oss-20b`, escolhido no painel; configuração antiga sem o campo, ou com modelo fora da
+  lista, vale o padrão. Na Groq vão `response_format` JSON, `reasoning_effort: "low"`, `include_reasoning: false`
+  e `max_completion_tokens`; o corpo enviado ao OpenRouter não mudou. **Sem a chave da Groq**, as dicas usam o
+  provedor de `AI_*`, como antes. `AI_CHAT_ENABLED`, o filtro central, o teto diário (mesmo `AiUsageLimiter`) e o
+  orçamento de 8 s valem igual nos dois casos. Limites da Groq são por organização e por modelo: o whisper da
+  transcrição não divide a cota dos modelos de texto.
+
+- **Privacidade (o modelo gratuito do OpenRouter registra os dados; a Groq, por padrão, não guarda as requisições,
+  mas pode registrá-las por até 30 dias para investigar abuso ou falha, salvo com Zero Data Retention):** a IA recebe só um código por oportunidade (`C1`…`C12`, na
   ordem do resumo), a seção, a etapa, o valor, os dias de follow-up vencido, desde o último contato e na etapa, a
   cultura e os produtos (ofertado e itens), a data da última compra (só nas reativações), a UF, o dia e o mês.
   Nunca nome, documento, telefone, cidade, região, ids nem o nome do vendedor. O CRM troca os códigos pelos nomes
@@ -464,14 +477,18 @@ migration e sem variável nova. Código em `apps/api/src/services/whatsappDailyS
   dica fica com até 320 caracteres no texto.
 - **Tempo e limite:** as dicas são geradas na montagem do texto de cada vendedor, com orçamento de 8 s (fluxo
   `daily-summary-tips`). Disjuntor por rodada: a primeira falha da IA (erro, demora, limite, IA desligada) deixa
-  os demais vendedores da rodada sem dicas, sem nova chamada. Vendedor sem itens não chama a IA. Uma chamada por
+  os demais vendedores da rodada sem dicas, sem nova chamada. Um 429 (limite) não tem nova tentativa nem espera
+  o `retry-after`: o resumo sai sem as dicas. Vendedor sem itens não chama a IA. Uma chamada por
   vendedor por dia, no balde `resumo-diario` do teto diário de IA (`ai.usage`, padrão 50); a prévia e o teste
   contam no teto de quem clicou. Sem dicas, por qualquer motivo, o resumo sai igual e na hora.
 - **Prévia:** mostra o texto com as dicas e a situação (`ok`, `ai_unavailable`, `ai_failed`, `discarded`…).
-- **Log:** `[whatsapp daily summary] tips` só com a situação, o motivo do descarte e contagens (códigos e dicas);
+- **Log:** `[whatsapp daily summary] tips` só com a situação, o motivo do descarte, contagens (códigos e dicas) e o
+  provedor e o modelo usados (`provider`, `model`);
   os logs `[AI]` existentes só têm números. Nunca o prompt, a resposta ou dados de cliente.
-- **Limitações conhecidas:** os limites do modelo gratuito do OpenRouter (requisições por minuto e por dia) não
-  estão confirmados; um nome comercial de produto inventado pela IA não é detectado (só culturas da lista fixa);
+- **Limitações conhecidas:** os limites do plano gratuito da Groq não estão confirmados pela página oficial (a tabela
+  publicada para gpt-oss é 30 por minuto, 1.000 por dia, 8 mil tokens por minuto e 200 mil por dia; conferir em
+  Settings → Limits da conta); sem a chave da Groq, valem os limites, também não confirmados, do modelo gratuito do
+  OpenRouter; um nome comercial de produto inventado pela IA não é detectado (só culturas da lista fixa);
   "dias na etapa" é aproximado (última troca de etapa no `OpportunityChangeLog`, que a tela de rascunho e a
   automação não gravam; sem ela, a data de criação). O produto da última compra não existe no CRM e não vai.
 
