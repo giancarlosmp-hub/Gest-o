@@ -10,7 +10,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test:responsive": "node ./scripts/verify-mobile-layout.mjs && npx tsx tests/territoryMapRules.test.ts && npx tsx tests/territoriesMobileLayout.test.ts",
     "test:territory-map": "npx tsx tests/territoryMapRules.test.ts && npx tsx tests/territoriesMobileLayout.test.ts",
-    "test:opportunity-quick-action": "npx tsx tests/opportunityQuickAction.test.ts && npx tsx tests/opportunitiesMobileLayout.test.ts",
+    "test:opportunity-quick-action": "npx tsx tests/opportunityQuickAction.test.ts && npx tsx tests/opportunitiesMobileLayout.test.ts && npx tsx tests/commercialPolicy.test.ts",
     "test:opportunities-mobile": "npx tsx tests/opportunitiesMobileLayout.test.ts",
     "test:orders": "npx tsx tests/orderPresentation.test.ts && npx tsx tests/ordersErpMobileLayout.test.ts && npx tsx tests/erpIntegrationPanelSellerDiagnostics.test.ts",
     "test:orders-erp-mobile": "npx tsx tests/ordersErpMobileLayout.test.ts",
