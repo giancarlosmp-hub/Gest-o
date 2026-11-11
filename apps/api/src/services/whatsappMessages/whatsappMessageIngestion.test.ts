@@ -60,10 +60,14 @@ assert.equal(messageOf("M-1").textContent, "Pedido ficticio");
 assert.equal(messageOf("M-1").providerTimestamp.toISOString(), "2026-11-07T14:00:00.000Z");
 assert.equal(messageOf("M-1").tenantId, "tenant-a");
 assert.deepEqual(messageOf("M-1").metadata, {});
+assert.equal(linked.unreadCount, 1, "recebida soma uma não lida");
 
-// 4) Reentrega do mesmo evento: duplicada, nada muda.
+// 4) Reentrega do mesmo evento: duplicada, nada muda (nem as não lidas).
 assert.equal((await ingestion.handle(upsert("M-1", "5511900000101", "Pedido ficticio"), NOW)).status, "duplicate");
 assert.equal(memory.messages.length, 1);
+assert.equal(conversationOf("5511900000101").unreadCount, 1);
+await ingestion.handle(upsert("M-1B", "5511900000101", "Outro pedido ficticio"), NOW);
+assert.equal(conversationOf("5511900000101").unreadCount, 2);
 
 // 5) Enviada pelo app do celular: OUTBOUND, "via app".
 const outbound = await ingestion.handle(upsert("M-2", "5511900000101", "Resposta ficticia", { fromMe: true, pushName: "Você", ts: at("2026-11-07T14:05:00.000Z") }), NOW);
@@ -71,6 +75,7 @@ assert.equal(outbound.direction, "outbound");
 assert.equal(messageOf("M-2").direction, "OUTBOUND");
 assert.equal(messageOf("M-2").status, "SENT");
 assert.deepEqual(messageOf("M-2").metadata, { origin: "app" });
+assert.equal(conversationOf("5511900000101").unreadCount, 0, "respondeu pelo celular: já leu");
 assert.equal(conversationOf("5511900000101").lastOutboundAt?.toISOString(), "2026-11-07T14:05:00.000Z");
 assert.equal(conversationOf("5511900000101").lastMessageAt?.toISOString(), "2026-11-07T14:05:00.000Z");
 
