@@ -15,7 +15,6 @@ import {
   isDraftExpired,
   isItemLocked,
   itemActiveWarnings,
-  itemPriceDiffPercent,
   itemTotal,
   productSearchUrl,
   readProductSearchResults,
@@ -53,7 +52,6 @@ const dateInputClass = `${inputClass} block appearance-none bg-white text-left`;
 const labelClass = "text-xs font-semibold text-slate-600";
 const chipClass = (selected: boolean) =>
   `w-full min-w-0 break-words rounded-xl border px-3 py-2 text-left text-sm ${selected ? "border-brand-600 bg-brand-50 text-brand-900" : "border-slate-200 bg-white text-slate-800 hover:bg-slate-50"}`;
-const formatDiff = (diff: number) => `${diff > 0 ? "+" : ""}${diff.toLocaleString("pt-BR")}%`;
 
 function ItemEditor({ card, item, index, onChange }: { card: DraftCard; item: DraftCardItem; index: number; onChange: (card: DraftCard) => void }) {
   const [query, setQuery] = useState(item.spokenName);
@@ -61,7 +59,6 @@ function ItemEditor({ card, item, index, onChange }: { card: DraftCard; item: Dr
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState("");
   const locked = isItemLocked(item);
-  const diff = itemPriceDiffPercent(item);
   const total = itemTotal(item);
   const warnings = itemActiveWarnings(item);
 
@@ -105,15 +102,13 @@ function ItemEditor({ card, item, index, onChange }: { card: DraftCard; item: Dr
         <span className="block text-xs text-slate-500">{[result.brand, result.unit].filter(Boolean).join(" · ")} · {formatCurrencyBRL(Number(result.price))} na {card.priceTable.label}</span>
       </button>)}</div> : <p className="text-xs text-slate-500">Nenhum produto com preço válido na {card.priceTable.label}.</p>)}
     </div>}
-    {item.product && <p className="break-words text-sm text-slate-800">Escolhido: <span className="font-semibold">{item.product.name}</span> · tabela {formatCurrencyBRL(item.product.tablePrice)}</p>}
+    {item.product && <p className="break-words text-sm text-slate-800">Escolhido: <span className="font-semibold">{item.product.name}</span> · preço do ERP {formatCurrencyBRL(item.product.tablePrice)}</p>}
 
     <div className="grid gap-2 sm:grid-cols-2">
       <label className="min-w-0 space-y-1"><span className={labelClass}>Quantidade (sacas)</span><input inputMode="decimal" value={item.quantity} disabled={locked} onChange={(event) => onChange(setItemField(card, item.key, "quantity", event.target.value))} className={inputClass} /></label>
-      <label className="min-w-0 space-y-1"><span className={labelClass}>Preço</span><select value={item.priceMode} disabled={locked} onChange={(event) => onChange(setItemField(card, item.key, "priceMode", event.target.value as DraftCardItem["priceMode"]))} className={inputClass}><option value="registered">Cadastrado</option><option value="informed">Informado</option></select></label>
+      <div className="min-w-0 space-y-1"><span className={labelClass}>Preço</span><p className="min-h-11 rounded-xl border border-slate-200 bg-slate-100 px-3 py-2.5 text-sm text-slate-700">{item.product ? `${formatCurrencyBRL(item.product.tablePrice)} (ERP)` : "Do ERP, ao escolher o produto"}</p></div>
     </div>
-    {item.priceMode === "informed" && <label className="block space-y-1"><span className={labelClass}>Preço informado por saca (R$)</span><input inputMode="decimal" value={item.informedPrice} disabled={locked} onChange={(event) => onChange(setItemField(card, item.key, "informedPrice", event.target.value))} className={inputClass} /></label>}
     <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
-      {diff !== null && <span className={diff < 0 ? "font-semibold text-amber-700" : "font-semibold text-slate-700"}>Diferença da tabela: {formatDiff(diff)}</span>}
       {total !== null && <span className="text-slate-700">Total: {formatCurrencyBRL(total)}</span>}
     </div>
   </div>;

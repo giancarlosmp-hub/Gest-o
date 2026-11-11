@@ -10,7 +10,7 @@ import {
   draftActiveWarnings,
   draftPendingFields,
   draftValue,
-  itemPriceDiffPercent,
+  itemUnitPrice,
   productSearchUrl,
   readProductSearchResults,
   reinterpretDraftCard,
@@ -33,7 +33,7 @@ import { listOpportunityDrafts, removeOpportunityDraft, saveOpportunityDraft } f
 // Dados fictícios; API e armazenamento simulados.
 const now = new Date("2026-10-28T13:00:00.000Z");
 const product = (id: string, name: string, tablePrice: number) => ({
-  productId: id, name, className: null, brand: null, unit: "SC", weightKg: 20, tablePrice, unitPrice: tablePrice, total: null, priceDiffPercent: null, score: 4
+  productId: id, name, className: null, brand: null, unit: "SC", weightKg: 20, tablePrice, unitPrice: tablePrice, total: null, score: 4
 });
 const response = (overrides: Partial<OpportunityDraftResponse> = {}): OpportunityDraftResponse => ({
   client: {
@@ -60,7 +60,7 @@ const response = (overrides: Partial<OpportunityDraftResponse> = {}): Opportunit
   notes: "cliente ficticio pediu retorno",
   warnings: [
     { code: "owner_pending", field: "ownerSellerId", message: "Responsável pendente em algum cliente sugerido." },
-    { code: "price_differs", field: "items.0.unitPrice", message: "Preço informado abaixo." },
+    { code: "price_ignored", field: "items.0.unitPrice", message: "Preço falado não é usado: o preço vem do ERP." },
     { code: "product_not_found", field: "items.1.productId", message: "Produto não encontrado." },
     { code: "quantity_missing", field: "items.1.quantity", message: "Quantidade não informada." }
   ],
@@ -76,12 +76,11 @@ assert.equal(card.client.selected, null);
 assert.equal(card.owner.mode, "pick");
 assert.ok(card.items.every((item) => item.product === null), "produto nunca pré-selecionado");
 assert.equal(card.items[0].quantity, "10");
-assert.equal(card.items[0].priceMode, "informed");
-assert.equal(card.items[0].informedPrice, "90");
+assert.equal("priceMode" in card.items[0], false, "sem preço informado: o preço é o do ERP");
+assert.deepEqual(card.items[0].warnings.map((warning) => warning.code), ["price_ignored"], "aviso do preço falado ignorado");
 assert.equal(card.followUpSuggestedByAi, true);
 assert.equal(card.notes, "cliente ficticio pediu retorno");
 assert.deepEqual(card.items[1].warnings.map((warning) => warning.code), ["product_not_found", "quantity_missing"]);
-assert.ok(!card.warnings.some((warning) => warning.code === "price_differs"), "diferença de preço é recalculada na tela");
 const single = buildDraftCard(response({ client: { spokenName: "x", spokenCity: null, candidates: [response().client.candidates[0]] } }), "frase", { now });
 assert.equal(single.client.selected, null, "um candidato só ainda pede o toque do vendedor");
 const self = buildDraftCard(response({ owner: { mode: "self", sellerId: "sel-self" } }), "frase", { now });
@@ -105,10 +104,9 @@ const pendingOwner = selectClientCandidate(buildDraftCard(response(), "frase", {
 assert.ok(draftPendingFields(pendingOwner).some((item) => item.field === "ownerSellerId"), "dono pendente deixa o responsável a escolher");
 assert.equal(selectSearchedClient(card, { id: "cli-manual", name: "Cliente Manual Ficticio", city: "Cidade", state: "MT" }).client.selected?.source, "search");
 
-// Item: candidato, preço informado com diferença em %.
+// Item: candidato; o preço é sempre o do ERP (o falado, 90, não vale).
 card = selectProductCandidate(card, "item-1", "prod-a");
-assert.equal(itemPriceDiffPercent(card.items[0]), -10);
-assert.equal(itemPriceDiffPercent(setItemField(card, "item-1", "priceMode", "registered").items[0]), null);
+assert.equal(itemUnitPrice(card.items[0]), 100);
 
 // Busca manual de produto na tabela do rascunho, com o preço da própria busca.
 assert.equal(productSearchUrl(card, "  milho teste "), "/products/search?q=milho%20teste&priceTableCode=1");
@@ -125,7 +123,7 @@ assert.ok(draftPendingFields(card).some((item) => item.field === "items.item-2.q
 card = setItemField(card, "item-2", "quantity", "4");
 assert.deepEqual(draftPendingFields(card), []);
 assert.equal(canCreateDraft(card, now), true);
-assert.equal(draftValue(card), 10 * 90 + 4 * 55.5);
+assert.equal(draftValue(card), 10 * 100 + 4 * 55.5);
 
 // Adicionar/remover item; sem item, o valor é obrigatório.
 const withExtra = addDraftItem(card);
@@ -172,7 +170,7 @@ assert.equal(selectClientCandidate(oldStored, "cli-a").title, "Nova oportunidade
 assert.equal(card.title, "Semente Teste 20kg – Fazenda Ficticia B");
 assert.deepEqual(buildOpportunityPayload(card), {
   title: "Semente Teste 20kg – Fazenda Ficticia B",
-  value: 1122,
+  value: 1222,
   stage: "prospeccao",
   probability: 20,
   proposalEntryDate: "2026-10-28",
@@ -185,15 +183,12 @@ assert.deepEqual(buildOpportunityPayload(card), {
   ownerSellerId: "sel-c",
   priceTableCode: "1"
 });
-const selfCard = setItemField(
-  selectProductCandidate(selectClientCandidate(removeDraftItem(self, "item-2"), "cli-a"), "item-1", "prod-b"),
-  "item-1", "priceMode", "registered"
-);
+const selfCard = selectProductCandidate(selectClientCandidate(removeDraftItem(self, "item-2"), "cli-a"), "item-1", "prod-b");
 assert.equal("ownerSellerId" in buildOpportunityPayload(selfCard), false, "vendedor não manda responsável");
 assert.deepEqual(buildItemPayload(card.items[0]), {
-  productId: "prod-a", productNameSnapshot: "Semente Teste 20kg", unit: "SC", quantity: 10, unitPrice: 90, discountType: "value", discountValue: 0
+  productId: "prod-a", productNameSnapshot: "Semente Teste 20kg", unit: "SC", quantity: 10, unitPrice: 100, discountType: "percent", discountValue: 0
 });
-assert.equal(buildItemPayload(selfCard.items[0]).unitPrice, 120, "preço cadastrado = preço da tabela");
+assert.equal(buildItemPayload(selfCard.items[0]).unitPrice, 120, "preço do ERP");
 
 // Confirmação: falha parcial de item e nova tentativa sem duplicar a oportunidade.
 const calls: Array<{ url: string; body: any }> = [];
