@@ -68,7 +68,6 @@ export type DraftProductCandidate = {
   tablePrice: number;
   unitPrice: number;
   total: number | null;
-  priceDiffPercent: number | null;
   score: number;
 };
 export type DraftItem = { spokenName: string; kg: number | null; quantity: number | null; price: SpokenPrice; candidates: DraftProductCandidate[] };
@@ -266,13 +265,12 @@ export class OpportunityDraftService {
         pendingFields.push(`items.${index}.quantity`);
         warnings.push({ code: "quantity_missing", field: `items.${index}.quantity`, message: `Quantidade de sacas não informada${position}.` });
       }
-      const top = item.candidates[0];
-      if (item.price.mode === "informed" && top && top.priceDiffPercent !== null && top.priceDiffPercent !== 0) {
-        const direction = top.priceDiffPercent < 0 ? "abaixo" : "acima";
+      // Política comercial: o preço é sempre o do ERP. O preço falado é lido (para não virar outro campo) e não é usado.
+      if (item.price.mode === "informed") {
         warnings.push({
-          code: "price_differs",
+          code: "price_ignored",
           field: `items.${index}.unitPrice`,
-          message: `Preço informado ${formatMoney(item.price.amount)}${position} está ${Math.abs(top.priceDiffPercent).toLocaleString("pt-BR")}% ${direction} do preço da ${PRICE_TABLE_LABELS[finalTable]} (${formatMoney(top.tablePrice)}) para o 1º produto sugerido.`
+          message: `Preço falado ${formatMoney(item.price.amount)}${position} não é usado: o preço vem do ERP (${PRICE_TABLE_LABELS[finalTable]}). Desconto, só em % na oportunidade.`
         });
       }
     });
@@ -477,7 +475,6 @@ export class OpportunityDraftService {
         if (words.length ? wordsScore <= 0 : !kgMatches) return [];
         const kgScore = kgMatches ? 4 : 0;
         const tablePrice = Number(picked.price.toFixed(2));
-        const unitPrice = item.price.mode === "informed" ? item.price.amount : tablePrice;
         return [{
           productId: product.id,
           name: product.name,
@@ -486,9 +483,8 @@ export class OpportunityDraftService {
           unit: product.unit,
           weightKg,
           tablePrice,
-          unitPrice,
-          total: item.quantity !== null ? Number((item.quantity * unitPrice).toFixed(2)) : null,
-          priceDiffPercent: item.price.mode === "informed" ? Number((((unitPrice - tablePrice) / tablePrice) * 100).toFixed(1)) : null,
+          unitPrice: tablePrice,
+          total: item.quantity !== null ? Number((item.quantity * tablePrice).toFixed(2)) : null,
           score: wordsScore + kgScore
         }];
       })
