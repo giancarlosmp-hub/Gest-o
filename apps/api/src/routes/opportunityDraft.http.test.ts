@@ -152,8 +152,8 @@ try {
   assert.equal(model.items.length, 1);
   assert.deepEqual(model.items[0].candidates.map((candidate: Row) => candidate.productId), ["p-aurora-10", "p-aurora-20"], "kg falado pesa; inativo, sem preço e não sincronizado ficam de fora");
   assert.deepEqual(
-    (({ tablePrice, unitPrice, total, priceDiffPercent, weightKg, unit }) => ({ tablePrice, unitPrice, total, priceDiffPercent, weightKg, unit }))(model.items[0].candidates[0]),
-    { tablePrice: 140, unitPrice: 140, total: 14000, priceDiffPercent: null, weightKg: 10, unit: "SC" }
+    (({ tablePrice, unitPrice, total, weightKg, unit }) => ({ tablePrice, unitPrice, total, weightKg, unit }))(model.items[0].candidates[0]),
+    { tablePrice: 140, unitPrice: 140, total: 14000, weightKg: 10, unit: "SC" }
   );
   assert.equal(model.items[0].candidates[1].weightKg, 20, "PESO_PRODUTO com vírgula");
   assert.deepEqual(model.value, { amount: 14000, source: "items" });
@@ -186,21 +186,22 @@ try {
   assert.equal(noTable.probability, 20);
   assert.deepEqual(noTable.value, { amount: 7000, source: "items" });
 
-  // 4 e 5. Preço informado abaixo e acima do cadastrado: só a diferença em %, sem bloquear (não há regra de desconto).
+  // 4 e 5. Preço falado (abaixo, acima ou igual ao do ERP): não é usado; o preço é sempre o do ERP, com aviso.
   const below = await parse("Cliente Agro Teste Alfa. Produto braquiária Aurora, 10 quilos, 100 sacas, preço R$ 130");
   assert.deepEqual(
     (({ tablePrice, unitPrice, total, priceDiffPercent }) => ({ tablePrice, unitPrice, total, priceDiffPercent }))(below.items[0].candidates[0]),
-    { tablePrice: 140, unitPrice: 130, total: 13000, priceDiffPercent: -7.1 }
+    { tablePrice: 140, unitPrice: 140, total: 14000, priceDiffPercent: undefined }
   );
-  assert.deepEqual(codes(below), ["price_differs"]);
-  assert.match(below.warnings[0].message, /7,1% abaixo do preço da Tabela 1/);
-  assert(!below.pendingFields.some((field: string) => field.includes("unitPrice")), "preço diferente não fica pendente");
+  assert.deepEqual(codes(below), ["price_ignored"]);
+  assert.match(below.warnings[0].message, /^Preço falado R\$\s130,00 não é usado: o preço vem do ERP \(Tabela 1\)\. Desconto, só em % na oportunidade\.$/);
+  assert(!below.pendingFields.some((field: string) => field.includes("unitPrice")), "preço falado não fica pendente");
+  assert.deepEqual(below.value, { amount: 14000, source: "items" });
   const above = await parse("Cliente Agro Teste Alfa. Produto braquiária Aurora, 10 quilos, 100 sacas, preço R$ 150,00");
-  assert.equal(above.items[0].candidates[0].priceDiffPercent, 7.1);
-  assert.match(above.warnings[0].message, /7,1% acima/);
+  assert.equal(above.items[0].candidates[0].unitPrice, 140);
+  assert.deepEqual(codes(above), ["price_ignored"]);
   const samePrice = await parse("Cliente Agro Teste Alfa. Produto braquiária Aurora, 10 quilos, 100 sacas, preço R$ 140");
-  assert.equal(samePrice.items[0].candidates[0].priceDiffPercent, 0);
-  assert.deepEqual(codes(samePrice), []);
+  assert.equal(samePrice.items[0].candidates[0].unitPrice, 140);
+  assert.deepEqual(codes(samePrice), ["price_ignored"]);
 
   // 6. Dois produtos: lista de itens e valor pela soma.
   const twoProducts = await parse("Cliente Agro Teste Alfa. Produto braquiária Aurora, 10 quilos, 100 sacas, preço cadastrado. Produto capim Boreal, Marca Teste, 20 kg, 30 sacas, preço R$ 95,50");
@@ -208,8 +209,8 @@ try {
   assert.equal(twoProducts.items[0].candidates[0].productId, "p-aurora-10");
   // "marca" ~ "marandu" (3 letras iguais) entra como candidato fraco, depois do produto certo.
   assert.equal(twoProducts.items[1].candidates[0].productId, "p-boreal");
-  assert.equal(twoProducts.items[1].candidates[0].priceDiffPercent, -4.5);
-  assert.deepEqual(twoProducts.value, { amount: 16865, source: "items" });
+  assert.equal(twoProducts.items[1].candidates[0].unitPrice, 100, "preço do ERP, não o falado");
+  assert.deepEqual(twoProducts.value, { amount: 17000, source: "items" });
   assert.deepEqual(twoProducts.pendingFields, ["clientId", "items.0.productId", "items.1.productId"]);
 
   // 7. Sem produto, com valor falado.
@@ -283,8 +284,8 @@ try {
   assert.deepEqual(dictatedWords.stage, { value: "proposta", label: "Proposta" });
   assert.equal(dictatedWords.items[0].candidates[0].productId, "p-marandu-10");
   assert.deepEqual(
-    (({ unitPrice, total, priceDiffPercent }) => ({ unitPrice, total, priceDiffPercent }))(dictatedWords.items[0].candidates[0]),
-    { unitPrice: 190, total: 38000, priceDiffPercent: -5 }
+    (({ unitPrice, total }) => ({ unitPrice, total }))(dictatedWords.items[0].candidates[0]),
+    { unitPrice: 200, total: 40000 }
   );
   // Nenhuma palavra bate: só pelo kg dito, na mesma tabela.
   const byKg = await parse("Cliente Bonvita. Produto xyzw 10 kg 5 sacas");

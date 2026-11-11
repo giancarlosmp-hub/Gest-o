@@ -31,6 +31,7 @@ import {
   normalizeErpParameterCode,
 } from "@salesforce-pro/shared";
 import { brazilMonthKey } from "../lib/brazilDate";
+import { OPPORTUNITY_ITEM_ERP_PRICE_DIFFERS_LABEL } from "../lib/opportunityItemPolicy";
 
 type Stage = "prospeccao" | "negociacao" | "proposta" | "ganho" | "perdido";
 type EventType = "comentario" | "mudanca_etapa" | "status";
@@ -134,6 +135,8 @@ type OpportunityItem = {
   discountTotal: number;
   netTotal: number;
   notes?: string | null;
+  // Item antigo com preço fora do ERP atual: o pedido ERP fica bloqueado até o item ser editado.
+  erpPriceDiffers?: boolean;
   product?: {
     id: string;
     erpProductCode?: string | null;
@@ -451,6 +454,7 @@ const OpportunityItemsSummaryCard = ({
                     </div>
                   </div>
                   {noStock ? <StatusPill tone="warning">Sem saldo</StatusPill> : null}
+                  {opportunityItem.erpPriceDiffers ? <StatusPill tone="warning">{OPPORTUNITY_ITEM_ERP_PRICE_DIFFERS_LABEL}</StatusPill> : null}
                 </div>
                 <dl className="mt-3 grid grid-cols-2 gap-2 text-xs">
                   <div className="rounded-xl bg-white p-2">
@@ -501,6 +505,7 @@ const OpportunityItemsSummaryCard = ({
                   <tr key={opportunityItem.id} className="align-top">
                     <td className="px-3 py-2">
                       <p className="font-semibold text-slate-900">{opportunityItem.productNameSnapshot}</p>
+                      {opportunityItem.erpPriceDiffers ? <p className="mt-1 text-[11px] font-semibold text-red-700">{OPPORTUNITY_ITEM_ERP_PRICE_DIFFERS_LABEL}: edite o item na oportunidade antes do pedido ERP.</p> : null}
                       {opportunityItem.notes ? <p className="mt-1 text-[11px] text-slate-500">Obs.: {opportunityItem.notes}</p> : null}
                     </td>
                     <td className="px-3 py-2 text-slate-700">{opportunityItem.erpProductCode || "-"}</td>
@@ -937,11 +942,8 @@ export default function OpportunityDetailsPage() {
         receivingConditionCode:
           current.receivingConditionCode ||
           firstOptionCode(nextReceivingConditions),
-        priceTableCode:
-          current.priceTableCode ||
-          item.priceTableCode ||
-          firstOptionCode(nextPriceTables) ||
-          "1",
+        // Política comercial: o pedido usa a tabela que precificou os itens (a da oportunidade); não é escolhida aqui.
+        priceTableCode: item.priceTableCode || "1",
         branchCode: current.branchCode || firstOptionCode(nextBranches),
         operationCode: defaultSalesOperationCode,
         expectedDeliveryDate:
@@ -1828,16 +1830,13 @@ export default function OpportunityDetailsPage() {
                             setErpOrderField("receivingConditionCode", value)
                           }
                         />
-                        <SearchableSelect
-                          label="Tabela de preço"
-                          value={erpOrderForm.priceTableCode}
-                          options={priceTables}
-                          loading={loadingErpOrderData}
-                          emptyMessage="Nenhuma tabela de preço sincronizada. Vá em Configurações > Integração ERP e sincronize Tabelas de preço."
-                          onChange={(value) =>
-                            setErpOrderField("priceTableCode", value)
-                          }
-                        />
+                        <div className="space-y-1">
+                          <span className="text-sm font-medium text-slate-700">Tabela de preço</span>
+                          <div className="rounded-lg border border-slate-200 bg-slate-100 p-2 text-sm text-slate-700" aria-readonly="true">
+                            {priceTables.find((option) => option.code === erpOrderForm.priceTableCode)?.name || `Tabela ${erpOrderForm.priceTableCode || "1"}`}
+                          </div>
+                          <p className="text-xs text-slate-500">A mesma tabela que precificou os itens da oportunidade.</p>
+                        </div>
                         <SearchableSelect
                           label="Filial"
                           value={erpOrderForm.branchCode}

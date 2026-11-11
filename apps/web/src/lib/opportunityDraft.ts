@@ -28,7 +28,6 @@ export type DraftProductCandidate = {
   tablePrice: number;
   unitPrice: number;
   total: number | null;
-  priceDiffPercent: number | null;
   score: number;
 };
 export type DraftSpokenPrice = { mode: "registered" } | { mode: "informed"; amount: number };
@@ -64,8 +63,6 @@ export type DraftCardItem = {
   candidates: DraftProductCandidate[];
   product: DraftProductChoice | null;
   quantity: string;
-  priceMode: "registered" | "informed";
-  informedPrice: string;
   warnings: DraftWarning[];
   // Preenchidos na confirmação: item já gravado (não reenviar) ou erro da última tentativa.
   createdItemId?: string;
@@ -130,9 +127,6 @@ const itemFieldIndex = (field: string) => {
   return match ? Number(match[1]) : null;
 };
 
-// "price_differs" sai: a diferença é recalculada na tela com o produto escolhido.
-const isLiveWarning = (warning: DraftWarning) => warning.code !== "price_differs";
-
 export const buildDraftCard = (
   response: OpportunityDraftResponse,
   text: string,
@@ -144,9 +138,7 @@ export const buildDraftCard = (
     candidates: item.candidates,
     product: null,
     quantity: item.quantity !== null ? String(item.quantity) : "",
-    priceMode: item.price.mode,
-    informedPrice: item.price.mode === "informed" ? String(item.price.amount) : "",
-    warnings: response.warnings.filter((warning) => itemFieldIndex(warning.field) === index && isLiveWarning(warning))
+    warnings: response.warnings.filter((warning) => itemFieldIndex(warning.field) === index)
   }));
   return {
     version: 1,
@@ -169,7 +161,7 @@ export const buildDraftCard = (
     followUpSuggestedByAi: response.followUp.suggestedByAi,
     expectedCloseDate: response.expectedCloseDate,
     notes: response.notes ?? "",
-    warnings: response.warnings.filter((warning) => itemFieldIndex(warning.field) === null && isLiveWarning(warning)),
+    warnings: response.warnings.filter((warning) => itemFieldIndex(warning.field) === null),
     createdOpportunityId: null,
     lastError: null
   };
@@ -271,7 +263,7 @@ export const productSearchUrl = (card: OpportunityDraftCard, query: string) => {
   return q ? `/products/search?q=${encodeURIComponent(q)}&priceTableCode=${encodeURIComponent(card.priceTable.code)}` : null;
 };
 
-type ItemFields = Pick<DraftCardItem, "quantity" | "priceMode" | "informedPrice">;
+type ItemFields = Pick<DraftCardItem, "quantity">;
 export const setItemField = <K extends keyof ItemFields>(card: OpportunityDraftCard, key: string, field: K, value: ItemFields[K]) =>
   updateItem(card, key, (item) => ({ ...item, [field]: value }));
 
@@ -280,7 +272,7 @@ export const addDraftItem = (card: OpportunityDraftCard): OpportunityDraftCard =
   const next = card.items.reduce((max, item) => Math.max(max, Number(item.key.replace("item-", "")) || 0), 0) + 1;
   return {
     ...card,
-    items: [...card.items, { key: `item-${next}`, spokenName: "", candidates: [], product: null, quantity: "", priceMode: "registered", informedPrice: "", warnings: [] }]
+    items: [...card.items, { key: `item-${next}`, spokenName: "", candidates: [], product: null, quantity: "", warnings: [] }]
   };
 };
 
@@ -289,19 +281,8 @@ export const removeDraftItem = (card: OpportunityDraftCard, key: string): Opport
   return withAutoTitle({ ...card, items: card.items.filter((item) => item.key !== key) });
 };
 
-export const itemUnitPrice = (item: DraftCardItem): number | null => {
-  if (!item.product) return null;
-  if (item.priceMode === "registered") return item.product.tablePrice;
-  const informed = parseDecimalInput(item.informedPrice);
-  return informed !== null && informed > 0 ? toTwoDecimals(informed) : null;
-};
-
-// Mesma conta da rota de interpretação: (informado − tabela) / tabela, com 1 casa.
-export const itemPriceDiffPercent = (item: DraftCardItem): number | null => {
-  const unitPrice = itemUnitPrice(item);
-  if (!item.product || item.priceMode !== "informed" || unitPrice === null || item.product.tablePrice <= 0) return null;
-  return Number((((unitPrice - item.product.tablePrice) / item.product.tablePrice) * 100).toFixed(1));
-};
+// Política comercial: o preço é sempre o do ERP (a API recalcula ao gravar o item).
+export const itemUnitPrice = (item: DraftCardItem): number | null => item.product ? item.product.tablePrice : null;
 
 export const itemTotal = (item: DraftCardItem): number | null => {
   const quantity = parseDecimalInput(item.quantity);
@@ -334,10 +315,6 @@ export const draftPendingFields = (card: OpportunityDraftCard): PendingField[] =
     if (!item.product) pending.push({ field: `items.${item.key}.productId`, message: `Escolha o produto${label}.` });
     const quantity = parseDecimalInput(item.quantity);
     if (quantity === null || quantity <= 0) pending.push({ field: `items.${item.key}.quantity`, message: `Informe a quantidade de sacas${label}.` });
-    const informed = parseDecimalInput(item.informedPrice);
-    if (item.priceMode === "informed" && (informed === null || informed <= 0)) {
-      pending.push({ field: `items.${item.key}.unitPrice`, message: `Informe o preço${label}.` });
-    }
   });
   if (!card.items.length && draftValue(card) === null) pending.push({ field: "value", message: "Sem produto: informe o valor da oportunidade." });
   if (!DAY_KEY.test(card.proposalDate)) pending.push({ field: "proposalDate", message: "Informe a data de entrada." });
@@ -390,14 +367,14 @@ export const buildOpportunityPayload = (card: OpportunityDraftCard) => {
   };
 };
 
-// Sem desconto: o preço informado vai como preço unitário (não há regra de desconto por perfil).
+// Sem desconto: o preço é o do ERP; desconto, só em % depois, na oportunidade (limite por perfil).
 export const buildItemPayload = (item: DraftCardItem) => ({
   productId: item.product?.productId ?? "",
   productNameSnapshot: (item.product?.name ?? "").slice(0, 240),
   ...(item.product?.unit ? { unit: item.product.unit } : {}),
   quantity: Number(parseDecimalInput(item.quantity)),
   unitPrice: itemUnitPrice(item) ?? 0,
-  discountType: "value" as const,
+  discountType: "percent" as const,
   discountValue: 0
 });
 

@@ -18,6 +18,7 @@ import { decryptErpCredential } from "./erpCredentialCrypto.js";
 import { requestUltraFv3ReadOnlyWithCredentialsRetry, requestUltraFv3ReadOnlyWithRetry } from "./ultraFv3SyncService.js";
 import { reserveNextErpOrderNumber } from "./erpOrderNumberSequenceService.js";
 import { isErpReferenceEligible } from "../utils/erpReferenceValidation.js";
+import { assertOpportunityItemsMatchErp } from "./opportunityItemErpPrice.js";
 
 const SALESMEN_CONFIG_KEY = "erp.ultrafv3.salesmen";
 const SALESMEN_ORDER_SEQUENCE_ENDPOINT = "/salesmen";
@@ -277,6 +278,8 @@ export const getErpOrderParameterDiagnostics = (params: Partial<OrderParameterCo
 };
 
 type OpportunityForErpOrder = {
+  // Tabela que precificou os itens; o pedido precisa usar a mesma (ausente = 1).
+  priceTableCode?: string | null;
   id: string;
   stage: string;
   client: {
@@ -1257,6 +1260,8 @@ async function createErpOrderFromOpportunityUnsafe(
   const expectedDeliveryDate = parseIsoDateOnlyAsUtc(params.expectedDeliveryDate);
   if (!expectedDeliveryDate)
     throw Object.assign(new Error("Payload inválido: Data prevista de entrega obrigatória no formato YYYY-MM-DD."), { status: 400, parameterDiagnostics });
+  // Política comercial: mesma tabela dos itens e todo item no preço atual do ERP, antes de reservar número ou chamar o ERP.
+  await assertOpportunityItemsMatchErp(opportunity, params.priceTableCode);
   const pedidoIdImportacao = randomUUID();
   const operationContext = {
     opportunityId: opportunity.id,
@@ -1969,6 +1974,7 @@ const buildProtocolTestOrderPayload = async (
   const now = new Date();
   const expectedDeliveryDate = parseIsoDateOnlyAsUtc(params.expectedDeliveryDate);
   if (!expectedDeliveryDate) throw Object.assign(new Error("Payload inválido: Data prevista de entrega obrigatória no formato YYYY-MM-DD."), { status: 400, parameterDiagnostics });
+  await assertOpportunityItemsMatchErp(opportunity, params.priceTableCode);
   const numericSellerErpCode = Number(sellerErpCode);
   const numericOperatorCode = Number(operatorCode);
   if (!Number.isFinite(numericSellerErpCode) || !Number.isFinite(numericOperatorCode))

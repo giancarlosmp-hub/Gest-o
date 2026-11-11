@@ -29,6 +29,9 @@ import {
   weeklyVisitMinimumSchema,
   planningVisitRadiusSchema,
   planningVisitRulesSchema,
+  commercialPolicySchema,
+  checkItemDiscount,
+  computeOpportunityItemAmounts,
   arePlanningVisitTiersOrdered,
   PLANNING_VISIT_TIERS_ORDER_MESSAGE,
   commercialAutomationsConfigSchema,
@@ -132,6 +135,8 @@ import { getCommercialInsights, invalidateCommercialInsightsCache } from "../ser
 import { timelineIntelligenceService } from "../services/timelineIntelligenceService.js";
 import { planningIntelligenceService } from "../services/planningIntelligenceService.js";
 import { getPlanningVisitRadiusKm, parsePlanningVisitRadiusKm, PLANNING_VISIT_RADIUS_KEY } from "../services/planningVisitRadius.js";
+import { getCommercialPolicy, saveCommercialPolicy } from "../services/commercialPolicyConfig.js";
+import { erpPriceUnavailableMessage, isErpPriceDifferent, loadErpUnitPrices, resolveErpUnitPrice, type ErpUnitPrice } from "../services/opportunityItemErpPrice.js";
 import { getPlanningVisitRules, PLANNING_VISIT_OPPORTUNITY_KEY, PLANNING_VISIT_TIER1_KEY, PLANNING_VISIT_TIER2_KEY } from "../services/planningVisitRules.js";
 import { agendaIntelligenceService } from "../services/agendaIntelligenceService.js";
 import { getErpAutomaticSyncRuntimeStatus, refreshErpAutomaticSyncConfig, runAutomaticErpSyncNow, setErpAutomaticSyncEnabled } from "../jobs/erpSyncScheduler.js";
@@ -6470,40 +6475,40 @@ const productSearchQuerySchema = z.object({
   priceTableCode: z.string().trim().min(1).max(60).optional()
 });
 
+// Item de oportunidade: o produto do ERP é obrigatório e o preço é sempre o do ERP para a tabela da oportunidade
+// (recalculado aqui). unitPrice, códigos e nome que a tela mandar são aceitos e ignorados; o desconto é só em %.
+const OPPORTUNITY_ITEM_PRODUCT_REQUIRED_MESSAGE = "Selecione um produto do ERP: item sem produto não é aceito.";
+const OPPORTUNITY_ITEM_DISCOUNT_PERCENT_ONLY_MESSAGE = "Desconto só em %: informe o percentual de desconto.";
 const opportunityItemPayloadSchema = z.object({
-  productId: z.string().optional(),
+  productId: z.string({ required_error: OPPORTUNITY_ITEM_PRODUCT_REQUIRED_MESSAGE, invalid_type_error: OPPORTUNITY_ITEM_PRODUCT_REQUIRED_MESSAGE }).trim().min(1, OPPORTUNITY_ITEM_PRODUCT_REQUIRED_MESSAGE),
   lineNumber: z.number().int().positive().optional(),
   erpProductCode: z.string().trim().min(1).max(60).optional(),
   erpProductClassCode: z.string().trim().min(1).max(60).optional(),
   productNameSnapshot: z.string().trim().min(1).max(240).optional(),
   unit: z.string().trim().max(30).optional(),
   quantity: z.number().positive(),
-  unitPrice: z.number().nonnegative(),
+  unitPrice: z.number().nonnegative().optional(),
   discountType: z.enum(["value", "percent"]).optional(),
   discountValue: z.number().nonnegative().optional(),
   notes: z.string().max(2000).optional()
 });
 
-const computeOpportunityItemTotals = (payload: { quantity: number; unitPrice: number; discountType?: "value" | "percent"; discountValue?: number }) => {
-  const quantity = Number(payload.quantity || 0);
-  const unitPrice = Number(payload.unitPrice || 0);
-  const grossTotal = Number((quantity * unitPrice).toFixed(2));
-  const discountType = payload.discountType || "value";
-  const discountValue = Number(payload.discountValue || 0);
-  // TODO: adicionar limites de desconto por perfil via Configurações.
-  if (discountType === "percent" && (discountValue < 0 || discountValue > 100)) {
-    throw Object.assign(new Error("Desconto percentual deve estar entre 0 e 100."), { status: 400 });
-  }
-  if (discountType === "value" && (discountValue < 0 || discountValue > grossTotal)) {
-    throw Object.assign(new Error("Desconto em valor não pode ser maior que o valor bruto do item."), { status: 400 });
-  }
-  const rawDiscount = discountType === "percent" ? grossTotal * (discountValue / 100) : discountValue;
-  const discountTotal = Number(Math.max(0, Math.min(grossTotal, rawDiscount)).toFixed(2));
-  const netTotal = Number((grossTotal - discountTotal).toFixed(2));
-  if (netTotal < 0) {
-    throw Object.assign(new Error("Valor líquido do item não pode ser negativo."), { status: 400 });
-  }
-  return { grossTotal, discountTotal, netTotal, discountType, discountValue };
+// Desconto em R$ maior que zero não é aceito; sem tipo, o valor é percentual.
+const opportunityItemDiscountPercentOf = (payload: { discountType?: string | null; discountValue?: number | null }) => {
+  const value = Number(payload.discountValue ?? 0);
+  if (payload.discountType === "value") return value > 0 ? null : 0;
+  return value;
+};
+
+// Desconto do item como aparece na auditoria: "3" (percentual) ou "R$ 10.00" (item antigo com desconto em valor).
+const opportunityItemDiscountAuditValue = (item: { discountType: string; discountValue: number; discountTotal: number }) =>
+  item.discountType === "percent" ? String(item.discountValue) : item.discountTotal > 0 ? `R$ ${item.discountTotal.toFixed(2)}` : "0";
+
+const opportunityItemDiscountAuditField = (lineNumber: number) => `item.${lineNumber}.discountPercent`;
+
+const opportunityItemErpPriceStatus = (item: { productId: string | null; unitPrice: number }, erpPrices: Map<string, ErpUnitPrice>) => {
+  const erp = item.productId ? erpPrices.get(item.productId) : undefined;
+  return { erpUnitPrice: erp?.selectable ? erp.price : null, erpPriceDiffers: isErpPriceDifferent(item.unitPrice, erp) };
 };
 
 const mapOpportunityItemResponse = (item: any) => ({
@@ -6881,6 +6886,8 @@ router.get("/opportunities/:id/items", async (req, res) => {
     orderBy: [{ lineNumber: "asc" }],
     include: { product: true }
   });
+  // Item antigo com preço fora do ERP atual fica como está e é sinalizado; ao editar, volta ao preço do ERP.
+  const erpPrices = await loadErpUnitPrices(items.map((item) => item.productId), opportunity.priceTableCode);
 
   const totals = items.reduce(
     (acc, item) => ({ grossTotal: acc.grossTotal + item.grossTotal, discountTotal: acc.discountTotal + item.discountTotal, netTotal: acc.netTotal + item.netTotal }),
@@ -6888,7 +6895,7 @@ router.get("/opportunities/:id/items", async (req, res) => {
   );
 
   return res.json({
-    items: items.map(mapOpportunityItemResponse),
+    items: items.map((item) => ({ ...mapOpportunityItemResponse(item), ...opportunityItemErpPriceStatus(item, erpPrices) })),
     totals: {
       grossTotal: Number(totals.grossTotal.toFixed(2)),
       discountTotal: Number(totals.discountTotal.toFixed(2)),
@@ -6907,44 +6914,55 @@ router.post("/opportunities/:id/items", async (req, res) => {
   if (!parsed.success) return res.status(400).json({ message: parsed.error.issues[0]?.message || "Payload inválido" });
 
   const payload = parsed.data;
-  let product = null;
-  if (payload.productId) {
-    product = await prisma.product.findUnique({ where: { id: payload.productId } });
-    if (!product) return res.status(404).json({ message: "Produto não encontrado" });
-  }
+  const product = await prisma.product.findUnique({ where: { id: payload.productId }, include: { prices: { orderBy: [{ validFrom: "desc" }] } } });
+  if (!product) return res.status(404).json({ message: "Produto não encontrado" });
+  const erpPrice = resolveErpUnitPrice(product, opportunity.priceTableCode);
+  if (!erpPrice.selectable) return res.status(400).json({ message: erpPriceUnavailableMessage(erpPrice.priceTableCode) });
+
+  const discountPercent = opportunityItemDiscountPercentOf(payload);
+  if (discountPercent === null) return res.status(400).json({ message: OPPORTUNITY_ITEM_DISCOUNT_PERCENT_ONLY_MESSAGE });
+  const discountCheck = checkItemDiscount(await getCommercialPolicy(), req.user!.role, discountPercent);
+  if (!discountCheck.ok) return res.status(400).json({ message: discountCheck.message });
 
   const maxLine = await prisma.opportunityItem.aggregate({
     where: { opportunityId: req.params.id },
     _max: { lineNumber: true }
   });
 
-  const { grossTotal, discountTotal, netTotal, discountType, discountValue } = computeOpportunityItemTotals(payload);
+  const { grossTotal, discountTotal, netTotal } = computeOpportunityItemAmounts({ quantity: payload.quantity, unitPrice: erpPrice.price, discountPercent });
   const nextLineNumber = payload.lineNumber || (maxLine._max.lineNumber || 0) + 1;
+  const { prices: _prices, ...productData } = product;
 
-  const created = await prisma.opportunityItem.create({
-    data: {
-      opportunityId: req.params.id,
-      productId: payload.productId || null,
-      lineNumber: nextLineNumber,
-      erpProductCode: payload.erpProductCode || product?.erpProductCode || "manual",
-      erpProductClassCode: payload.erpProductClassCode || product?.erpProductClassCode || String(nextLineNumber),
-      productNameSnapshot: payload.productNameSnapshot || product?.name || "Item sem produto",
-      unit: payload.unit || product?.unit || null,
-      quantity: payload.quantity,
-      unitPrice: payload.unitPrice,
-      discountType,
-      discountValue,
-      grossTotal,
-      discountTotal,
-      netTotal,
-      notes: payload.notes || null
-    },
-    include: { product: true }
+  const created = await prisma.$transaction(async (tx) => {
+    const item = await tx.opportunityItem.create({
+      data: {
+        opportunityId: req.params.id,
+        productId: product.id,
+        lineNumber: nextLineNumber,
+        erpProductCode: product.erpProductCode,
+        erpProductClassCode: product.erpProductClassCode,
+        productNameSnapshot: product.name,
+        unit: product.unit || payload.unit || null,
+        quantity: payload.quantity,
+        unitPrice: erpPrice.price,
+        discountType: "percent",
+        discountValue: discountPercent,
+        grossTotal,
+        discountTotal,
+        netTotal,
+        notes: payload.notes || null
+      }
+    });
+    // Auditoria do desconto: quem deu, em qual linha e quanto.
+    if (discountPercent > 0) {
+      await tx.opportunityChangeLog.create({ data: { opportunityId: req.params.id, actorId: req.user!.id, field: opportunityItemDiscountAuditField(nextLineNumber), oldValue: null, newValue: String(discountPercent) } });
+    }
+    return item;
   });
 
   await recalculateOpportunityValueFromItems(req.params.id);
 
-  return res.status(201).json(mapOpportunityItemResponse(created));
+  return res.status(201).json({ ...mapOpportunityItemResponse({ ...created, product: productData }), erpUnitPrice: erpPrice.price, erpPriceDiffers: false });
 });
 
 router.put("/opportunities/:id/items/:itemId", async (req, res) => {
@@ -6961,48 +6979,58 @@ router.put("/opportunities/:id/items/:itemId", async (req, res) => {
 
   const payload = parsed.data;
   const nextQuantity = payload.quantity ?? existing.quantity;
-  const nextUnitPrice = payload.unitPrice ?? existing.unitPrice;
-  const nextDiscountType = payload.discountType ?? existing.discountType;
-  const nextDiscountValue = payload.discountValue ?? existing.discountValue;
+  // Sem desconto novo no corpo, vale o gravado; item antigo com desconto em R$ precisa receber o desconto em %.
+  const discountPercent = payload.discountType === undefined && payload.discountValue === undefined
+    ? opportunityItemDiscountPercentOf(existing)
+    : opportunityItemDiscountPercentOf({ discountType: payload.discountType ?? "percent", discountValue: payload.discountValue ?? 0 });
+  if (discountPercent === null) return res.status(400).json({ message: OPPORTUNITY_ITEM_DISCOUNT_PERCENT_ONLY_MESSAGE });
 
-  let product = null;
+  // Item antigo sem produto não pode ser editado (só excluído): o preço precisa vir do ERP.
   const productId = payload.productId === undefined ? existing.productId : payload.productId;
-  if (productId) {
-    product = await prisma.product.findUnique({ where: { id: productId } });
-    if (!product) return res.status(404).json({ message: "Produto não encontrado" });
-  }
+  if (!productId) return res.status(400).json({ message: OPPORTUNITY_ITEM_PRODUCT_REQUIRED_MESSAGE });
+  const product = await prisma.product.findUnique({ where: { id: productId }, include: { prices: { orderBy: [{ validFrom: "desc" }] } } });
+  if (!product) return res.status(404).json({ message: "Produto não encontrado" });
+  // Ao editar, o preço volta ao do ERP atual, mesmo que o item antigo tenha outro.
+  const erpPrice = resolveErpUnitPrice(product, opportunity.priceTableCode);
+  if (!erpPrice.selectable) return res.status(400).json({ message: erpPriceUnavailableMessage(erpPrice.priceTableCode) });
 
-  const { grossTotal, discountTotal, netTotal } = computeOpportunityItemTotals({
-    quantity: nextQuantity,
-    unitPrice: nextUnitPrice,
-    discountType: nextDiscountType,
-    discountValue: nextDiscountValue
-  });
+  const discountCheck = checkItemDiscount(await getCommercialPolicy(), req.user!.role, discountPercent);
+  if (!discountCheck.ok) return res.status(400).json({ message: discountCheck.message });
 
-  const updated = await prisma.opportunityItem.update({
-    where: { id: existing.id },
-    data: {
-      productId: productId || null,
-      lineNumber: payload.lineNumber ?? existing.lineNumber,
-      erpProductCode: payload.erpProductCode ?? product?.erpProductCode ?? existing.erpProductCode,
-      erpProductClassCode: payload.erpProductClassCode ?? product?.erpProductClassCode ?? existing.erpProductClassCode,
-      productNameSnapshot: payload.productNameSnapshot ?? product?.name ?? existing.productNameSnapshot,
-      unit: payload.unit ?? product?.unit ?? existing.unit,
-      quantity: nextQuantity,
-      unitPrice: nextUnitPrice,
-      discountType: nextDiscountType,
-      discountValue: nextDiscountValue,
-      grossTotal,
-      discountTotal,
-      netTotal,
-      notes: payload.notes === undefined ? existing.notes : payload.notes || null
-    },
-    include: { product: true }
+  const { grossTotal, discountTotal, netTotal } = computeOpportunityItemAmounts({ quantity: nextQuantity, unitPrice: erpPrice.price, discountPercent });
+  const nextLineNumber = payload.lineNumber ?? existing.lineNumber;
+  const previousDiscount = opportunityItemDiscountAuditValue(existing);
+  const { prices: _prices, ...productData } = product;
+
+  const updated = await prisma.$transaction(async (tx) => {
+    const item = await tx.opportunityItem.update({
+      where: { id: existing.id },
+      data: {
+        productId: product.id,
+        lineNumber: nextLineNumber,
+        erpProductCode: product.erpProductCode,
+        erpProductClassCode: product.erpProductClassCode,
+        productNameSnapshot: product.name,
+        unit: product.unit || payload.unit || existing.unit,
+        quantity: nextQuantity,
+        unitPrice: erpPrice.price,
+        discountType: "percent",
+        discountValue: discountPercent,
+        grossTotal,
+        discountTotal,
+        netTotal,
+        notes: payload.notes === undefined ? existing.notes : payload.notes || null
+      }
+    });
+    if (previousDiscount !== String(discountPercent)) {
+      await tx.opportunityChangeLog.create({ data: { opportunityId: req.params.id, actorId: req.user!.id, field: opportunityItemDiscountAuditField(nextLineNumber), oldValue: previousDiscount, newValue: String(discountPercent) } });
+    }
+    return item;
   });
 
   await recalculateOpportunityValueFromItems(req.params.id);
 
-  return res.json(mapOpportunityItemResponse(updated));
+  return res.json({ ...mapOpportunityItemResponse({ ...updated, product: productData }), erpUnitPrice: erpPrice.price, erpPriceDiffers: false });
 });
 
 router.delete("/opportunities/:id/items/:itemId", async (req, res) => {
@@ -10473,6 +10501,15 @@ router.put("/settings/planning-visit-rules", authorize("diretor", "gerente"), va
   ];
   await prisma.$transaction(entries.map(([key, number]) => prisma.appConfig.upsert({ where: { key }, update: { value: String(number) }, create: { key, value: String(number) }, select: { value: true } })));
   return res.json(await getPlanningVisitRules());
+});
+
+// Política comercial: todos os perfis leem (a tela de itens precisa do limite e do aviso); só o diretor altera.
+router.get("/settings/commercial-policy", authorize("diretor", "gerente", "vendedor"), async (_req, res) => {
+  return res.json(await getCommercialPolicy());
+});
+
+router.put("/settings/commercial-policy", authorize("diretor"), validateBody(commercialPolicySchema), async (req, res) => {
+  return res.json(await saveCommercialPolicy(req.body));
 });
 
 router.get("/ai/commercial-insights", authorize("diretor", "gerente"), async (req, res) => {
