@@ -496,8 +496,8 @@ campo vale desligado. Sem migration e sem variável nova. Código em
 
 - O envio do resumo é `EvolutionClient.sendTextToCrmUser` (`POST /message/sendText/{instância}`); o outro envio do
   sistema é o da Fase C (`sendTextToClient`), com destino próprio e recusado aqui. O destino tem de ser o objeto
-  emitido por `resolveCrmUserRecipient`, que lê o usuário na hora: ativo, celular válido em `User.phone` e **fora do índice de telefones de cliente** (`ClientPhoneIndex`, inclusive cliente
-  arquivado). O objeto vale 2 minutos; um objeto montado à mão, ou uma cópia dele, é recusado antes da rede.
+  emitido por `resolveCrmUserRecipient`, que lê o usuário na hora: ativo, celular válido em `User.phone` e **fora
+  do índice de telefones de cliente** (`ClientPhoneIndex`, inclusive cliente arquivado). O objeto vale 2 minutos; um objeto montado à mão, ou uma cópia dele, é recusado antes da rede.
 - Teste estático (`whatsappSendGuard.test.ts`): só o resumo diário chama `sendTextToCrmUser`, e só o cliente do
   Evolution conhece `/message/...`.
 - Celular do usuário também cadastrado em cliente: recusado (`phone_matches_client`). O painel e a prévia
