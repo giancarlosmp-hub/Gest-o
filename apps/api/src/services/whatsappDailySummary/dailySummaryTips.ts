@@ -1,8 +1,16 @@
-import { WHATSAPP_DAILY_SUMMARY_MAX_ITEMS_PER_SECTION, type WhatsAppDailySummaryTipsStatus } from "@salesforce-pro/shared";
+import {
+  DEFAULT_WHATSAPP_DAILY_SUMMARY_TIPS_MODEL,
+  WHATSAPP_DAILY_SUMMARY_MAX_ITEMS_PER_SECTION,
+  type WhatsAppDailySummaryTipsModel,
+  type WhatsAppDailySummaryTipsStatus
+} from "@salesforce-pro/shared";
+import { env } from "../../config/env.js";
 import { logApiEvent } from "../../utils/logger.js";
 import { parseAiJsonObject } from "../ai/aiResponseParser.js";
-import { aiService as defaultAiService, type AiService } from "../ai/aiService.js";
+import { aiService as defaultAiService, AiService } from "../ai/aiService.js";
 import { runAiFlow } from "../ai/aiTimeBudget.js";
+import { groqTextConfig, type GroqTextConfig } from "../ai/groqTextConfig.js";
+import { GROQ_PROVIDER_NAME, OpenAICompatibleProvider } from "../ai/openAiCompatibleProvider.js";
 import { DAILY_SUMMARY_SECTION_ORDER, plainText, type DailySummaryData, type DailySummarySectionKey } from "./dailySummaryFormat.js";
 
 // Resumo diário: bloco "Dicas do gerente comercial" escrito pela IA. Montagem e conferência são funções puras; só
@@ -190,11 +198,50 @@ export type DailySummaryTipsContext = {
   round: DailySummaryTipsRound;
   /** Quem conta no teto diário de IA: o balde do resumo no envio, o usuário na prévia e no teste. */
   usageKey: string;
+  /** Modelo da Groq escolhido na configuração (só vale com a chave da Groq). Ausente = padrão. */
+  model?: WhatsAppDailySummaryTipsModel;
 };
 
 export type DailySummaryTipsResult = { status: WhatsAppDailySummaryTipsStatus; tips: string[] };
 
 type TipsAi = Pick<AiService, "chat" | "getStatus">;
+
+// Um AiService da Groq por modelo, para o status (lastError) durar entre os envios. Divide o teto diário de
+// chamadas com a IA do CRM (mesmo AiUsageLimiter): as dicas continuam no balde do resumo ou do usuário.
+const groqTipsServices = new Map<string, AiService>();
+
+/**
+ * IA das dicas: a Groq com o modelo escolhido quando a chave da Groq existe; senão o provedor de IA do CRM (como
+ * antes). A chave ligada ou não da IA (AI_CHAT_ENABLED), o filtro central, o teto diário e o orçamento de 8 s
+ * valem igual. Em 429 o AiService não tenta de novo: as dicas saem vazias e o resumo vai sem elas.
+ */
+export function dailySummaryTipsAi(
+  model: WhatsAppDailySummaryTipsModel = DEFAULT_WHATSAPP_DAILY_SUMMARY_TIPS_MODEL,
+  deps: { groq?: GroqTextConfig | null; fallback?: AiService } = {}
+): AiService {
+  const fallback = deps.fallback ?? defaultAiService;
+  const groq = deps.groq === undefined ? groqTextConfig() : deps.groq;
+  if (!groq) return fallback;
+  const cacheKey = `${model}\n${groq.baseUrl}`;
+  let service = groqTipsServices.get(cacheKey);
+  if (!service) {
+    service = new AiService(
+      () =>
+        new OpenAICompatibleProvider({
+          providerName: GROQ_PROVIDER_NAME,
+          baseUrl: groq.baseUrl,
+          apiKey: groq.apiKey,
+          model,
+          timeoutMs: env.aiTimeoutMs,
+          defaultTemperature: env.aiTemperature,
+          defaultMaxTokens: env.aiMaxOutputTokens
+        }),
+      fallback.usageLimiter
+    );
+    groqTipsServices.set(cacheKey, service);
+  }
+  return service;
+}
 type TipsLog = (level: "INFO" | "WARN", message: string, data: Record<string, unknown>) => void;
 
 /**
@@ -205,12 +252,14 @@ export async function generateDailySummaryTips(
   data: DailySummaryData,
   now: Date,
   context: DailySummaryTipsContext,
-  ai: TipsAi = defaultAiService,
+  ai: TipsAi = dailySummaryTipsAi(context.model),
   log: TipsLog = (level, message, meta) => logApiEvent(level, message, meta)
 ): Promise<DailySummaryTipsResult> {
   let codes = 0;
+  // Provedor e modelo usados (rótulos, sem conteúdo), para o log dizer se as dicas foram à Groq ou à IA do CRM.
+  let provider: { provider: string; model: string } | null = null;
   const finish = (status: WhatsAppDailySummaryTipsStatus, tips: string[] = [], extra: Record<string, unknown> = {}): DailySummaryTipsResult => {
-    log(status === "ok" ? "INFO" : "WARN", "[whatsapp daily summary] tips", { result: status, codes, tips: tips.length, ...extra });
+    log(status === "ok" ? "INFO" : "WARN", "[whatsapp daily summary] tips", { result: status, codes, tips: tips.length, ...provider, ...extra });
     return { status, tips };
   };
   try {
@@ -219,6 +268,7 @@ export async function generateDailySummaryTips(
     if (!input) return { status: "no_summary", tips: [] };
     codes = input.names.size;
     const status = ai.getStatus();
+    provider = { provider: status.provider, model: status.model };
     if (!status.enabled || !status.configured) {
       context.round.aiDown = true;
       return finish("ai_unavailable");

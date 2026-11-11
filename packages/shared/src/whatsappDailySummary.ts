@@ -12,6 +12,19 @@ export const whatsappDailySummarySectionsSchema = z
   })
   .strict();
 
+/**
+ * Modelo de texto da Groq usado nas dicas do gerente comercial (só quando a chave da Groq existe; sem ela, as dicas
+ * usam o provedor de IA do CRM). O primeiro é o padrão.
+ */
+export const WHATSAPP_DAILY_SUMMARY_TIPS_MODELS = ["openai/gpt-oss-120b", "openai/gpt-oss-20b"] as const;
+export type WhatsAppDailySummaryTipsModel = (typeof WHATSAPP_DAILY_SUMMARY_TIPS_MODELS)[number];
+export const DEFAULT_WHATSAPP_DAILY_SUMMARY_TIPS_MODEL: WhatsAppDailySummaryTipsModel = "openai/gpt-oss-120b";
+
+export const WHATSAPP_DAILY_SUMMARY_TIPS_MODEL_LABELS: Record<WhatsAppDailySummaryTipsModel, string> = {
+  "openai/gpt-oss-120b": "GPT-OSS 120B (padrão, mais qualidade)",
+  "openai/gpt-oss-20b": "GPT-OSS 20B (mais leve)"
+};
+
 export const whatsappDailySummaryConfigSchema = z
   .object({
     enabled: z.boolean(),
@@ -20,7 +33,9 @@ export const whatsappDailySummaryConfigSchema = z
     senderUserId: z.string().trim().min(1).max(64).nullable(),
     sections: whatsappDailySummarySectionsSchema,
     // Bloco "Dicas do gerente comercial" gerado pela IA. Ausente (configuração antiga) = desligado.
-    managerTips: z.boolean().default(false)
+    managerTips: z.boolean().default(false),
+    // Ausente (configuração antiga) = modelo padrão.
+    managerTipsModel: z.enum(WHATSAPP_DAILY_SUMMARY_TIPS_MODELS).default(DEFAULT_WHATSAPP_DAILY_SUMMARY_TIPS_MODEL)
   })
   .strict();
 
@@ -32,7 +47,8 @@ export const DEFAULT_WHATSAPP_DAILY_SUMMARY_CONFIG: WhatsAppDailySummaryConfig =
   sendTime: "07:30",
   senderUserId: null,
   sections: { reactivations: true, newOpportunities: true, overdueFollowUps: true, todayFollowUps: true },
-  managerTips: false
+  managerTips: false,
+  managerTipsModel: DEFAULT_WHATSAPP_DAILY_SUMMARY_TIPS_MODEL
 };
 
 /** Corpo da prévia e do "Enviar teste para mim": de qual vendedor é o resumo. */

@@ -1,12 +1,17 @@
 import assert from "node:assert/strict";
+import { env } from "../../config/env.js";
 import type { AiChatRequest } from "../ai/aiProvider.js";
-import type { AiService } from "../ai/aiService.js";
+import { AiService } from "../ai/aiService.js";
+import { AiUsageLimiter } from "../ai/aiUsageLimiter.js";
+import { groqTextConfig } from "../ai/groqTextConfig.js";
+import { OpenAICompatibleProvider } from "../ai/openAiCompatibleProvider.js";
 import type { DailySummaryData, DailySummaryItem, DailySummaryTipFacts } from "./dailySummaryFormat.js";
 import {
   buildDailySummaryTipsInput,
   createDailySummaryTipsRound,
   DAILY_SUMMARY_TIPS_SYSTEM_PROMPT,
   DAILY_SUMMARY_TIPS_USAGE_BUCKET,
+  dailySummaryTipsAi,
   dailySummaryTipsUserMessage,
   generateDailySummaryTips,
   MAX_TIP_CODES,
@@ -208,6 +213,87 @@ assert.equal(reason(""), "invalid_format");
   assert.match(all, /"reason":"unknown_code"/);
   assert.match(all, /"codes":3/);
   assert.doesNotMatch(all, /Ficticia|Ficticio|Ligue|aveia|desconto|C2|48000/i, "log só com situação, motivo e contagens");
+}
+
+// 5) Provedor das dicas: Groq quando a chave existe (modelo da configuração), senão a IA do CRM. fetch falso: nada
+// sai da máquina. Chave e endereço fictícios.
+{
+  env.aiChatEnabled = true;
+  const crmAi = new AiService(
+    () => new OpenAICompatibleProvider({ providerName: "openrouter", baseUrl: "https://crm-ficticio.test/v1", apiKey: "chave-crm-ficticia", model: "fornecedor/modelo-ficticio:free", timeoutMs: 1_000, defaultTemperature: 0.2, defaultMaxTokens: 512 }),
+    new AiUsageLimiter(async () => 1_000)
+  );
+  const groq = { baseUrl: "https://groq-ficticio.test/openai/v1", apiKey: "chave-groq-ficticia" };
+
+  // Sem chave da Groq: as dicas usam a IA do CRM, como antes.
+  assert.equal(dailySummaryTipsAi("openai/gpt-oss-120b", { groq: null, fallback: crmAi }), crmAi);
+  assert.equal(groqTextConfig({ whatsappTranscriptionBaseUrl: "https://groq-ficticio.test/openai/v1", whatsappTranscriptionApiKey: "" }), null);
+  assert.equal(groqTextConfig({ whatsappTranscriptionBaseUrl: "", whatsappTranscriptionApiKey: "chave-groq-ficticia" }), null);
+  assert.deepEqual(groqTextConfig({ whatsappTranscriptionBaseUrl: " https://groq-ficticio.test/openai/v1 ", whatsappTranscriptionApiKey: " chave-groq-ficticia " }), groq);
+
+  // Com chave: Groq, modelo da configuração (padrão 120b), mesmo teto diário da IA do CRM.
+  const groqDefault = dailySummaryTipsAi(undefined, { groq, fallback: crmAi });
+  assert.notEqual(groqDefault, crmAi);
+  assert.deepEqual([groqDefault.getStatus().provider, groqDefault.getStatus().model], ["groq", "openai/gpt-oss-120b"]);
+  assert.equal(groqDefault.usageLimiter, crmAi.usageLimiter);
+  assert.equal(dailySummaryTipsAi("openai/gpt-oss-120b", { groq, fallback: crmAi }), groqDefault, "um serviço por modelo");
+  assert.equal(dailySummaryTipsAi("openai/gpt-oss-20b", { groq, fallback: crmAi }).getStatus().model, "openai/gpt-oss-20b");
+
+  const originalFetch = globalThis.fetch;
+  const calls: Array<{ url: string; body: Record<string, any> }> = [];
+  let respond: () => Response = () => Response.json({ choices: [{ message: { role: "assistant", content: answer(["Ligue hoje para C2."]) }, finish_reason: "stop" }] });
+  globalThis.fetch = (async (input: URL | RequestInfo, init?: RequestInit) => {
+    calls.push({ url: String(input), body: JSON.parse(String(init?.body)) });
+    return respond();
+  }) as typeof fetch;
+  const logs: string[] = [];
+  const log = (level: string, message: string, meta: Record<string, unknown>) => void logs.push(JSON.stringify({ level, message, meta }));
+  const originalInfo = console.info;
+  const originalWarn = console.warn;
+  const originalError = console.error;
+  console.info = console.warn = console.error = () => undefined;
+  try {
+    // Dicas pela Groq: endereço e corpo da Groq, conteúdo conferido como sempre.
+    const groq20b = dailySummaryTipsAi("openai/gpt-oss-20b", { groq, fallback: crmAi });
+    const ok = await generateDailySummaryTips(data, now, { round: createDailySummaryTipsRound(), usageKey: DAILY_SUMMARY_TIPS_USAGE_BUCKET, model: "openai/gpt-oss-20b" }, groq20b, log);
+    assert.deepEqual(ok, { status: "ok", tips: ["Ligue hoje para Agropecuaria Ficticia Alfa Ltda."] });
+    assert.equal(calls[0].url, "https://groq-ficticio.test/openai/v1/chat/completions");
+    assert.equal(calls[0].body.model, "openai/gpt-oss-20b");
+    assert.equal(calls[0].body.reasoning_effort, "low");
+    assert.equal(calls[0].body.include_reasoning, false);
+    assert.equal(calls[0].body.max_completion_tokens, 600);
+    assert.deepEqual(calls[0].body.response_format, { type: "json_object" });
+    assert.equal("reasoning" in calls[0].body, false);
+    assert.match(logs.at(-1)!, /"provider":"groq","model":"openai\/gpt-oss-20b"/);
+
+    // 429 da Groq: uma chamada só (sem nova tentativa), sem dicas e a rodada desligada; o resumo sai sem o bloco.
+    respond = () => new Response(JSON.stringify({ error: { message: "limite ficticio" } }), { status: 429, headers: { "content-type": "application/json", "retry-after": "30" } });
+    const round = createDailySummaryTipsRound();
+    const before = calls.length;
+    assert.deepEqual(await generateDailySummaryTips(data, now, { round, usageKey: DAILY_SUMMARY_TIPS_USAGE_BUCKET }, groq20b, log), { status: "ai_failed", tips: [] });
+    assert.equal(calls.length - before, 1, "429 não tenta de novo");
+    assert.equal(round.aiDown, true);
+    assert.equal(groq20b.getStatus().lastError, "http_429");
+    assert.match(logs.at(-1)!, /"result":"ai_failed".*"provider":"groq"/);
+
+    // Sem chave: a chamada vai ao provedor do CRM, com o corpo do OpenRouter de sempre.
+    respond = () => Response.json({ choices: [{ message: { role: "assistant", content: answer(["Ligue hoje para C2."]) }, finish_reason: "stop" }] });
+    const viaCrm = await generateDailySummaryTips(data, now, { round: createDailySummaryTipsRound(), usageKey: DAILY_SUMMARY_TIPS_USAGE_BUCKET }, dailySummaryTipsAi("openai/gpt-oss-120b", { groq: null, fallback: crmAi }), log);
+    assert.equal(viaCrm.status, "ok");
+    const last = calls.at(-1)!;
+    assert.equal(last.url, "https://crm-ficticio.test/v1/chat/completions");
+    assert.equal(last.body.model, "fornecedor/modelo-ficticio:free");
+    assert.equal(last.body.max_tokens, 600);
+    assert.equal("reasoning_effort" in last.body, false);
+    assert.match(logs.at(-1)!, /"provider":"openrouter"/);
+
+    assert.doesNotMatch(logs.join("\n"), /chave-|Agropecuaria|Produtor|Revenda|Ligue|limite ficticio/i, "log só com códigos e números");
+  } finally {
+    globalThis.fetch = originalFetch;
+    console.info = originalInfo;
+    console.warn = originalWarn;
+    console.error = originalError;
+  }
 }
 
 console.log("dailySummaryTips.test.ts: ok");

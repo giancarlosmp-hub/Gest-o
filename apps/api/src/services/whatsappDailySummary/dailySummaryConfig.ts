@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import {
   DEFAULT_WHATSAPP_DAILY_SUMMARY_CONFIG,
   WHATSAPP_DAILY_SUMMARY_SELLER_STATUSES,
+  WHATSAPP_DAILY_SUMMARY_TIPS_MODELS,
   whatsappDailySummaryConfigSchema,
   type WhatsAppDailySummaryConfig,
   type WhatsAppDailySummaryRunState,
@@ -48,6 +49,10 @@ export function parseDailySummaryConfig(value: string | null | undefined): Whats
       ...(parsed && typeof parsed === "object" ? parsed : {}),
       sections: { ...DEFAULT_WHATSAPP_DAILY_SUMMARY_CONFIG.sections, ...(parsed?.sections && typeof parsed.sections === "object" ? parsed.sections : {}) }
     };
+    // Modelo das dicas que saiu da lista: volta ao padrão sem derrubar o resto da configuração.
+    if (!(WHATSAPP_DAILY_SUMMARY_TIPS_MODELS as readonly unknown[]).includes(merged.managerTipsModel)) {
+      merged.managerTipsModel = DEFAULT_WHATSAPP_DAILY_SUMMARY_CONFIG.managerTipsModel;
+    }
     const result = whatsappDailySummaryConfigSchema.safeParse(merged);
     return result.success ? result.data : DEFAULT_WHATSAPP_DAILY_SUMMARY_CONFIG;
   } catch {

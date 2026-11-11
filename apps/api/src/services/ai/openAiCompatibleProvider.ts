@@ -28,6 +28,21 @@ const isAbortError = (error: unknown) => error instanceof DOMException
 
 const isOpenRouter = (providerName: string) => providerName.trim().toLowerCase() === "openrouter";
 
+// Parâmetros só da Groq (https://console.groq.com/docs/reasoning e /docs/api-reference): raciocínio com esforço baixo
+// e fora da resposta (gpt-oss aceita low/medium/high e o padrão é medium). Na Groq o max_tokens é obsoleto: vai
+// max_completion_tokens.
+export const GROQ_PROVIDER_NAME = "groq";
+export const GROQ_REASONING = { reasoning_effort: "low", include_reasoning: false } as const;
+
+const isGroq = (providerName: string) => providerName.trim().toLowerCase() === GROQ_PROVIDER_NAME;
+
+const providerParams = (providerName: string, request: AiChatRequest, maxTokens: number) => {
+  const jsonMode = request.responseFormat === "json_object" ? { response_format: { type: "json_object" } } : {};
+  if (isGroq(providerName)) return { max_completion_tokens: maxTokens, ...GROQ_REASONING, ...jsonMode };
+  if (isOpenRouter(providerName)) return { max_tokens: maxTokens, reasoning: OPENROUTER_REASONING, ...jsonMode };
+  return { max_tokens: maxTokens };
+};
+
 export class OpenAICompatibleProvider implements AiProvider {
   readonly name: string;
   readonly mode: string = "openai-compatible-chat-completions";
@@ -79,13 +94,7 @@ export class OpenAICompatibleProvider implements AiProvider {
           model: this.model,
           messages,
           temperature: request.temperature ?? this.defaultTemperature,
-          max_tokens: request.maxTokens ?? this.defaultMaxTokens,
-          ...(isOpenRouter(this.name)
-            ? {
-                reasoning: OPENROUTER_REASONING,
-                ...(request.responseFormat === "json_object" ? { response_format: { type: "json_object" } } : {})
-              }
-            : {})
+          ...providerParams(this.name, request, request.maxTokens ?? this.defaultMaxTokens)
         })
       });
       // Os cabeçalhos podem chegar bem antes do corpo (o OpenRouter responde cedo e completa depois). O tempo da
