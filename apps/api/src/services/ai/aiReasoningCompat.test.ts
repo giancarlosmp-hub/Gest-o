@@ -8,7 +8,7 @@ import { parseAiJsonObject, parseAiTextResponse } from "./aiResponseParser.js";
 import { aiService, AiService } from "./aiService.js";
 import { AiUsageLimiter } from "./aiUsageLimiter.js";
 import { OllamaProvider } from "./ollamaProvider.js";
-import { OPENROUTER_REASONING, OpenAICompatibleProvider } from "./openAiCompatibleProvider.js";
+import { GROQ_PROVIDER_NAME, GROQ_REASONING, OPENROUTER_REASONING, OpenAICompatibleProvider } from "./openAiCompatibleProvider.js";
 
 // Provedor falso: fetch simulado, nenhuma chamada sai da máquina. Dados fictícios.
 const originalFetch = globalThis.fetch;
@@ -131,6 +131,34 @@ test("payload ao openrouter leva reasoning e response_format; ao ollama, nenhum 
   await otherProvider.chat({ messages: [{ role: "user", content: "pedido ficticio" }], responseFormat: "json_object" });
   assert.equal("reasoning" in sentBodies[3], false);
   assert.equal("response_format" in sentBodies[3], false);
+});
+
+test("payload à groq leva reasoning_effort low, include_reasoning false, max_completion_tokens e response_format", async () => {
+  nextReply = reply({ content: JSON.stringify(SUGGESTION) });
+  sentBodies.length = 0;
+  const groq = new OpenAICompatibleProvider({ providerName: GROQ_PROVIDER_NAME, baseUrl: "https://groq-ficticio.test/openai/v1", apiKey: "chave-ficticia", model: "openai/gpt-oss-120b", timeoutMs: 1_000, defaultTemperature: 0.2, defaultMaxTokens: 512 });
+  await groq.chat({ messages: [{ role: "user", content: "pedido ficticio" }], maxTokens: 600, responseFormat: "json_object" });
+  const body = sentBodies[0];
+  assert.equal(body.model, "openai/gpt-oss-120b");
+  assert.equal(body.reasoning_effort, "low");
+  assert.equal(body.include_reasoning, false);
+  assert.deepEqual({ reasoning_effort: body.reasoning_effort, include_reasoning: body.include_reasoning }, GROQ_REASONING);
+  assert.equal(body.max_completion_tokens, 600);
+  assert.deepEqual(body.response_format, { type: "json_object" });
+  assert.equal("max_tokens" in body, false, "na Groq o max_tokens é obsoleto");
+  assert.equal("reasoning" in body, false, "o objeto reasoning é só do OpenRouter");
+
+  // Texto livre: sem modo JSON; teto padrão do provedor.
+  await groq.chat({ messages: [{ role: "user", content: "pedido ficticio" }] });
+  assert.equal("response_format" in sentBodies[1], false);
+  assert.equal(sentBodies[1].max_completion_tokens, 512);
+  assert.equal(sentBodies[1].reasoning_effort, "low");
+
+  // OpenRouter continua com o mesmo corpo de antes.
+  await openRouter().chat({ messages: [{ role: "user", content: "pedido ficticio" }], maxTokens: 900, responseFormat: "json_object" });
+  assert.deepEqual(Object.keys(sentBodies[2]).sort(), ["max_tokens", "messages", "model", "reasoning", "response_format", "temperature"]);
+  assert.equal("reasoning_effort" in sentBodies[2], false);
+  assert.equal("max_completion_tokens" in sentBodies[2], false);
 });
 
 test("leitor de resposta: <think>, cerca e primeiro objeto JSON válido", () => {
