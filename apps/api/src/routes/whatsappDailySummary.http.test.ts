@@ -74,7 +74,7 @@ const logs: string[] = [];
 const originals = { info: console.info, warn: console.warn, error: console.error };
 for (const level of ["info", "warn", "error"] as const) console[level] = (...args: unknown[]) => void logs.push(args.map((arg) => (typeof arg === "string" ? arg : JSON.stringify(arg))).join(" "));
 
-const config = { enabled: true, sendTime: "07:45", senderUserId: "manager-a", sections: { reactivations: true, newOpportunities: true, overdueFollowUps: true, todayFollowUps: false }, managerTips: false };
+const config = { enabled: true, sendTime: "07:45", senderUserId: "manager-a", sections: { reactivations: true, newOpportunities: true, overdueFollowUps: true, todayFollowUps: false }, managerTips: false, managerTipsModel: "openai/gpt-oss-120b" };
 
 try {
   env.communicationsEnabled = true;
@@ -118,10 +118,13 @@ try {
   assert.equal((await call("director-a", "PUT", "/daily-summary/config", { ...config, sendTime: "7:45" })).status, 400);
   assert.equal((await call("director-a", "PUT", "/daily-summary/config", { ...config, extra: true })).status, 400);
   assert.equal((await call("director-a", "PUT", "/daily-summary/config", { ...config, managerTips: "sim" })).status, 400);
-  // Corpo antigo, sem managerTips: aceito, com as dicas desligadas.
-  const { managerTips: _omitted, ...legacyBody } = config;
+  assert.equal((await call("director-a", "PUT", "/daily-summary/config", { ...config, managerTipsModel: "outro/modelo-ficticio" })).status, 400, "só os modelos da lista");
+  // Corpo antigo, sem managerTips nem modelo: aceito, com as dicas desligadas e o modelo padrão.
+  const { managerTips: _omitted, managerTipsModel: _omittedModel, ...legacyBody } = config;
   const legacy = await call("director-a", "PUT", "/daily-summary/config", legacyBody);
-  assert.deepEqual([legacy.status, legacy.json.managerTips], [200, false]);
+  assert.deepEqual([legacy.status, legacy.json.managerTips, legacy.json.managerTipsModel], [200, false, "openai/gpt-oss-120b"]);
+  const lighter = await call("director-a", "PUT", "/daily-summary/config", { ...config, managerTipsModel: "openai/gpt-oss-20b" });
+  assert.deepEqual([lighter.status, lighter.json.managerTipsModel], [200, "openai/gpt-oss-20b"]);
   const saved = await call("director-a", "PUT", "/daily-summary/config", config);
   assert.deepEqual([saved.status, saved.json], [200, config]);
   assert.deepEqual(JSON.parse(tables.appConfig.find((row) => row.key === DAILY_SUMMARY_CONFIG_KEY)!.value), config);
@@ -150,6 +153,8 @@ try {
   env.aiApiKey = "chave-ficticia-ia";
   env.aiModel = "modelo-ficticio";
   env.aiTimeoutMs = 30_000;
+  // Sem chave da Groq: as dicas usam a IA do CRM (a IA falsa acima).
+  env.whatsappTranscriptionApiKey = "";
   const plainText = preview.json.text;
   assert.equal((await call("director-a", "PUT", "/daily-summary/config", { ...config, managerTips: true })).json.managerTips, true);
   const aiOff = await call("manager-a", "POST", "/daily-summary/preview", { sellerId: "seller-a" });

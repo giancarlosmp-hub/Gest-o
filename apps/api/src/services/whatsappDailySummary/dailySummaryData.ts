@@ -142,6 +142,6 @@ export async function buildDailySummaryMessage(
   const text = formatDailySummary(data, { crmUrl });
   if (!config.managerTips) return { text, tips: "off" };
   if (text === null) return { text, tips: "no_summary" };
-  const result = await (deps.generateTips ?? generateDailySummaryTips)(data, now, tips);
+  const result = await (deps.generateTips ?? generateDailySummaryTips)(data, now, { ...tips, model: config.managerTipsModel });
   return { text: result.tips.length ? formatDailySummary(data, { crmUrl, managerTips: result.tips }) : text, tips: result.status };
 }

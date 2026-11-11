@@ -123,7 +123,8 @@ try {
   const context = { round: createDailySummaryTipsRound(), usageKey: "resumo-diario" };
   const generated: Array<DailySummaryData> = [];
   let tipsResult: Awaited<ReturnType<typeof generateDailySummaryTips>> = { status: "ok", tips: ["Dica ficticia"] };
-  const generateTips: typeof generateDailySummaryTips = async (summary) => (generated.push(summary), tipsResult);
+  const tipsContexts: Array<Parameters<typeof generateDailySummaryTips>[2]> = [];
+  const generateTips: typeof generateDailySummaryTips = async (summary, _now, tipsContext) => (generated.push(summary), tipsContexts.push(tipsContext), tipsResult);
 
   const off = await buildDailySummaryMessage(seller, config, now, context, { generateTips });
   assert.equal(off.tips, "off");
@@ -134,6 +135,10 @@ try {
   assert.equal(on.tips, "ok");
   assert.match(on.text!, /\*Dicas do gerente comercial\*\n• Dica ficticia\n— Claude, gerente comercial/);
   assert(generated[0].sections.overdueFollowUps!.items[0].tipFacts, "a IA recebe os dados das dicas");
+  assert.deepEqual(tipsContexts[0], { ...context, model: "openai/gpt-oss-120b" }, "modelo padrão da configuração");
+  await buildDailySummaryMessage(seller, { ...config, managerTips: true, managerTipsModel: "openai/gpt-oss-20b" }, now, context, { generateTips });
+  assert.equal(tipsContexts[1].model, "openai/gpt-oss-20b", "modelo escolhido no painel vai para as dicas");
+  generated.length = 1;
 
   tipsResult = { status: "ai_failed", tips: [] };
   const failed = await buildDailySummaryMessage(seller, { ...config, managerTips: true }, now, context, { generateTips });
