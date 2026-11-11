@@ -1,3 +1,15 @@
+# Política comercial: preço travado do ERP e desconto máximo por perfil — código pronto, aguardando merge — 11/11/2026
+
+- O preço do item de oportunidade é sempre o do ERP (tabela da oportunidade), recalculado na API para todos os perfis;
+  item sem produto do ERP é recusado. Desconto só em % por item, até o limite do perfil (padrão 3% para todos, igual
+  ao ERP); acima do limite o item não é salvo. O aviso configurável aparece sempre que há desconto.
+- Configurações → Política Comercial (só o diretor altera): liga/desliga, limite por perfil e texto do aviso, no
+  AppConfig `commercial.policy`. Auditoria de cada desconto no `OpportunityChangeLog`.
+- Pedido ERP bloqueado com tabela diferente da dos itens ou item fora do preço atual do ERP (itens antigos ficam
+  sinalizados "Preço diferente do ERP atual" até serem editados). Payload: `PRECO` = `PRECO_LISTA` = preço do ERP e
+  desconto em valor por item, arredondado para baixo no centavo. Ditado por voz sem preço falado.
+- Sem migration. Pendências em `TECH_DEBT.md`, "TD-COMMERCIAL-POLICY".
+
 # WhatsApp Fase D: resumo diário aos vendedores — código pronto, aguardando merge — 07/11/2026
 
 - Dias úteis, 07:30 de Brasília (configurável): cada vendedor recebe no WhatsApp comercial dele reativações

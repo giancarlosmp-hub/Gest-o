@@ -1281,7 +1281,8 @@ Comercial (`OpportunityDraftSection.tsx`, `OpportunityDraftCard.tsx`; regras em 
 - Responsável: vendedor = ele mesmo (não manda `ownerSellerId`); gerente/diretor = dono do candidato, editável entre
   `/opportunities/seller-options`. Trocar a etapa volta a probabilidade para 20/50/70, salvo se já foi editada.
 - Sem item, o valor é obrigatório. Retorno → `followUpDate`/`expectedReturnDate`; fechamento → `expectedCloseDate`.
-  Item sem desconto: o preço informado vai como `unitPrice`, com a diferença em % visível. Pendências recalculadas na
+  Item sem desconto e sempre no preço do ERP (o preço falado é ignorado com o aviso `price_ignored`; ver
+  TD-COMMERCIAL-POLICY). Pendências recalculadas na
   tela; "Criar oportunidade" só habilita sem elas.
 - Confirmação: `POST /opportunities` uma vez só (o id fica no rascunho) e `POST /opportunities/:id/items` por item; item
   que falha fica pendente, os gravados travam, e "Tentar de novo" só reenvia os pendentes. 403/409 mostram a mensagem
@@ -1339,11 +1340,9 @@ ditado do teclado. Decisões da diretoria em 29/10/2026:
 Pendente:
 
 - (a) Microfone próprio pelo Web Speech API: adiado (ver "Microfone adiado" acima).
-- (b) Limite de desconto por perfil: não existe regra para item de oportunidade. `computeOpportunityItemTotals`
-  (`crudRoutes.ts`) só confere desconto entre 0 e 100% e até o valor bruto, com o TODO "adicionar limites de desconto
-  por perfil via Configurações". `Product.minPrice` não é usado como regra (a sincronização preenche com o próprio
-  preço quando o ERP não manda `PRECO_MINIMO`). Quando a regra existir, o rascunho deve aplicar a mesma ("precisa de
-  liberação").
+- (b) Limite de desconto por perfil: resolvido em TD-COMMERCIAL-POLICY (preço sempre do ERP, desconto só em %
+  limitado por perfil; o rascunho não usa mais preço falado). `Product.minPrice` continua sem uso como regra (a
+  sincronização preenche com o próprio preço quando o ERP não manda `PRECO_MINIMO`).
 - (c) Busca de produto sem tenant: `/products/search` e o rascunho não filtram `Product.tenantId` (nulo em parte do
   catálogo). Não alterado.
 - (d) Número por extenso longe de unidade e de "preço"/"valor" não é lido (de propósito, por causa dos nomes). Cada
@@ -1741,3 +1740,39 @@ marcado como ambíguo) diverge da regra compartilhada `normalizeBrazilPhone` (`5
 fluxo da Meta (desligado) sempre devolve `no_match`. A Fase B usa a regra compartilhada e o `ClientPhoneIndex`.
 Remover ou alinhar quando a integração da Meta for retomada.
 
+
+### TD-COMMERCIAL-POLICY — preço travado do ERP e desconto máximo por perfil
+
+**Aberto, médio.** Regra em vigor: o preço do item de oportunidade é sempre o do ERP para a tabela da oportunidade,
+recalculado na API (`opportunityItemErpPrice.ts`) para todos os perfis; item sem produto do ERP é recusado (400); o
+desconto é só em % por item, limitado pelo perfil de quem lança (padrão 3% para vendedor, gerente e diretor, igual ao
+ERP), e acima do limite o item não é salvo (tela e API). A regra fica em `packages/shared/src/commercialPolicy.ts`; a
+configuração (liga/desliga, limite por perfil e texto do aviso) fica no AppConfig `commercial.policy`, em
+Configurações → Política Comercial (só o diretor altera). Cada desconto dado ou alterado grava
+`OpportunityChangeLog` com `field = item.<linha>.discountPercent` e o autor. O ditado por voz não usa mais preço
+falado (aviso `price_ignored`). O pedido ERP é bloqueado quando a tabela do pedido difere da que precificou os itens,
+quando algum item está fora do preço atual do ERP ("Preço diferente do ERP atual") e quando há item antigo com
+desconto em R$. No payload, `PRECO` = `PRECO_LISTA` = preço do ERP e o desconto vai em valor por item
+(`VALOR_DESCONTO` = `VALOR_BRUTO` × %, arredondado para baixo no centavo; `VALOR_LIQUIDO` = bruto − desconto); os
+totais do pedido são a soma dos itens. O CRM grava a mesma conta no item. Sem migration.
+
+Pendente e riscos:
+
+- **Limite do ERP:** o UltraFV3 tem o parâmetro "Limitar % desconto a" (3,00 hoje) e "Liberar descontos e acréscimo
+  no pedido (gestão)" desmarcado. O fornecedor confirmou que o limite vale também para os pedidos da integração. Se o
+  limite do ERP for menor que o do CRM, o pedido será recusado pelo ERP; os dois precisam andar juntos. O contrato do
+  `POST /orders` não tem campo de percentual de desconto, só o valor (`VALOR_DESCONTO`); a forma como o ERP calcula o %
+  a partir do valor não foi confirmada (o arredondamento para baixo evita passar do limite por centavos).
+- **Tabela do cliente no ERP:** o `/partners` tem o campo `TABELA_PRECO`, vazio em todos os parceiros da amostra
+  conferida. Hoje o vendedor escolhe a Tabela 1 ou 2. Se um dia o ERP preencher `TABELA_PRECO`, o CRM passa a usá-la
+  como tabela da oportunidade, travada (PR futuro).
+- **Foto do preço de lista:** o item não guarda o preço do ERP no momento da gravação (exigiria migration, por exemplo
+  `OpportunityItem.listUnitPrice`). Sem ela, "Preço diferente do ERP atual" não separa preço alterado pelo vendedor de
+  preço que o ERP mudou depois; nos dois casos o pedido fica bloqueado até o item ser editado (o preço volta ao atual).
+- **Troca de tabela com itens:** mudar a tabela de uma oportunidade que já tem itens não reprecifica os itens; eles
+  ficam sinalizados e o pedido bloqueado até cada um ser editado.
+- **Itens antigos:** ficam como estão e são sinalizados. Item sem produto (antigo "manual") não pode ser editado, só
+  excluído. Item com desconto em R$ precisa receber o desconto em % ao ser editado.
+- **Relatório de descontos por vendedor:** fica para outro PR; a base é o `OpportunityChangeLog`
+  (`item.<linha>.discountPercent`, autor e data) e `discountTotal`/`grossTotal` dos itens.
+- **Política desligada:** o CRM não limita o desconto (só confere 0 a 100%); o ERP continua validando o dele.
