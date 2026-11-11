@@ -2,7 +2,7 @@ import { DragEvent, FormEvent, PointerEvent, ReactNode, TouchEvent, useCallback,
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { MoreHorizontal, Search } from "lucide-react";
-import { isProposalWithoutResponse } from "@salesforce-pro/shared";
+import { DEFAULT_COMMERCIAL_POLICY, isProposalWithoutResponse, type CommercialPolicy } from "@salesforce-pro/shared";
 import api from "../lib/apiClient";
 import { isNoResponseFilterInUrl } from "../lib/proposalsNoResponse";
 import { lastContactFormDayOf, lastContactPayloadOf } from "../lib/opportunityLastContact";
@@ -24,6 +24,7 @@ import ClientCreditAlertBanner, { ClientCreditAlert } from "../components/client
 import ClientErpPhones, { type ClientErpEmail, type ClientErpPhone } from "../components/clients/ClientErpPhones";
 import { consumeOpportunityCreateRequest } from "../lib/opportunityQuickAction";
 import { brazilMonthKey } from "../lib/brazilDate";
+import { OPPORTUNITY_ITEM_ERP_PRICE_DIFFERS_LABEL, opportunityItemAmounts, opportunityItemDiscountError, opportunityItemDiscountWarning, opportunityItemDraftForEdit, parseDiscountPercentInput } from "../lib/opportunityItemPolicy";
 import { CLIENT_WITHOUT_ERP_CODE_ORDER_MESSAGE } from "@salesforce-pro/shared";
 
 type Stage = "prospeccao" | "negociacao" | "proposta" | "ganho" | "perdido";
@@ -137,6 +138,9 @@ type OpportunityItemForm = {
   discountValue: string;
   notes: string;
   stock?: number | null;
+  // Preço atual do ERP e se o preço gravado é diferente dele (itens antigos); vem do GET dos itens.
+  erpUnitPrice?: number | null;
+  erpPriceDiffers?: boolean;
 };
 
 type FormState = {
@@ -296,7 +300,7 @@ const emptyOpportunityItem: OpportunityItemForm = {
   unit: "",
   quantity: "1",
   unitPrice: "0",
-  discountType: "value",
+  discountType: "percent",
   discountValue: "0",
   notes: "",
   stock: null
@@ -389,16 +393,8 @@ const confirmStockWarning = (productName: string, stock?: number | null) => {
 const isClientWithoutErpCode = (opportunity: Opportunity) =>
   Boolean(opportunity.clientData) && !opportunity.clientData?.code?.trim();
 
-function calculateItemTotals(item: OpportunityItemForm) {
-  const quantity = Number(item.quantity || 0);
-  const unitPrice = Number(item.unitPrice || 0);
-  const grossTotal = toTwoDecimals(quantity * unitPrice);
-  const discountValue = Number(item.discountValue || 0);
-  const discountTotalRaw = item.discountType === "percent" ? grossTotal * (discountValue / 100) : discountValue;
-  const discountTotal = toTwoDecimals(Math.max(0, Math.min(grossTotal, discountTotalRaw)));
-  const netTotal = toTwoDecimals(grossTotal - discountTotal);
-  return { grossTotal, discountTotal, netTotal };
-}
+// Mesma conta da API e do pedido ERP (desconto em % arredondado para baixo no centavo).
+const calculateItemTotals = (item: OpportunityItemForm) => opportunityItemAmounts(item);
 
 export default function OpportunitiesPage() {
   const { user } = useAuth();
@@ -418,6 +414,8 @@ export default function OpportunitiesPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [opportunityItems, setOpportunityItems] = useState<OpportunityItemForm[]>([]);
   const [itemDraft, setItemDraft] = useState<OpportunityItemForm>(emptyOpportunityItem);
+  // Política comercial (limite de desconto do perfil e aviso); sem resposta, vale o padrão (3%).
+  const [commercialPolicy, setCommercialPolicy] = useState<CommercialPolicy>(DEFAULT_COMMERCIAL_POLICY);
   const [productSearch, setProductSearch] = useState("");
   const [productOptions, setProductOptions] = useState<OpportunityProduct[]>([]);
   const [priceTableOptions, setPriceTableOptions] = useState<PriceTableOption[]>([]);
@@ -532,6 +530,12 @@ export default function OpportunitiesPage() {
       .catch(() => {
         setPriceTableOptions([{ code: "1", label: "1 · REVENDA / COOPERATIVA" }]);
       });
+  }, []);
+
+  useEffect(() => {
+    api.get<CommercialPolicy>("/settings/commercial-policy")
+      .then((response) => setCommercialPolicy(response.data))
+      .catch(() => setCommercialPolicy(DEFAULT_COMMERCIAL_POLICY));
   }, []);
 
   useEffect(() => {
@@ -913,7 +917,9 @@ export default function OpportunitiesPage() {
         discountType: (item.discountType || "value") as DiscountType,
         discountValue: String(item.discountValue ?? 0),
         notes: item.notes || "",
-        stock: typeof item.product?.stockQuantity === "number" ? item.product.stockQuantity : null
+        stock: typeof item.product?.stockQuantity === "number" ? item.product.stockQuantity : null,
+        erpUnitPrice: typeof item.erpUnitPrice === "number" ? item.erpUnitPrice : null,
+        erpPriceDiffers: Boolean(item.erpPriceDiffers)
       }));
       setOpportunityItems(loadedItems);
     } catch {
@@ -1072,27 +1078,20 @@ export default function OpportunitiesPage() {
       erpProductClassCode: draft.erpProductClassCode,
       unit: draft.unit || undefined,
       quantity: Number(draft.quantity || 0),
+      // O preço é recalculado na API com o preço do ERP; o desconto vai só em %.
       unitPrice: Number(draft.unitPrice || 0),
-      discountType: draft.discountType,
-      discountValue: Number(draft.discountValue || 0),
+      discountType: "percent" as const,
+      discountValue: parseDiscountPercentInput(draft.discountValue),
       notes: draft.notes || undefined
     };
 
-    if (payload.quantity <= 0 || payload.unitPrice < 0 || !payload.productNameSnapshot) {
-      toast.error("Preencha produto, quantidade e preço válidos.");
+    if (!payload.productId || payload.quantity <= 0 || !payload.productNameSnapshot) {
+      toast.error("Selecione um produto do ERP e informe a quantidade.");
       return;
     }
-    const draftTotals = calculateItemTotals(draft);
-    if (draft.discountType === "percent" && (payload.discountValue < 0 || payload.discountValue > 100)) {
-      toast.error("Desconto percentual deve estar entre 0 e 100.");
-      return;
-    }
-    if (draft.discountType === "value" && (payload.discountValue < 0 || payload.discountValue > draftTotals.grossTotal)) {
-      toast.error("Desconto em valor não pode ser maior que o valor bruto do item.");
-      return;
-    }
-    if (draftTotals.netTotal < 0) {
-      toast.error("Valor líquido do item não pode ser negativo.");
+    const discountError = opportunityItemDiscountError(commercialPolicy, user?.role, draft);
+    if (discountError) {
+      toast.error(discountError);
       return;
     }
 
@@ -1110,7 +1109,9 @@ export default function OpportunitiesPage() {
   };
 
   const editOpportunityItem = (item: OpportunityItemForm) => {
-    setItemDraft(item);
+    const { legacyValueDiscount, ...draft } = opportunityItemDraftForEdit(item);
+    if (legacyValueDiscount) toast.warning("Este item tinha desconto em R$. Informe o desconto em % para salvar.");
+    setItemDraft(draft);
     setProductSearch(`${item.erpProductCode} / ${item.erpProductClassCode} — ${item.productNameSnapshot}`);
     setSelectedProduct((current) => current?.id === item.productId ? current : null);
     setPriceTableWarning("");
@@ -1205,8 +1206,8 @@ export default function OpportunitiesPage() {
               unit: draft.unit || undefined,
               quantity: Number(draft.quantity || 0),
               unitPrice: Number(draft.unitPrice || 0),
-              discountType: draft.discountType,
-              discountValue: Number(draft.discountValue || 0),
+              discountType: "percent" as const,
+              discountValue: parseDiscountPercentInput(draft.discountValue),
               notes: draft.notes || undefined
             };
             try {
@@ -1392,6 +1393,8 @@ export default function OpportunitiesPage() {
   };
 
   const itemDraftTotals = useMemo(() => calculateItemTotals(itemDraft), [itemDraft]);
+  const itemDraftDiscountError = opportunityItemDiscountError(commercialPolicy, user?.role, itemDraft);
+  const itemDraftDiscountWarning = opportunityItemDiscountWarning(commercialPolicy, itemDraft);
   const savedOpportunityId = editing;
   const isOpportunitySaved = Boolean(savedOpportunityId);
   const effectiveProductId = itemDraft.productId || selectedProduct?.id || "";
@@ -1401,11 +1404,13 @@ export default function OpportunitiesPage() {
       && Boolean(itemDraft.unit)
       && Number(itemDraft.quantity || 0) > 0
       && Number(itemDraft.unitPrice || 0) >= 0
+      && !itemDraftDiscountError
     : Boolean(effectiveProductId)
       && Boolean(itemDraft.erpProductCode)
       && Boolean(itemDraft.unit)
     && Number(itemDraft.quantity || 0) > 0
-    && Number(itemDraft.unitPrice || 0) >= 0;
+    && Number(itemDraft.unitPrice || 0) >= 0
+    && !itemDraftDiscountError;
   const addItemDisabledReason = !effectiveProductId
       ? "Selecione um produto válido."
       : !itemDraft.erpProductCode
@@ -1416,7 +1421,7 @@ export default function OpportunitiesPage() {
             ? "Informe quantidade maior que zero."
             : Number(itemDraft.unitPrice || 0) < 0
               ? "Informe preço maior ou igual a zero."
-              : null;
+              : itemDraftDiscountError;
   const itemsTotals = useMemo(() => opportunityItems.reduce(
     (acc, current) => {
       const currentTotals = calculateItemTotals(current);
@@ -1673,7 +1678,9 @@ export default function OpportunitiesPage() {
             unitPrice: String(item.unitPrice ?? 0),
             discountType: (item.discountType || "value") as DiscountType,
             discountValue: String(item.discountValue ?? 0),
-            notes: item.notes || ""
+            notes: item.notes || "",
+            erpUnitPrice: typeof item.erpUnitPrice === "number" ? item.erpUnitPrice : null,
+            erpPriceDiffers: Boolean(item.erpPriceDiffers)
           })));
         }
         if (loadedItems.length < 1) {
@@ -1925,7 +1932,7 @@ export default function OpportunitiesPage() {
           <section className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
             <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
               <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Produtos da oportunidade</h4>
-              <span className="max-w-xl text-xs leading-relaxed text-slate-500">Adicione os produtos antes de salvar. O total dos itens atualizará automaticamente o valor da oportunidade. Preços sugeridos respeitam a tabela {form.priceTableCode || "1"} quando houver sincronização.</span>
+              <span className="max-w-xl text-xs leading-relaxed text-slate-500">Adicione os produtos antes de salvar. O total dos itens atualizará automaticamente o valor da oportunidade. O preço é o da tabela {form.priceTableCode || "1"} do ERP e não pode ser alterado; desconto só em %.</span>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -2020,19 +2027,15 @@ export default function OpportunitiesPage() {
                 <span className="text-sm font-medium text-slate-700">Quantidade</span>
                 <input className="w-full rounded-lg border border-slate-200 p-2" value={itemDraft.quantity} onChange={(e) => setItemDraft((current) => ({ ...current, quantity: sanitizeNumericInput(e.target.value) }))} />
               </label>
+              <div className="space-y-1">
+                <span className="text-sm font-medium text-slate-700">Preço unitário (ERP)</span>
+                <div className="rounded-lg border border-slate-200 bg-slate-100 p-2 text-sm text-slate-700" aria-readonly="true">{formatCurrencyBRL(Number(itemDraft.unitPrice || 0))}</div>
+                <p className="text-xs text-slate-500">Preço da tabela {form.priceTableCode || "1"} do ERP; não pode ser alterado.</p>
+              </div>
               <label className="space-y-1">
-                <span className="text-sm font-medium text-slate-700">Preço unitário</span>
-                <input className="w-full rounded-lg border border-slate-200 p-2" value={itemDraft.unitPrice} onChange={(e) => setItemDraft((current) => ({ ...current, unitPrice: sanitizeNumericInput(e.target.value) }))} />
-              </label>
-              <label className="space-y-1">
-                <span className="text-sm font-medium text-slate-700">Desconto</span>
-                <div className="flex gap-2">
-                  <select className="rounded-lg border border-slate-200 p-2" value={itemDraft.discountType} onChange={(e) => setItemDraft((current) => ({ ...current, discountType: e.target.value as DiscountType }))}>
-                    <option value="value">R$</option>
-                    <option value="percent">%</option>
-                  </select>
-                  <input className="w-full rounded-lg border border-slate-200 p-2" value={itemDraft.discountValue} onChange={(e) => setItemDraft((current) => ({ ...current, discountValue: sanitizeNumericInput(e.target.value) }))} />
-                </div>
+                <span className="text-sm font-medium text-slate-700">Desconto (%)</span>
+                <input inputMode="decimal" className="w-full rounded-lg border border-slate-200 p-2" value={itemDraft.discountValue} onChange={(e) => setItemDraft((current) => ({ ...current, discountType: "percent", discountValue: sanitizeNumericInput(e.target.value) }))} />
+                {itemDraftDiscountError ? <p className="text-xs font-medium text-red-700">{itemDraftDiscountError}</p> : itemDraftDiscountWarning ? <p className="text-xs text-amber-700">{itemDraftDiscountWarning}</p> : null}
               </label>
               <label className="space-y-1">
                 <span className="text-sm font-medium text-slate-700">Total do item</span>
@@ -2067,6 +2070,11 @@ export default function OpportunitiesPage() {
                       {stockBadge ? (
                         <span className={`inline-flex whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-semibold ${stockBadge.className}`}>
                           {stockBadge.label}
+                        </span>
+                      ) : null}
+                      {opportunityItem.erpPriceDiffers ? (
+                        <span className="inline-flex whitespace-nowrap rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-700" title="Edite o item para o preço voltar ao do ERP; o pedido ERP fica bloqueado até lá.">
+                          {OPPORTUNITY_ITEM_ERP_PRICE_DIFFERS_LABEL}
                         </span>
                       ) : null}
                     </div>
@@ -2115,6 +2123,11 @@ export default function OpportunitiesPage() {
                                 {getStockBadge(opportunityItem.stock)?.label}
                               </span>
                             ) : null}
+                            {opportunityItem.erpPriceDiffers ? (
+                        <span className="inline-flex whitespace-nowrap rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-700" title="Edite o item para o preço voltar ao do ERP; o pedido ERP fica bloqueado até lá.">
+                          {OPPORTUNITY_ITEM_ERP_PRICE_DIFFERS_LABEL}
+                        </span>
+                      ) : null}
                           </div>
                         </td>
                         <td className="p-2">{opportunityItem.quantity}</td>
