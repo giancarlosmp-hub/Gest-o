@@ -1788,3 +1788,22 @@ Compose; modelo no `AppConfig` do resumo (`openai/gpt-oss-120b` padrão, `openai
 sem dicas); sem a chave da Groq, as dicas usam o provedor atual. Log com o provedor e o modelo usados. Detalhes em
 [communications/whatsapp-evolution.md](communications/whatsapp-evolution.md#dicas-do-gerente-comercial-ia);
 pendências (limites e Zero Data Retention da Groq a confirmar na conta) em `TD-WHATSAPP-DAILY-SUMMARY`.
+
+# WhatsApp Fase C: conversar com o cliente pelo CRM — API (C1) (11/11/2026)
+
+O vendedor passa a responder o cliente dentro do CRM, pelo próprio número comercial conectado, e a conversa fica
+registrada. O C1 traz a API com o envio **desligado**; as telas (caixa em `/whatsapp`, botão "WhatsApp" do cliente
+e da oportunidade, "Gerar mensagem IA" no campo de resposta) vêm no C2. Só texto nesta fase. Sem migration e sem
+variável nova. Detalhes em
+[communications/whatsapp-evolution.md](communications/whatsapp-evolution.md#fase-c--conversa-pelo-crm-api-c1).
+
+Decisões aprovadas: limites de 6 envios por minuto, 150 por dia e 20 primeiros contatos por dia, por usuário;
+chave no `AppConfig`, desligada por padrão, só o diretor altera; gerente e diretor veem as conversas da equipe
+somente leitura (sem zerar as não lidas do vendedor) e só enviam pelo próprio número, em conversa própria;
+mensagem enviada não cria `Activity`; envio com timeout de 10 s; novo método `sendTextToClient`, separado do
+`sendTextToCrmUser`, com trava estática que lista quem chama cada um. Logs nunca com texto, telefone, nome, JID, id
+da mensagem do WhatsApp, instância ou segredos; ids internos do CRM podem aparecer no log de acesso.
+
+Pendências em `TD-WHATSAPP-CRM-SEND` ([TECH_DEBT.md](TECH_DEBT.md)): telas do C2; conversa do dia atualizar o
+`lastContactAt` das oportunidades abertas do cliente; três comportamentos do Evolution a confirmar no primeiro envio
+real (eco `fromMe` × `SEND_MESSAGE`, `@lid`, nono dígito).

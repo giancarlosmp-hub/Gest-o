@@ -120,8 +120,8 @@ export type MessageView = {
   type: string;
   text: string;
   at: Date | null;
-  /** Enviada pelo app do celular ("via app") ou recebida. */
-  origin: "app" | "received";
+  /** Enviada pelo app do celular ("via app"), pelo CRM ("via CRM", Fase C) ou recebida. */
+  origin: "app" | "crm" | "received";
   edited: boolean;
   /** Edição cifrada no WhatsApp: o texto mostrado é o original, o novo não é legível. */
   editedTextUnavailable: boolean;
@@ -163,7 +163,7 @@ export const toMessageView = (row: {
     type: row.type,
     text: row.textContent ?? "",
     at: row.providerTimestamp,
-    origin: outbound ? "app" : "received",
+    origin: outbound ? (metadata.origin === "crm" ? "crm" : "app") : "received",
     edited: Boolean(metadata.editedAt),
     editedTextUnavailable: Boolean(metadata.editedInWhatsAppAt),
     deletedInWhatsApp: Boolean(metadata.deletedInWhatsAppAt),

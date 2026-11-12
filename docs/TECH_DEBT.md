@@ -1724,6 +1724,27 @@ Pendente:
   - Os testes do resumo diário da API (`test:whatsapp-daily-summary:unit`) rodam no CI dentro de
     `test:route-authorization`; o teste da tela roda em `test:whatsapp-link`.
 
+### TD-WHATSAPP-CRM-SEND — WhatsApp Fase C (conversa pelo CRM)
+
+**Aberto, médio.** API pronta (C1) e envio desligado por padrão
+([communications/whatsapp-evolution.md](communications/whatsapp-evolution.md#fase-c--conversa-pelo-crm-api-c1)).
+Pendente:
+
+- **Telas (C2):** caixa de conversas em `/whatsapp`, botão "WhatsApp" do cliente e da oportunidade abrindo a conversa
+  no CRM (wa.me só sem número conectado), "Gerar mensagem IA" no campo de resposta e o painel da chave.
+- **Conversa do dia e `lastContactAt` (follow-up aprovado em 11/11/2026):** conversa do dia (pelo CRM ou pelo app)
+  deve atualizar o `lastContactAt` das oportunidades abertas do cliente, para os KPIs e as dicas da IA. Hoje só
+  atividade registrada avança o `lastContactAt`; a mensagem pelo CRM não cria `Activity` (decisão).
+- **A confirmar no primeiro envio real** (roteiro na seção da Fase C): se o envio pela API volta como
+  `MESSAGES_UPSERT` `fromMe` ou só como `SEND_MESSAGE`; se o eco ou as respostas chegam como `@lid`; e se o envio
+  com o nono dígito chega a contas antigas do WhatsApp.
+- **Limites em memória:** os contadores por minuto e "um envio de cada vez" valem para uma instância da API (é o
+  caso de produção). Depois de reiniciar, o dia é retomado do banco, mas os envios **incertos** de antes não
+  contam (não foram gravados).
+- **Mídia e anexos:** fora desta fase (só texto).
+- **Log de acesso:** grava a URL das rotas com ids internos do CRM (opacos), como no resto do sistema; texto,
+  telefone, nome, JID, id da mensagem do WhatsApp, instância e segredos nunca vão para log (teste garante).
+
 ### TD-TIMELINE-EVENTS-OWNER-FILTER — histórico some quando o cliente muda de vendedor
 
 **Aberto, médio.** `GET /events` filtra por `TimelineEvent.ownerSellerId` (`sellerWhere`): para o vendedor, eventos

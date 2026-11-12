@@ -3,8 +3,10 @@ import { once } from "node:events";
 import { createServer, type IncomingMessage } from "node:http";
 import { env } from "../../config/env.js";
 import { EVOLUTION_MESSAGE_WEBHOOK_EVENTS, EVOLUTION_WEBHOOK_SECRET_HEADER, EVOLUTION_WEBHOOK_URL, evolutionWebhookEvents } from "./config.js";
-import { EvolutionClient, EvolutionUnavailableError, explicitWebhookEvents, MAX_SEND_TEXT_LENGTH, pickQrDataUrl } from "./evolutionClient.js";
+import { CLIENT_SEND_TIMEOUT_MS, EvolutionClient, EvolutionUnavailableError, explicitWebhookEvents, MAX_SEND_TEXT_LENGTH, pickQrDataUrl } from "./evolutionClient.js";
 import { CRM_USER_RECIPIENT_TTL_MS, isCrmUserRecipient, resolveCrmUserRecipient, type CrmUserRecipient } from "./crmUserRecipient.js";
+import { CLIENT_RECIPIENT_TTL_MS, isClientRecipient, resolveClientRecipient, type ClientRecipient } from "../whatsappConversations/clientRecipient.js";
+import { createWhatsAppConversationsTestDb } from "../whatsappMessages/whatsappConversationsTestDb.js";
 
 // Cliente da Evolution API contra um Evolution falso em localhost. Chave, segredo e QR fictícios.
 type Recorded = { method: string; url: string; headers: IncomingMessage["headers"]; body: any };
@@ -32,7 +34,8 @@ const client = new EvolutionClient({
   timeoutMs: 300,
   createTimeoutMs: 300,
   mediaTimeoutMs: 300,
-  sendTimeoutMs: 300
+  sendTimeoutMs: 300,
+  clientSendTimeoutMs: 300
 });
 const respond = (status: number, body: unknown, delayMs?: number) => {
   nextResponse = { status, body, delayMs };
@@ -150,9 +153,11 @@ try {
   env.whatsappEvolutionMessagesEnabled = false;
   assert.deepEqual([...evolutionWebhookEvents()], ["CONNECTION_UPDATE"], "gravação desligada volta a só conexão");
 
-  // 8) O único método de envio é sendTextToCrmUser; o único de mídia é a leitura do áudio a transcrever.
+  // 8) Só dois envios (resumo diário e conversa com o cliente), o POST comum é privado de verdade; o único de
+  // mídia é a leitura do áudio a transcrever.
   const methods = Object.getOwnPropertyNames(EvolutionClient.prototype);
-  assert.deepEqual(methods.filter((name) => /send|message|text|media/i.test(name)).sort(), ["getMediaBase64", "sendTextToCrmUser"]);
+  assert.deepEqual(methods.filter((name) => /send|message|text|media|post/i.test(name)).sort(), ["getMediaBase64", "sendTextToClient", "sendTextToCrmUser"]);
+  assert.equal((client as any).postSendText, undefined);
 
   // 9) Áudio para transcrever: mensagem inteira (key + message), sem conversão, base64 devolvido.
   const audioRef = {
@@ -247,6 +252,45 @@ try {
   const refusedRecipient = await resolve("user-ativo");
   assert(refusedRecipient.ok);
   assert.deepEqual(await refused.sendTextToCrmUser("crm-ficticio", refusedRecipient.recipient, "x"), { kind: "not_sent", code: "connection_refused", retryable: true });
+
+  // 11) Envio ao cliente (Fase C): só o destino emitido por resolveClientRecipient, pela instância do próprio
+  // remetente que vai dentro do destino; devolve o id da mensagem (casa com o eco do webhook).
+  const models = ["user", "client", "opportunity", "opportunityItem", "opportunityChangeLog", "contact", "clientPhoneIndex", "communicationConversation", "communicationMessage", "appConfig", "whatsAppConnection", "tenantMembership"];
+  const fakePrisma: any = Object.fromEntries(models.map((model) => [model, {}]));
+  const { tables } = createWhatsAppConversationsTestDb(fakePrisma);
+  tables.whatsAppConnection.push({ id: "conn-1", userId: "seller-a", instanceName: "crm-ficticio-vendedor", status: "CONNECTED", connectedPhone: "5511900000001" });
+  tables.client.push({ id: "client-a", tenantId: "tenant-a", ownerSellerId: "seller-a", isArchived: false });
+  tables.clientPhoneIndex.push({ id: "idx-a", phone: "5511900000301", clientId: "client-a", tenantId: "tenant-a", source: "erp" });
+  const resolveClient = () =>
+    resolveClientRecipient({ user: { id: "seller-a", role: "vendedor" }, tenantId: "tenant-a", target: { clientId: "client-a", phoneRef: "idx-a" } }, fakePrisma, { internalPhones: async () => new Set() });
+  const clientResolution = await resolveClient();
+  assert(clientResolution.ok);
+  const clientRecipient = clientResolution.recipient;
+  assert.equal(clientRecipient.instanceName, "crm-ficticio-vendedor");
+
+  const beforeClient = recorded.length;
+  const forgedClient = { ...clientRecipient } as ClientRecipient;
+  await assert.rejects(client.sendTextToClient(forgedClient, "Olá"), /whatsapp_recipient_not_client/, "cópia do destino");
+  await assert.rejects(client.sendTextToClient(recipient as unknown as ClientRecipient, "Olá"), /whatsapp_recipient_not_client/, "destino do resumo diário não serve para cliente");
+  await assert.rejects(client.sendTextToCrmUser("crm-ficticio", clientRecipient as unknown as CrmUserRecipient, "Olá"), /whatsapp_recipient_not_crm_user/, "destino de cliente não serve para o resumo");
+  assert.equal(isClientRecipient(clientRecipient, Date.now() + CLIENT_RECIPIENT_TTL_MS + 1), false, "destino vencido");
+  await assert.rejects(client.sendTextToClient(clientRecipient, " "), /whatsapp_text_invalid/);
+  await assert.rejects(client.sendTextToClient(clientRecipient, "x".repeat(MAX_SEND_TEXT_LENGTH + 1)), /whatsapp_text_invalid/);
+  assert.equal(recorded.length, beforeClient, "nada chegou ao Evolution");
+
+  respond(201, { key: { remoteJid: "5511900000301@s.whatsapp.net", fromMe: true, id: "MSG-FICTICIA-CLIENTE-1" }, status: "PENDING" });
+  assert.deepEqual(await client.sendTextToClient(clientRecipient, "Olá, cliente fictício"), { kind: "sent", messageId: "MSG-FICTICIA-CLIENTE-1" });
+  assert.equal(last().url, "/message/sendText/crm-ficticio-vendedor", "instância do próprio remetente");
+  assert.deepEqual(last().body, { number: "5511900000301", text: "Olá, cliente fictício", delay: 1_200, linkPreview: false });
+  respond(201, { status: "PENDING" });
+  assert.deepEqual(await client.sendTextToClient(clientRecipient, "x"), { kind: "uncertain", code: "no_message_id" });
+  respond(400, { response: { message: [{ exists: false, number: "5511900000301" }] } });
+  assert.deepEqual(await client.sendTextToClient(clientRecipient, "x"), { kind: "not_sent", code: "number_not_on_whatsapp", retryable: false });
+  respond(201, {}, 1_000);
+  assert.deepEqual(await client.sendTextToClient(clientRecipient, "x"), { kind: "uncertain", code: "timeout" });
+  assert.equal(CLIENT_SEND_TIMEOUT_MS, 10_000);
+  // API_REQUEST_TIMEOUT_MS de produção (docker-compose.production.yml): 15 s.
+  assert(CLIENT_SEND_TIMEOUT_MS < 15_000, "o envio ao cliente termina antes do timeout da requisição da API");
 
   console.log("evolutionClient.test.ts: ok");
 } finally {

@@ -311,7 +311,7 @@ Leitura das conversas gravadas no B1, fila "não vinculadas", vínculo manual e 
 |---|---|
 | `GET /clients/:clientId/days?before=AAAA-MM-DD&take=20` | Cartões por conversa e dia de Brasília (UTC-3), mais recente primeiro. `take` até 60; `nextBefore` pagina por dia. |
 | `GET /opportunities/:opportunityId/days` | O mesmo, só com mensagens desde a criação da oportunidade, mais `clientId`, `since` e `canOpenClient`. |
-| `GET /conversations/:conversationId/messages?day=AAAA-MM-DD` | Mensagens de um cartão (até 300 por página, `cursor`; `opportunityId` limita à criação dela): direção, tipo, texto, hora, origem (`app` = "via app", `received` = "recebida"), `edited` e `deletedInWhatsApp`. Nunca devolve número, id externo ou nome do contato no WhatsApp. |
+| `GET /conversations/:conversationId/messages?day=AAAA-MM-DD` | Mensagens de um cartão (até 300 por página, `cursor`; `opportunityId` limita à criação dela): direção, tipo, texto, hora, origem (`app` = "via app", `crm` = "via CRM" na Fase C, `received` = "recebida"), `edited` e `deletedInWhatsApp`. Nunca devolve número, id externo ou nome do contato no WhatsApp. |
 | `GET /unlinked?cursor=&take=20` | Fila do próprio número (`take` até 50): número completo, nome no WhatsApp, última mensagem (até 120 caracteres), dias para expirar, `unlinked`/`ambiguous` e `total`. |
 | `POST /unlinked/:conversationId/link` `{ clientId }` | Vincula (só o dono do número). Vendedor só a cliente da carteira dele; gerente e diretor a qualquer cliente ativo do tenant. |
 | `POST /unlinked/:conversationId/discard` | Apaga a conversa e as mensagens (só o dono). Se o contato escrever de novo, ela volta para a fila. |
@@ -494,11 +494,12 @@ campo vale desligado. Sem migration e sem variável nova. Código em
 
 ### Trava do destino
 
-- O único envio do sistema é `EvolutionClient.sendTextToCrmUser` (`POST /message/sendText/{instância}`). O
-  destino tem de ser o objeto emitido por `resolveCrmUserRecipient`, que lê o usuário na hora: ativo, celular
-  válido em `User.phone` e **fora do índice de telefones de cliente** (`ClientPhoneIndex`, inclusive cliente
-  arquivado). O objeto vale 2 minutos; um objeto montado à mão, ou uma cópia dele, é recusado antes da rede.
-- Teste estático: só o resumo diário chama o envio, e só o cliente do Evolution conhece `/message/...`.
+- O envio do resumo é `EvolutionClient.sendTextToCrmUser` (`POST /message/sendText/{instância}`); o outro envio do
+  sistema é o da Fase C (`sendTextToClient`), com destino próprio e recusado aqui. O destino tem de ser o objeto
+  emitido por `resolveCrmUserRecipient`, que lê o usuário na hora: ativo, celular válido em `User.phone` e **fora
+  do índice de telefones de cliente** (`ClientPhoneIndex`, inclusive cliente arquivado). O objeto vale 2 minutos; um objeto montado à mão, ou uma cópia dele, é recusado antes da rede.
+- Teste estático (`whatsappSendGuard.test.ts`): só o resumo diário chama `sendTextToCrmUser`, e só o cliente do
+  Evolution conhece `/message/...`.
 - Celular do usuário também cadastrado em cliente: recusado (`phone_matches_client`). O painel e a prévia
   mostram "O celular deste usuário também está cadastrado em cliente(s) – corrija o cadastro", sem expor o
   cliente. O índice é reconstruído pela Fase B; com a gravação desligada ele pode estar desatualizado.
@@ -539,3 +540,107 @@ a instância desconectada, nem o evento que o envio pela API gera no webhook. A 
   vendedor). Teste garante.
 - Log só com contagens e códigos (`sent`, `uncertain`, `connection_refused`, `sender_not_connected`…): sem texto,
   nomes, números ou ids. A situação de cada vendedor fica só no `AppConfig` e aparece na tela.
+
+## Fase C — conversa pelo CRM (API, C1)
+
+O vendedor conversa com o cliente **dentro do CRM, pelo próprio número comercial**, e tudo fica registrado. Este
+PR (C1) traz só a API, com o envio **desligado**; a caixa de conversas, o botão "WhatsApp" do cliente e da
+oportunidade e o "Gerar mensagem IA" no campo de resposta vêm no C2 (web). Só **texto** nesta fase. Sem migration
+e sem variável nova: usa `CommunicationConversation.unreadCount` (já existia, sempre 0) e o `AppConfig`.
+
+### Regras de segurança
+
+- **Remetente:** só o número `CONNECTED` do próprio usuário, com a instância `open` no Evolution na hora.
+- **Destino:** conferido no servidor por `resolveClientRecipient`, nunca número digitado:
+  - uma conversa **vinculada do próprio número** (a de outro número nunca é usada, nem por gerente ou diretor); ou
+  - cliente + referência de telefone = id da linha do `ClientPhoneIndex` daquele cliente.
+  - Cliente não arquivado do tenant; vendedor só da carteira atual (`ownerSellerId`); gerente e diretor qualquer
+    cliente, sempre pelo próprio número, em conversa própria.
+  - Recusas: conversa na fila (`conversation_unlinked`, vincule antes); telefone em mais de um cliente sem conversa
+    já vinculada a este (`phone_ambiguous`); número de usuário do CRM (`phone_internal`).
+- **Um destino e um texto por requisição**, por ação humana: o corpo é um objeto estrito (lista, número solto ou
+  campo a mais = 400). Nunca em lote, nunca repetido.
+- **Trava do envio:** dois métodos no `EvolutionClient`, cada um com o próprio tipo de destino, emitido por um só
+  módulo (objeto congelado, registrado num `WeakMap`, válido 2 minutos) e recusado pelo outro método:
+  - `sendTextToCrmUser` (resumo diário): chamado só por `dailySummarySender.ts`;
+  - `sendTextToClient` (Fase C): chamado só por `crmConversationSender.ts`.
+
+  O POST comum (`#postSendText`) é privado de verdade. A trava estática
+  (`services/whatsappConnection/whatsappSendGuard.test.ts`) lista exatamente quem chama cada método, cada
+  resolvedor de destino e `sendCrmText`.
+- **Chave:** `AppConfig` `whatsappCrmSend.config`, `{ "enabled": false }` por padrão; só o diretor muda
+  (`PUT /whatsapp/inbox/send-config`). Também exige a gravação das conversas (Fase B) ligada e o Evolution
+  configurado; sem isso, `send_unavailable`.
+
+### Limites (por usuário)
+
+Um envio de cada vez; 3 s entre envios; **6 por minuto**; **150 por dia** e **20 primeiros contatos por dia**
+(contato que nunca escreveu para este número, contado uma vez por contato). Dia de Brasília. Contam os envios que
+saíram ou podem ter saído (incerto); recusa certa do Evolution não conta. Contadores em memória; o dia é retomado
+do banco (mensagens "via CRM" de hoje) depois de reiniciar a API. Uma só instância da API em produção.
+
+### Envio, eco e "via CRM"
+
+1. `POST /message/sendText/{instância do remetente}` com timeout de **10 s** (abaixo dos 15 s da requisição da API)
+   e "digitando" de 1,2 s.
+2. Com o `key.id` devolvido, a mensagem é gravada `OUTBOUND`/`SENT` com `metadata = { origin: "crm",
+   sentByUserId, firstContact? }`, na conversa do número do remetente (criada vinculada, `linkSource = crm`, se não
+   existia). Não lidas zeradas.
+3. **Eco depois:** o `messages.upsert` `fromMe` com o mesmo id cai na unicidade (provedor, número, id) e vira
+   `duplicate`. **Eco antes** da resposta do envio: é gravado "via app"; o envio recebe `duplicate` e só troca a
+   origem para `crm`. Nunca duplica.
+4. **Incerto** (timeout, 5xx, 2xx sem id): nada é gravado nem repetido; a resposta é 202 "Pode ter sido enviada.
+   Confira no celular antes de reenviar." Se o eco chegar, entra como "via app".
+
+### Não lidas
+
+Por conversa = por dono do número. Recebida soma 1; enviada (app ou CRM) zera; abrir (`POST /inbox/read`) zera;
+"marcar como não lida" põe 1. Gerente ou diretor olhando conversa de outro número não mexe nas não lidas.
+
+### Rotas (`/whatsapp`, autenticadas)
+
+| Rota | O que faz |
+|---|---|
+| `GET /inbox/status` | Chave, envio disponível, número conectado, limites, uso de hoje e total de não lidas do próprio número. |
+| `PUT /inbox/send-config` `{ enabled }` | Liga/desliga o envio pelo CRM (só diretor). |
+| `GET /inbox?scope=mine&cursor=&take=20` | Caixa: conversas **vinculadas** do próprio número, mais recente primeiro, com cliente, número mascarado, não lidas, trecho da última mensagem (até 120 caracteres, `viaCrm`), `own` e `canReply`. `scope=team` (opcional `ownerUserId`) só gestão: outros números do tenant, somente leitura. |
+| `GET /inbox/messages?conversationId=&before=&changedSince=` | Últimas 50 mensagens (`nextBefore` para as anteriores) ou só as criadas/alteradas desde `changedSince` (polling; usar o `serverTime` da resposta anterior). Mesma visão da linha do tempo, com origem `app`, `crm` ou `received`. Vendedor só do próprio número. |
+| `POST /inbox/read` e `POST /inbox/unread` `{ conversationId }` | Lida / não lida (só o dono do número). |
+| `GET /inbox/client-targets?clientId=` | Telefones do cliente (um por número, ERP antes do CRM): `ref`, número formatado, celular/fixo, origem e a conversa do próprio número com ele. Vendedor só da carteira. |
+| `POST /inbox/send` `{ conversationId, text }` ou `{ clientId, phoneRef, text }` | Envia (201 com a conversa e a mensagem; erro com `code` e `message`). |
+
+Códigos de recusa: `send_disabled` 403, `send_unavailable` 503, `text_invalid` 400 (vazio ou acima de 4.000
+caracteres), `send_in_progress`/`rate_interval`/`rate_minute`/`rate_day`/`rate_first_contact` 429,
+`not_connected` 409, `conversation_not_found` 404, `conversation_unlinked` 409, `recipient_not_allowed` 404,
+`phone_ambiguous` 409, `phone_internal` 409, `evolution_unavailable` 503, `number_not_on_whatsapp` 422,
+`uncertain` 202.
+
+Atualização da tela (C2): polling só com a aba visível, caixa a cada 20 s e conversa aberta a cada 5 s com
+`changedSince`.
+
+### Log
+
+O serviço de envio grava uma linha `[whatsapp] crm send` só com `result` (`sent`, `refused`, `not_sent`,
+`uncertain`) e `code`. Nunca texto, telefone (completo ou parcial), nome de cliente ou contato, `pushName`, JID,
+`key.id`, instância do Evolution, chave ou segredo. O log de acesso da API grava a URL das rotas, com ids internos
+do CRM (opacos), como no resto do sistema.
+
+### Roteiro do envio de teste (antes de ligar para todos)
+
+O código não mostra três comportamentos do Evolution v2.3.7. O desenho funciona nos três casos, mas eles precisam
+ser confirmados no primeiro envio real. Com a chave ligada pelo diretor, um usuário com número conectado envia, pela
+API (`POST /whatsapp/inbox/send`) ou pela tela do C2, uma mensagem curta a um cliente de teste da própria carteira
+(número de um aparelho da empresa cadastrado como contato do cliente) e confere:
+
+1. **Eco `fromMe` × `SEND_MESSAGE`:** no banco, a mensagem aparece **uma vez**, com `metadata.origin = "crm"`. No
+   log do webhook da API, um evento `messages.upsert` com resultado `duplicate` (ou `stored`, com a origem corrigida
+   em seguida pelo envio) confirma que o envio pela API volta como `MESSAGES_UPSERT` `fromMe`. Nenhum evento de
+   mensagem indica que o Evolution só emite `SEND_MESSAGE` (que não assinamos): nada a fazer, a mensagem gravada no
+   envio é o registro.
+2. **`@lid`:** se o eco vier com o contato como `@lid`, a ingestão o ignora (sem número legível) e a mensagem
+   gravada no envio continua sendo o registro. Conferir também se as respostas desse contato continuam caindo na
+   mesma conversa; se vierem como `@lid`, ficam fora da Fase B: registrar em `TD-WHATSAPP-MESSAGES`.
+3. **Nono dígito:** repetir com um contato cuja conta do WhatsApp é antiga (sem o 9). O destino vai com o 9
+   (55 + DDD + 9 + número); confirmar que a mensagem chega ao aparelho e que o eco cai na mesma conversa (a
+   ingestão acrescenta o 9). Se o Evolution responder `exists: false`, o CRM devolve `number_not_on_whatsapp` e
+   nada sai: registrar e tratar em PR próprio.

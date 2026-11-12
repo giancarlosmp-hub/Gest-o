@@ -77,6 +77,9 @@ assert.equal(inbound.text, "");
 assert.equal(inbound.edited, false);
 assert.equal(inbound.deletedInWhatsApp, false);
 assert.equal(inbound.editedTextUnavailable, false);
+// Enviada pelo CRM (Fase C): "via CRM"; a origem só vale para enviada.
+assert.equal(toMessageView({ id: "msg-crm", direction: CommunicationDirection.OUTBOUND, type: "TEXT", textContent: "Texto ficticio", providerTimestamp: null, metadata: { origin: "crm", sentByUserId: "seller-a" } }).origin, "crm");
+assert.equal(toMessageView({ id: "msg-crm-in", direction: CommunicationDirection.INBOUND, type: "TEXT", textContent: "Texto ficticio", providerTimestamp: null, metadata: { origin: "crm" } }).origin, "received");
 // Edição cifrada: só a marca, o texto continua o original.
 const encrypted = toMessageView({ id: "msg-3", direction: CommunicationDirection.INBOUND, type: "TEXT", textContent: "Texto ficticio original", providerTimestamp: null, metadata: { editedInWhatsAppAt: "2026-11-06T15:03:00.000Z" } });
 assert.equal(encrypted.editedTextUnavailable, true);

@@ -55,14 +55,16 @@ export function createMemoryWhatsAppMessageStore() {
     },
     async createConversation(data) {
       if (conversations.some((row) => row.account === data.account && row.contactPhone === data.contactPhone)) return "conflict";
-      const row: StoredConversation = { ...data, id: `conversation-${++sequence}`, lastMessageAt: null, lastInboundAt: null, lastOutboundAt: null };
+      const row: StoredConversation = { ...data, id: `conversation-${++sequence}`, lastMessageAt: null, lastInboundAt: null, lastOutboundAt: null, unreadCount: 0 };
       conversations.push(row);
       return row;
     },
     async updateConversation(id, data: ConversationUpdate) {
       const row = conversations.find((item) => item.id === id);
       if (!row) throw new Error("conversa inexistente");
-      Object.assign(row, data);
+      const { unreadCount, ...rest } = data;
+      Object.assign(row, rest);
+      if (unreadCount !== undefined) row.unreadCount = typeof unreadCount === "number" ? unreadCount : (Number(row.unreadCount) || 0) + unreadCount.increment;
     },
     async createMessage(data) {
       failIfAsked();

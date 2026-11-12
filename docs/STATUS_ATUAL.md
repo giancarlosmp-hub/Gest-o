@@ -1,3 +1,16 @@
+# WhatsApp Fase C (C1, API): conversar pelo CRM — código pronto, aguardando merge — 11/11/2026
+
+- Envio de texto pelo CRM, pelo número conectado do próprio usuário, para um cliente ativo (vendedor: só da
+  carteira; gerente e diretor: qualquer cliente, pelo próprio número, nunca na conversa de outro número). Um destino
+  por ação; destino conferido no servidor (conversa vinculada ou telefone do `ClientPhoneIndex`), nunca número
+  digitado. Mensagem gravada "via CRM" com o id do Evolution; o eco do webhook não duplica.
+- Limites por usuário: 6/min, 150/dia e 20 primeiros contatos/dia. Não lidas por conversa. Caixa "Meu número" e
+  "Equipe" (gestão, somente leitura) na API.
+- **Envio desligado** por padrão (`AppConfig` `whatsappCrmSend.config`, só diretor liga). Sem migration e sem
+  variável nova. Telas no C2. Detalhes e roteiro do envio de teste em
+  [communications/whatsapp-evolution.md](communications/whatsapp-evolution.md#fase-c--conversa-pelo-crm-api-c1);
+  pendências em `TD-WHATSAPP-CRM-SEND`.
+
 # Política comercial: preço travado do ERP e desconto máximo por perfil — código pronto, aguardando merge — 11/11/2026
 
 - O preço do item de oportunidade é sempre o do ERP (tabela da oportunidade), recalculado na API para todos os perfis;

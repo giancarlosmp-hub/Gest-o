@@ -7,8 +7,11 @@ import { PrismaWhatsAppMessageStore, type ConversationRow, type ConversationUpda
 import { initialTranscription, whatsappTranscriptionQueue, type TranscriptionJob } from "./whatsappTranscriptionQueue.js";
 
 // WhatsApp Fase B: grava as mensagens do número comercial conectado (enviadas pelo app do celular e
-// recebidas) e liga a conversa ao cliente pelo telefone. Não existe envio.
+// recebidas) e liga a conversa ao cliente pelo telefone. O envio pelo CRM (Fase C) grava a própria mensagem
+// com o id devolvido pelo Evolution; o eco dela aqui vira "duplicate" (ou, se chegar antes, é gravado
+// "via app" e o envio corrige a origem).
 //
+// - Não lidas (Fase C): a recebida soma 1 na conversa (do dono do número); a enviada pelo app zera.
 // - Idempotência: (provedor, número comercial, id da mensagem) é único; reentrega vira "duplicate".
 // - Vínculo: um cliente com o telefone = vinculada; nenhum ou mais de um = fila "não vinculadas" do dono do
 //   número, que expira em 7 dias. A cada mensagem nova de uma conversa sem vínculo a busca roda de novo.
@@ -186,8 +189,8 @@ export class WhatsAppMessageIngestion {
       numberOwnerUserId: connection.userId,
       lastMessageAt: later(conversation.lastMessageAt, timestamp),
       ...(parsed.fromMe
-        ? { lastOutboundAt: later(conversation.lastOutboundAt, timestamp), previewSanitized: "Mensagem enviada" }
-        : { lastInboundAt: later(conversation.lastInboundAt, timestamp), previewSanitized: "Mensagem recebida" }),
+        ? { lastOutboundAt: later(conversation.lastOutboundAt, timestamp), previewSanitized: "Mensagem enviada", unreadCount: 0 }
+        : { lastInboundAt: later(conversation.lastInboundAt, timestamp), previewSanitized: "Mensagem recebida", unreadCount: { increment: 1 } }),
       ...(link !== "linked" && parsed.pushName ? { contactName: parsed.pushName } : {}),
       ...current.update
     });
