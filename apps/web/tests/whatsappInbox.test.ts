@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createServer, type Plugin } from "vite";
 
@@ -232,6 +233,20 @@ try {
   const waHtml = mod.renderPhones({ phones });
   assert.match(waHtml, /href="https:\/\/wa\.me\/5511900000101"/);
   assert.doesNotMatch(waHtml, /data-whatsapp-crm/);
+
+  // 10) 429 do campo de resposta só no campo: envio e "Gerar mensagem IA" pedem para não mostrar o aviso geral;
+  // o aviso geral continua para as outras requisições.
+  const rateLimit = await import("../src/lib/apiRateLimit.ts");
+  assert.equal(rateLimit.shouldShowRateLimitToast(undefined), true);
+  assert.equal(rateLimit.shouldShowRateLimitToast({}), true);
+  assert.equal(rateLimit.shouldShowRateLimitToast({ skipRateLimitToast: false }), true);
+  assert.equal(rateLimit.shouldShowRateLimitToast({ skipRateLimitToast: true }), false);
+  const source = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
+  const replyBox = source("../src/components/whatsapp/WhatsAppReplyBox.tsx");
+  assert.match(replyBox, /api\.post\("\/whatsapp\/inbox\/send", .*\{ skipRateLimitToast: true \}\)/);
+  assert.match(replyBox, /api\.post<.*"\/ai\/assistant-whatsapp-message", .*skipRateLimitToast: true \}\)/);
+  assert.equal(replyBox.match(/skipRateLimitToast/g)?.length, 2);
+  assert.match(source("../src/lib/apiClient.ts"), /if \(shouldShowRateLimitToast\(requestConfig\)\) toast\.error\("Muitas requisições/);
 
   console.log("whatsapp inbox tests passed");
 } finally {
