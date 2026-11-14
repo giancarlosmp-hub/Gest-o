@@ -1,3 +1,14 @@
+# WhatsApp como contato com o cliente — código pronto, aguardando merge — 14/11/2026
+
+- Mensagem enviada pelo WhatsApp (CRM ou app, qualquer número da empresa) conta como contato; só recebida não conta;
+  não cria `Activity`.
+- Oportunidades abertas do cliente: `lastContactAt` avança uma vez por conversa por dia de Brasília (primeira enviada
+  do dia), nunca para trás; vínculo tardio grava a última enviada.
+- Tela do cliente: card "Último contato" (antes "Última atividade"); Resumo automático, Sugestão, contexto da IA e
+  Resumo inteligente da Timeline leem a última enviada das conversas (vale para o histórico).
+- Script de histórico das oportunidades `backfillOpportunityWhatsAppLastContact` pronto, **não rodado**. Sem migration.
+  Detalhes em [communications/whatsapp-evolution.md](communications/whatsapp-evolution.md#whatsapp-como-contato-com-o-cliente).
+
 # WhatsApp Fase C (C2, web): telas da conversa pelo CRM — código pronto, aguardando merge — 14/11/2026
 
 - `/whatsapp`: caixa "Meu número" (conversas vinculadas, não lidas, trecho) e, para gerente e diretor, "Equipe"

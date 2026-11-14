@@ -1734,9 +1734,20 @@ Pendente:
 - **Telas (C2), limites conhecidos:** aba "Equipe" sem filtro por vendedor; o botão "WhatsApp" do cliente só abre a
   conversa no CRM para telefone que já está no `ClientPhoneIndex` (índice desatualizado → wa.me até a reconstrução);
   sem "marcar como não lida" na tela (a rota existe).
-- **Conversa do dia e `lastContactAt` (follow-up aprovado em 11/11/2026):** conversa do dia (pelo CRM ou pelo app)
-  deve atualizar o `lastContactAt` das oportunidades abertas do cliente, para os KPIs e as dicas da IA. Hoje só
-  atividade registrada avança o `lastContactAt`; a mensagem pelo CRM não cria `Activity` (decisão).
+- **Conversa do dia e `lastContactAt`:** resolvido no código em 14/11/2026, aguardando merge
+  ([communications/whatsapp-evolution.md](communications/whatsapp-evolution.md#whatsapp-como-contato-com-o-cliente)):
+  mensagem enviada (CRM ou app) avança o `lastContactAt` das oportunidades abertas do cliente e entra no "Último
+  contato" e nos resumos; a mensagem continua sem criar `Activity`. Limites conhecidos:
+  - A oportunidade é atualizada **uma vez por conversa por dia de Brasília** (fica a hora da primeira mensagem enviada
+    do dia). Oportunidade aberta depois dessa mensagem, no mesmo dia, só recebe a data na próxima mensagem enviada de
+    outro dia (ou pelo script de histórico).
+  - Se a gravação falhar na primeira mensagem do dia (`WARN [whatsapp] last contact not advanced`), só tenta de novo
+    na primeira mensagem do dia seguinte.
+  - `Opportunity` não tem índice em `clientId` (criar exige migration); a regra de uma vez por dia limita as
+    atualizações.
+  - Envio pelo CRM "incerto" não é gravado, então não conta como contato.
+  - Script de histórico `backfillOpportunityWhatsAppLastContact` **não rodado** (simulação, depois
+    `--apply --expect=N`, depois do deploy).
 - **`@lid` a observar:** na validação de 14/11/2026 a mensagem caiu na conversa do cliente certo, sem problema
   observado, mas o formato do contato (se o eco ou as respostas chegam como `@lid`) não foi verificado diretamente.
   Confirmados na mesma validação: o eco não duplica (a mensagem enviada pelo CRM aparece uma vez só, como "via CRM")

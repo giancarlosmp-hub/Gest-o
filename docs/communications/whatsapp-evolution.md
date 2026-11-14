@@ -716,3 +716,37 @@ Nada disso liga o envio sozinho.
 
 Algo errado em qualquer passo: o diretor desliga a chave (efeito imediato, sem deploy) e o caso vai para
 `TD-WHATSAPP-CRM-SEND`.
+
+## WhatsApp como contato com o cliente
+
+Decisões de 14/11/2026. A conversa do WhatsApp passa a contar como contato com o cliente, **sem criar `Activity`**:
+
+- **O que conta:** só mensagem **enviada** (pelo CRM ou pelo app do celular), inclusive se for apagada depois. Mensagem
+  só recebida não conta. Vale a conversa de **qualquer número da empresa** vinculada ao cliente (como a última visita).
+- **Oportunidades (gravado):** a enviada leva `Opportunity.lastContactAt` de **todas as oportunidades abertas** do
+  cliente para a hora da mensagem, nunca para trás (`apps/api/src/services/whatsappMessages/whatsappLastContact.ts`).
+  Roda **uma vez por conversa por dia de Brasília**: fica a hora da primeira mensagem enviada do dia. Pontos que
+  gravam: ingestão (mensagem do app), envio pelo CRM, vínculo pela fila "não vinculadas" e vínculo automático tardio
+  (nesses dois, e quando o envio pelo CRM corrige o vínculo, grava a última enviada da conversa). Na ingestão e no envio,
+  falha ao gravar só gera `WARN [whatsapp] last contact not advanced` (sem ids nem texto) e a mensagem continua gravada;
+  no vínculo pela fila, roda na mesma transação.
+- **Cliente e resumos (calculado na leitura):** a maior `CommunicationConversation.lastOutboundAt` das conversas
+  vinculadas ao cliente (`apps/api/src/services/clientWhatsAppContact.ts`; só a data). Vale também para as conversas
+  já gravadas.
+  - `GET /clients/:id`: `commercialSummary.lastContactAt` (atividade ou WhatsApp, a mais recente). O card da tela do
+    cliente passou de "Última atividade" para **"Último contato"**; `lastActivityAt` continua só das atividades.
+  - Resumo automático do cliente (`/ai/client-summary`): o WhatsApp entra no último contato e uma conversa conta como
+    histórico (não cai mais em "Sem atividades, observações ou oportunidades recentes").
+  - Sugestão inteligente e contexto da IA: "Último contato: …" e os dias desde o último contato; a IA externa recebe
+    `ultimoContato` (só a data).
+  - Resumo inteligente da Timeline: o WhatsApp entra no último contato ("sem contato registrado" some) e na chave do
+    cache.
+- **KPIs e dicas da IA** que leem `Opportunity.lastContactAt` passam a considerar a conversa pela gravação: "Propostas
+  sem retorno", score de prioridade, prioridades do dia, resumo diário e dicas do gerente comercial, insight e
+  mensagem de venda da oportunidade.
+- **Histórico das oportunidades:** script `apps/api/src/scripts/backfillOpportunityWhatsAppLastContact.ts` (última
+  enviada de cada cliente para as oportunidades abertas, só avança). Simulação por padrão (transação somente leitura,
+  só contagens) e `--apply --expect=N` (transação serializável, grava só se o total for N). Roda depois do deploy, no
+  container da API: `node dist/scripts/backfillOpportunityWhatsAppLastContact.js` e, conferida a contagem,
+  `node dist/scripts/backfillOpportunityWhatsAppLastContact.js --apply --expect=N`. **Não foi rodado.**
+- Sem migration. Limites conhecidos em `TD-WHATSAPP-CRM-SEND` ([TECH_DEBT.md](../TECH_DEBT.md)).
