@@ -8,6 +8,7 @@ import { calculateCommercialPriority } from "./commercialPriorityService.js";
 import type { Prisma } from "@prisma/client";
 import { PORTFOLIO_APPROACH_LABELS, portfolioApproachOf, portfolioSituationLabel } from "./clientAiContext.js";
 import { isClientCoolingActive, loadLastSentCrmOrderByClient, portfolioStatusOf, resolveLastPurchase } from "./clientPortfolioStatus.js";
+import { loadClientLastWhatsAppSentAt } from "./clientWhatsAppContact.js";
 
 export type TimelineIntelligenceInput = {
   clientId?: string;
@@ -101,27 +102,29 @@ export class TimelineIntelligenceService {
     const client = clientId ? await prisma.client.findFirst({ where: { id: clientId, isArchived: false, ...(input.opportunityId ? {} : baseWhere as Prisma.ClientWhereInput) }, select: { id: true, lastPurchaseDate: true, lastPurchaseValue: true, ownerSellerId: true, financialProfile: true, openTitlesTotal: true, overdueTitlesTotal: true } }) : null;
     if (!client) return null;
     const where = input.opportunityId ? { opportunityId: input.opportunityId } : { clientId: client.id };
-    const [eventsDesc, activitiesDesc, changeLogs, latestErpOrder, lastSentCrmOrderByClient] = await Promise.all([
+    const [eventsDesc, activitiesDesc, changeLogs, latestErpOrder, lastSentCrmOrderByClient, lastWhatsAppSentAt] = await Promise.all([
       prisma.timelineEvent.findMany({ where: { ...where, createdAt: { gte: since } }, orderBy: { createdAt: "desc" }, take: MAX_EVENTS, select: { type: true, description: true, createdAt: true, clientId: true, opportunityId: true, ownerSellerId: true } }),
       prisma.activity.findMany({ where: { ...where, createdAt: { gte: since } }, orderBy: [{ date: "desc" }, { dueDate: "desc" }, { createdAt: "desc" }], take: MAX_ACTIVITIES, select: { type: true, notes: true, description: true, result: true, dueDate: true, date: true, done: true, createdAt: true, opportunityId: true, clientId: true, ownerSellerId: true } }),
       input.opportunityId ? prisma.opportunityChangeLog.findMany({ where: { opportunityId: input.opportunityId, createdAt: { gte: since } }, orderBy: { createdAt: "desc" }, take: 10, select: { field: true, oldValue: true, newValue: true, createdAt: true } }) : Promise.resolve([]),
       input.opportunityId ? prisma.erpOrderSync.findFirst({ where: { opportunityId: input.opportunityId }, orderBy: { createdAt: "desc" }, select: { status: true, createdAt: true } }) : Promise.resolve(null),
       // Última compra efetiva também considera o pedido sent do CRM (mesma fonte das prioridades do dia).
-      loadLastSentCrmOrderByClient({ id: client.id })
+      loadLastSentCrmOrderByClient({ id: client.id }),
+      // Mensagem enviada pelo WhatsApp (CRM ou app) ao cliente conta como contato (só a data).
+      loadClientLastWhatsAppSentAt(client.id)
     ]);
     const now = new Date();
     const status = portfolioStatusOf(client, lastSentCrmOrderByClient, now);
     const cooling = isClientCoolingActive(client, lastSentCrmOrderByClient, now);
     const portfolio = { status, cooling, approach: portfolioApproachOf(status, cooling), lastPurchase: resolveLastPurchase(client, lastSentCrmOrderByClient) };
-    return { entityType, client: { ...client, lastSentCrmOrderDate: lastSentCrmOrderByClient.get(client.id) ?? null }, portfolio, opportunity, events: eventsDesc.reverse().map((e) => ({ ...e, description: sanitizeText(e.description) })), activities: activitiesDesc.reverse().map((a) => ({ ...a, notes: sanitizeText(a.notes), description: sanitizeText(a.description), result: sanitizeText(a.result) })), changeLogs: changeLogs.reverse(), latestErpOrder };
+    return { entityType, client: { ...client, lastSentCrmOrderDate: lastSentCrmOrderByClient.get(client.id) ?? null }, portfolio, opportunity, events: eventsDesc.reverse().map((e) => ({ ...e, description: sanitizeText(e.description) })), activities: activitiesDesc.reverse().map((a) => ({ ...a, notes: sanitizeText(a.notes), description: sanitizeText(a.description), result: sanitizeText(a.result) })), changeLogs: changeLogs.reverse(), latestErpOrder, lastWhatsAppSentAt };
   }
 
   analyzeDeterministically(context: NonNullable<Context>) {
     const now = new Date();
-    const contactDates = [...context.events.filter((e) => CONTACT_TYPES.test(`${e.type} ${e.description}`)).map((e) => e.createdAt), ...context.activities.filter((a) => a.done || CONTACT_TYPES.test(a.type)).map((a) => a.date ?? a.createdAt), context.opportunity?.lastContactAt].filter(Boolean) as Date[];
+    const contactDates = [...context.events.filter((e) => CONTACT_TYPES.test(`${e.type} ${e.description}`)).map((e) => e.createdAt), ...context.activities.filter((a) => a.done || CONTACT_TYPES.test(a.type)).map((a) => a.date ?? a.createdAt), context.opportunity?.lastContactAt, context.lastWhatsAppSentAt].filter(Boolean) as Date[];
     const lastContactAt = latestDate(contactDates);
     const overdueFollowUp = Boolean(context.opportunity?.followUpDate && context.opportunity.followUpDate < now && !CLOSED_STAGES.has(String(context.opportunity.stage)));
-    const lastRelevantEventAt = latestDate([...context.events.map((e) => e.createdAt), ...context.activities.map((a) => a.date ?? a.dueDate ?? a.createdAt), ...context.changeLogs.map((c) => c.createdAt), context.latestErpOrder?.createdAt]);
+    const lastRelevantEventAt = latestDate([...context.events.map((e) => e.createdAt), ...context.activities.map((a) => a.date ?? a.dueDate ?? a.createdAt), ...context.changeLogs.map((c) => c.createdAt), context.latestErpOrder?.createdAt, context.lastWhatsAppSentAt]);
     const progressed = context.changeLogs.some((c) => c.field === "stage" || c.field === "stageName") || context.events.some((e) => /etapa|estágio|stage|ganh|perdid/i.test(e.description));
     const priority = calculateCommercialPriority({ now, client: context.client as Prisma.JsonObject, opportunity: context.opportunity, activities: context.activities, timelineEvents: context.events });
     const noRecentContactDays = daysSince(lastContactAt, now);

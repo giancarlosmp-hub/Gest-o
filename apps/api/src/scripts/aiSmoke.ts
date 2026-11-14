@@ -90,6 +90,7 @@ const clientContext: ClientAiContextPayload = {
     openOpportunitiesCount: 0,
     totalCompletedActivities: 0,
     lastActivityAt: null,
+    lastContactAt: null,
     lastPurchaseDate: null,
     lastPurchaseValue: null
   },

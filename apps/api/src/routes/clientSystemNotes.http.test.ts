@@ -34,7 +34,15 @@ const clients: Row[] = [
   { ...baseClient, id: "c-inativo-vazio", name: "Cliente Ficticio Inativo Vazio", lastPurchaseDate: daysAgo(450) },
   { ...baseClient, id: "c-prospect", name: "Cliente Ficticio Prospect", lastPurchaseDate: null },
   { ...baseClient, id: "c-cobranca", name: "Cliente Ficticio Cobranca", lastPurchaseDate: daysAgo(450), partnerTitles: [overdueTitle], openTitlesTotal: 10, overdueTitlesTotal: 10 },
-  { ...baseClient, id: "c-insight", name: "Cliente Ficticio Insight", lastPurchaseDate: daysAgo(100) }
+  { ...baseClient, id: "c-insight", name: "Cliente Ficticio Insight", lastPurchaseDate: daysAgo(100) },
+  // Só conversa do WhatsApp com mensagem enviada (sem atividade, oportunidade ou observação).
+  { ...baseClient, id: "c-whatsapp", name: "Cliente Ficticio WhatsApp", lastPurchaseDate: daysAgo(100) }
+];
+// Conversas do WhatsApp (só a data da última enviada importa): c-whatsapp com enviada há 3 dias; c-inativo-vazio
+// só com recebidas (não conta como contato).
+const conversations: Row[] = [
+  { id: "conv-sent", clientId: "c-whatsapp", lastOutboundAt: daysAgo(3), lastInboundAt: daysAgo(3) },
+  { id: "conv-inbound-only", clientId: "c-inativo-vazio", lastOutboundAt: null, lastInboundAt: daysAgo(1) }
 ];
 const baseOpportunity = { probability: 50, notes: null, crop: "soja", season: null, areaHa: null, productOffered: "Semente ficticia", expectedCloseDate: daysAgo(-10), proposalDate: daysAgo(20), createdAt: daysAgo(30), lastContactAt: daysAgo(5), plantingForecastDate: null, ownerSellerId: "seller-a", value: 5000 };
 const opportunities: Row[] = [
@@ -120,6 +128,12 @@ setModel("activity", {
 });
 setModel("timelineEvent", { findFirst: async ({ where, select }: any) => { const row = newestFirst(timeline.filter((event) => matches(event, where)))[0]; return row ? pick(row, select) : null; } });
 setModel("erpOrderSync", { findMany: async () => [], findFirst: async () => null });
+setModel("communicationConversation", {
+  aggregate: async ({ where }: any) => {
+    const dates = conversations.filter((row) => row.clientId === where.clientId && row.lastOutboundAt).map((row) => row.lastOutboundAt as Date);
+    return { _max: { lastOutboundAt: dates.sort((a, b) => b.getTime() - a.getTime())[0] ?? null } };
+  }
+});
 setModel("knowledgeDocument", { findMany: async () => [], findFirst: async () => null });
 const appConfig = new Map<string, string>();
 setModel("appConfig", {
@@ -219,8 +233,33 @@ try {
   assert.equal(summaryCollection.json.recommendedApproach, CLIENT_IN_COLLECTION_RECOMMENDATION);
   assert.doesNotMatch(JSON.stringify(summaryCollection.json), /Reativar|primeira venda/);
 
+  // WhatsApp: mensagem enviada conta como contato (resumo automático, sugestão, contexto da IA); só recebida não.
+  assert(summaryEmpty.json.lastRelevantSignals.includes("Sem atividades, observações ou oportunidades recentes para este cliente."), "só recebida não conta");
+  const summaryWhatsApp = await call("GET", "/ai/client-summary/c-whatsapp");
+  assert.equal(summaryWhatsApp.status, 200);
+  assert.doesNotMatch(JSON.stringify(summaryWhatsApp.json), /Sem atividades, observações ou oportunidades|Sem data explícita de último contato/);
+  assert(summaryWhatsApp.json.lastRelevantSignals.some((signal: string) => /^Último contato há 3 dias/.test(signal)), JSON.stringify(summaryWhatsApp.json.lastRelevantSignals));
+  const sentDay = new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo" }).format(conversations[0].lastOutboundAt);
+  const suggestionWhatsApp = await call("POST", "/ai/client-suggestion", { clientId: "c-whatsapp" });
+  assert.equal(suggestionWhatsApp.status, 200);
+  assert(suggestionWhatsApp.json.summary.includes(`Último contato: ${sentDay}.`), suggestionWhatsApp.json.summary);
+  env.aiChatEnabled = true;
+  received.length = 0;
+  await call("POST", "/ai/client-suggestion", { clientId: "c-whatsapp" });
+  env.aiChatEnabled = false;
+  const whatsappPrompt = received.map((request) => request.messages.map((message) => message.content).join(" ")).join(" ");
+  assert(whatsappPrompt.includes(`"ultimaAtividade":null,"ultimoContato":"${sentDay}"`), "IA recebe só a data do último contato");
+  assert.doesNotMatch(whatsappPrompt, /conv-sent|lastOutboundAt/);
+  // Tela do cliente: "Último contato" com a enviada; "lastActivityAt" continua só das atividades.
+  const details = await call("GET", "/clients/c-whatsapp");
+  assert.equal(details.status, 200);
+  assert.equal(details.json.commercialSummary.lastContactAt, conversations[0].lastOutboundAt.toISOString());
+  assert.equal(details.json.commercialSummary.lastActivityAt, null);
+  const detailsInbound = await call("GET", "/clients/c-inativo-vazio");
+  assert.equal(detailsInbound.json.commercialSummary.lastContactAt, null, "só recebida não conta");
+
   console.info = originalInfo;
-  console.log("CLIENT_SYSTEM_NOTES=PASS criterion=PASS suggestion=PASS ai_context=PASS opportunity_insight=PASS summary_reactivation=PASS summary_first_sale=PASS summary_collection=PASS");
+  console.log("CLIENT_SYSTEM_NOTES=PASS criterion=PASS suggestion=PASS ai_context=PASS opportunity_insight=PASS summary_reactivation=PASS summary_first_sale=PASS summary_collection=PASS whatsapp_contact=PASS");
 } finally {
   console.info = originalInfo;
   server.close();

@@ -61,6 +61,7 @@ assert.equal(messageOf("M-1").providerTimestamp.toISOString(), "2026-11-07T14:00
 assert.equal(messageOf("M-1").tenantId, "tenant-a");
 assert.deepEqual(messageOf("M-1").metadata, {});
 assert.equal(linked.unreadCount, 1, "recebida soma uma não lida");
+assert.equal(memory.lastContactAdvances.length, 0, "mensagem só recebida não conta como contato");
 
 // 4) Reentrega do mesmo evento: duplicada, nada muda (nem as não lidas).
 assert.equal((await ingestion.handle(upsert("M-1", "5511900000101", "Pedido ficticio"), NOW)).status, "duplicate");
@@ -78,6 +79,11 @@ assert.deepEqual(messageOf("M-2").metadata, { origin: "app" });
 assert.equal(conversationOf("5511900000101").unreadCount, 0, "respondeu pelo celular: já leu");
 assert.equal(conversationOf("5511900000101").lastOutboundAt?.toISOString(), "2026-11-07T14:05:00.000Z");
 assert.equal(conversationOf("5511900000101").lastMessageAt?.toISOString(), "2026-11-07T14:05:00.000Z");
+assert.deepEqual(
+  memory.lastContactAdvances.map((row) => [row.clientId, row.at.toISOString()]),
+  [["client-a", "2026-11-07T14:05:00.000Z"]],
+  "enviada pelo app conta como contato do cliente"
+);
 
 // 6) Fora de ordem: a mais antiga chega depois e não recua lastMessageAt.
 await ingestion.handle(upsert("M-3", "5511900000101", "Mais antiga ficticia", { ts: at("2026-11-07T13:00:00.000Z") }), NOW);
@@ -258,5 +264,49 @@ assert.equal(memory.messages.filter((row) => row.externalMessageId === "M-1").le
 const results = [stored, outbound, unlinked];
 assert.doesNotMatch(JSON.stringify(results), /ficticio|Ficticio|5511900000|s\.whatsapp|M-\d/);
 assert.equal(maskContactPhone("551130000101"), "(11) ****-0101");
+
+// 18) Último contato: uma vez por conversa por dia de Brasília; recebida nunca; vínculo tardio grava a última enviada.
+const CONTACT_NOW = new Date("2026-11-12T12:00:00.000Z"); // depois das mensagens desta seção (relógio do WhatsApp vale)
+const advancesOf = (clientId: string) => memory.lastContactAdvances.filter((row) => row.clientId === clientId).map((row) => row.at.toISOString());
+memory.phoneIndex.set("5511900000301", ["client-c"]);
+memory.clientTenants.set("client-c", "tenant-a");
+await ingestion.handle(upsert("LC-1", "5511900000301", "Bom dia ficticio", { fromMe: true, ts: at("2026-11-08T12:00:00.000Z") }), CONTACT_NOW);
+await ingestion.handle(upsert("LC-2", "5511900000301", "Mais tarde ficticio", { fromMe: true, ts: at("2026-11-08T18:00:00.000Z") }), CONTACT_NOW);
+// 23:30 de Brasília ainda é o mesmo dia (em UTC já é o dia seguinte).
+await ingestion.handle(upsert("LC-3", "5511900000301", "Tarde da noite ficticio", { fromMe: true, ts: at("2026-11-09T02:30:00.000Z") }), CONTACT_NOW);
+await ingestion.handle(upsert("LC-4", "5511900000301", "Resposta do contato ficticia", { ts: at("2026-11-09T11:00:00.000Z") }), CONTACT_NOW);
+await ingestion.handle(upsert("LC-1", "5511900000301", "Bom dia ficticio", { fromMe: true, ts: at("2026-11-08T12:00:00.000Z") }), CONTACT_NOW);
+assert.deepEqual(advancesOf("client-c"), ["2026-11-08T12:00:00.000Z"], "só a primeira enviada do dia; recebida e reentrega não contam");
+await ingestion.handle(upsert("LC-5", "5511900000301", "Dia seguinte ficticio", { fromMe: true, ts: at("2026-11-09T13:00:00.000Z") }), CONTACT_NOW);
+assert.deepEqual(advancesOf("client-c"), ["2026-11-08T12:00:00.000Z", "2026-11-09T13:00:00.000Z"]);
+
+// Enviada para número sem cliente: nada; o telefone entra no cliente e a próxima mensagem (mesmo recebida) vincula
+// a conversa: grava a última enviada.
+await ingestion.handle(upsert("LC-6", "5511900000302", "Primeira ficticia", { fromMe: true, ts: at("2026-11-08T12:00:00.000Z") }), CONTACT_NOW);
+await ingestion.handle(upsert("LC-7", "5511900000302", "Segunda ficticia", { fromMe: true, ts: at("2026-11-08T13:00:00.000Z") }), CONTACT_NOW);
+assert.equal(conversationOf("5511900000302").clientId, null);
+assert.deepEqual(advancesOf("client-d"), []);
+memory.phoneIndex.set("5511900000302", ["client-d"]);
+memory.clientTenants.set("client-d", "tenant-a");
+await ingestion.handle(upsert("LC-8", "5511900000302", "Resposta ficticia", { ts: at("2026-11-08T14:00:00.000Z") }), CONTACT_NOW);
+assert.equal(conversationOf("5511900000302").clientId, "client-d");
+assert.deepEqual(advancesOf("client-d"), ["2026-11-08T13:00:00.000Z"], "vínculo tardio: última enviada da conversa");
+
+// Conversa sem vínculo só com recebidas, vinculada depois: nada.
+await ingestion.handle(upsert("LC-9", "5511900000303", "So recebida ficticia", { ts: at("2026-11-08T12:00:00.000Z") }), CONTACT_NOW);
+memory.phoneIndex.set("5511900000303", ["client-e"]);
+await ingestion.handle(upsert("LC-10", "5511900000303", "Outra recebida ficticia", { ts: at("2026-11-08T12:10:00.000Z") }), CONTACT_NOW);
+assert.equal(conversationOf("5511900000303").clientId, "client-e");
+assert.deepEqual(advancesOf("client-e"), []);
+
+// Falha ao gravar o último contato: a mensagem continua gravada (só WARN).
+const realAdvance = memory.store.advanceClientLastContact;
+memory.store.advanceClientLastContact = async () => {
+  throw new Error("falha ficticia");
+};
+const failed = await ingestion.handle(upsert("LC-11", "5511900000301", "Outro dia ficticio", { fromMe: true, ts: at("2026-11-10T12:00:00.000Z") }), CONTACT_NOW);
+memory.store.advanceClientLastContact = realAdvance;
+assert.equal(failed.status, "stored");
+assert.ok(messageOf("LC-11"));
 
 console.log("whatsappMessageIngestion.test.ts: ok");

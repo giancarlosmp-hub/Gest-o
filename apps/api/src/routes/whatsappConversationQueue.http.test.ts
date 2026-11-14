@@ -24,6 +24,12 @@ tables.client.push(
 tables.contact.push({ id: "contact-existing", clientId: "client-a2", phone: "(11) 90000-0302 / (11) 3000-0000", email: "", ownerSellerId: "seller-a" });
 // Telefone no índice de outro cliente: vincular não cria contato (ficaria ambíguo).
 tables.clientPhoneIndex.push({ id: "idx-1", phone: "5511900000303", clientId: "client-b", tenantId: "tenant-a", source: "erp" });
+// Último contato: vincular conversa com mensagem enviada avança as oportunidades abertas do cliente.
+tables.opportunity.push(
+  { id: "opp-a", clientId: "client-a", stage: "proposta", lastContactAt: null },
+  { id: "opp-a2-open", clientId: "client-a2", stage: "negociacao", lastContactAt: hoursAgo(72) },
+  { id: "opp-a2-won", clientId: "client-a2", stage: "ganho", lastContactAt: null }
+);
 
 const queued = (id: string, owner: string, phone: string, extra: Record<string, unknown> = {}) => ({
   id,
@@ -41,7 +47,7 @@ const queued = (id: string, owner: string, phone: string, extra: Record<string, 
 });
 tables.communicationConversation.push(
   queued("q-new", "seller-a", "5511900000301"),
-  queued("q-existing", "seller-a", "5511900000302", { lastMessageAt: hoursAgo(2), contactName: "X" }),
+  queued("q-existing", "seller-a", "5511900000302", { lastMessageAt: hoursAgo(2), lastOutboundAt: hoursAgo(3), contactName: "X" }),
   queued("q-other-client", "seller-a", "5511900000303", { lastMessageAt: hoursAgo(3) }),
   queued("q-ambiguous", "seller-a", "5511900000304", { linkStatus: "ambiguous", lastMessageAt: hoursAgo(4), unlinkedExpiresAt: daysAhead(0.2) }),
   queued("q-manager", "manager-a", "5511900000305"),
@@ -138,6 +144,12 @@ try {
   const existing = await call("seller-a", "POST", "/whatsapp/unlinked/q-existing/link", { clientId: "client-a2" });
   assert.equal(existing.json.contact, "exists");
   assert.equal(tables.contact.filter((contact) => contact.clientId === "client-a2").length, 1);
+  // Conversa com mensagem enviada antes do vínculo: a última enviada vira o último contato das abertas.
+  const opportunity = (id: string) => tables.opportunity.find((item) => item.id === id)!;
+  assert.equal(opportunity("opp-a2-open").lastContactAt.getTime(), hoursAgo(3).getTime());
+  assert.equal(opportunity("opp-a2-won").lastContactAt, null, "fechada não muda");
+  // Conversa só com recebidas (q-new): não conta como contato.
+  assert.equal(opportunity("opp-a").lastContactAt, null);
 
   // Telefone no índice de outro cliente: vincula, mas não cria contato.
   const otherClient = await call("seller-a", "POST", "/whatsapp/unlinked/q-other-client/link", { clientId: "client-a" });

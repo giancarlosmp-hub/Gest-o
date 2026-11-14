@@ -3,6 +3,7 @@ import { CLIENT_IN_COLLECTION_LABEL, PORTFOLIO_STATUS_LABELS, type PortfolioStat
 import { prisma } from "../config/prisma.js";
 import { isClientCoolingActive, loadLastSentCrmOrderByClient, portfolioStatusOf, resolveLastPurchase, type LastPurchase } from "./clientPortfolioStatus.js";
 import { collectionStatusOf } from "./clientCollection.js";
+import { latestDateOf, loadClientLastWhatsAppSentAt } from "./clientWhatsAppContact.js";
 import { SELLER_OBSERVATION_TIMELINE_WHERE } from "./sellerObservation.js";
 
 const OPEN_STAGES = [OpportunityStage.prospeccao, OpportunityStage.negociacao, OpportunityStage.proposta] as const;
@@ -49,6 +50,8 @@ export type ClientAiContextPayload = {
     openOpportunitiesCount: number;
     totalCompletedActivities: number;
     lastActivityAt: Date | null;
+    // Último contato: atividade ou mensagem enviada pelo WhatsApp (CRM ou app), a mais recente.
+    lastContactAt: Date | null;
     lastPurchaseDate: Date | null;
     lastPurchaseValue: number | null;
   };
@@ -127,7 +130,7 @@ export const buildClientAiContext = async ({
 
   if (!client) return null;
 
-  const [lastSentCrmOrderByClient, openOpportunitiesCount, totalCompletedActivities, lastActivityAggregate, recentActivities, recentOpportunities, latestTimelineEvent] = await Promise.all([
+  const [lastSentCrmOrderByClient, openOpportunitiesCount, totalCompletedActivities, lastActivityAggregate, recentActivities, recentOpportunities, latestTimelineEvent, lastWhatsAppSentAt] = await Promise.all([
     loadLastSentCrmOrderByClient({ id: client.id }),
     prisma.opportunity.count({
       where: {
@@ -211,7 +214,8 @@ export const buildClientAiContext = async ({
         description: true,
         createdAt: true
       }
-    })
+    }),
+    loadClientLastWhatsAppSentAt(client.id)
   ]);
 
   const latestActivityWithText = recentActivities
@@ -222,6 +226,7 @@ export const buildClientAiContext = async ({
   const latestActivityTimestamp = latestActivityWithText ? getActivityEventDate(latestActivityWithText).getTime() : 0;
   const latestTimelineTimestamp = latestTimelineEvent?.createdAt.getTime() ?? 0;
   const portfolioStatus = portfolioStatusOf(client, lastSentCrmOrderByClient, now);
+  const lastActivityAt = lastActivityAggregate._max.date ?? lastActivityAggregate._max.createdAt ?? null;
   const cooling = isClientCoolingActive(client, lastSentCrmOrderByClient, now);
 
   return {
@@ -239,7 +244,8 @@ export const buildClientAiContext = async ({
     commercialSummary: {
       openOpportunitiesCount,
       totalCompletedActivities,
-      lastActivityAt: lastActivityAggregate._max.date ?? lastActivityAggregate._max.createdAt ?? null,
+      lastActivityAt,
+      lastContactAt: latestDateOf(lastActivityAt, lastWhatsAppSentAt),
       lastPurchaseDate: client.lastPurchaseDate,
       lastPurchaseValue: client.lastPurchaseValue
     },
@@ -302,7 +308,9 @@ export const buildClientAiPromptContext = (context: ClientAiContextPayload) => (
   resumo: {
     oportunidadesAbertas: context.commercialSummary.openOpportunitiesCount,
     atividadesConcluidas: context.commercialSummary.totalCompletedActivities,
-    ultimaAtividade: formatBrazilDate(context.commercialSummary.lastActivityAt)
+    ultimaAtividade: formatBrazilDate(context.commercialSummary.lastActivityAt),
+    // Atividade ou mensagem enviada pelo WhatsApp: só a data.
+    ultimoContato: formatBrazilDate(context.commercialSummary.lastContactAt)
   },
   oportunidadesAbertas: context.recentOpportunities.slice(0, 5).map((opportunity) => ({
     titulo: compactText(opportunity.title, 120),

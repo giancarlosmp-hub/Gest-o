@@ -152,6 +152,8 @@ setModel("activity", {
 });
 setModel("timelineEvent", { findFirst: async () => null, findMany: async () => [] });
 setModel("opportunityChangeLog", { findMany: async () => [] });
+// Último WhatsApp enviado ao cliente (último contato): nenhum neste teste.
+setModel("communicationConversation", { aggregate: async () => ({ _max: { lastOutboundAt: null } }) });
 setModel("erpOrderSync", {
   findMany: async ({ where }: any) =>
     erpOrders

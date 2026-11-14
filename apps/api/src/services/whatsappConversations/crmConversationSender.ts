@@ -4,6 +4,7 @@ import { logApiEvent } from "../../utils/logger.js";
 import { createEvolutionClient, EvolutionUnavailableError, type EvolutionClient, type EvolutionClientSendResult } from "../whatsappConnection/evolutionClient.js";
 import { maskContactPhone } from "../whatsappMessages/whatsappMessageIngestion.js";
 import { toMessageView, type MessageView } from "../whatsappMessages/whatsappConversationReads.js";
+import { lastContactToRecord } from "../whatsappMessages/whatsappLastContact.js";
 import { PrismaWhatsAppMessageStore, type ConversationRow, type WhatsAppMessageStore } from "../whatsappMessages/whatsappMessageStore.js";
 import { resolveClientRecipient, type ClientRecipient, type ClientRecipientRefusal, type ClientSendTarget } from "./clientRecipient.js";
 import { isCrmSendAvailable, loadCrmSendConfig } from "./crmSendConfig.js";
@@ -18,6 +19,8 @@ import { CRM_SEND_LIMITS, crmSendLimiter, type CrmSendLimitCode, type CrmSendLim
 // 5. instância "open" no Evolution na hora;
 // 6. envio; com o id devolvido, a mensagem é gravada "via CRM". Se o eco do webhook chegou antes (gravado como
 //    "via app" com o mesmo id), só a origem é corrigida: nunca duplica. Incerto: nada é gravado nem repetido.
+// 7. a enviada conta como contato: avança o último contato das oportunidades abertas do cliente
+//    (whatsappLastContact.ts: uma vez por conversa por dia de Brasília, ou ao corrigir o vínculo).
 // Log só com o resultado e o código: nunca texto, número, nome ou ids.
 
 export const CRM_SEND_MAX_TEXT_LENGTH = 4_000;
@@ -222,6 +225,8 @@ export async function recordCrmSentMessage(
     conversation.clientId !== recipient.clientId || conversation.linkStatus !== "linked"
       ? { clientId: recipient.clientId, tenantId: recipient.tenantId, linkStatus: "linked" as const, linkSource: "crm" as const, linkedAt: sent.at, unlinkedExpiresAt: null, contactName: null }
       : {};
+  // Antes de atualizar a conversa: a última enviada até aqui decide o último contato.
+  const previousLastOutboundAt = conversation.lastOutboundAt;
   await store.updateConversation(conversation.id, {
     numberOwnerUserId: recipient.senderUserId,
     lastMessageAt: later(conversation.lastMessageAt, sent.at),
@@ -230,6 +235,20 @@ export async function recordCrmSentMessage(
     unreadCount: 0,
     ...relink
   });
+  const lastContactAt = lastContactToRecord({
+    clientId: recipient.clientId,
+    previousLastOutboundAt,
+    outboundAt: sent.at,
+    linkedNow: "clientId" in relink
+  });
+  if (lastContactAt) {
+    try {
+      await store.advanceClientLastContact(recipient.clientId, lastContactAt);
+    } catch {
+      // A mensagem já saiu e foi gravada: falhar aqui não pode virar erro do envio.
+      logApiEvent("WARN", "[whatsapp] last contact not advanced", { source: "crm_send" });
+    }
+  }
   const view = toMessageView({
     id: row.id,
     direction: CommunicationDirection.OUTBOUND,

@@ -25,6 +25,7 @@ export function createMemoryWhatsAppMessageStore() {
   const internal = new Set<string>();
   const conversations: StoredConversation[] = [];
   const messages: StoredMessage[] = [];
+  const lastContactAdvances: Array<{ clientId: string; at: Date }> = [];
   let sequence = 0;
   let failNext: Error | null = null;
 
@@ -83,6 +84,10 @@ export function createMemoryWhatsAppMessageStore() {
       if (data.textContent !== undefined) row.textContent = data.textContent;
       if (data.mediaMetadata !== undefined) row.mediaMetadata = data.mediaMetadata;
       row.metadata = data.metadata;
+    },
+    async advanceClientLastContact(clientId, at) {
+      failIfAsked();
+      lastContactAdvances.push({ clientId, at });
     }
   };
 
@@ -132,6 +137,7 @@ export function createMemoryWhatsAppMessageStore() {
     internal,
     conversations,
     messages,
+    lastContactAdvances,
     failNextWith(error: Error) {
       failNext = error;
     }

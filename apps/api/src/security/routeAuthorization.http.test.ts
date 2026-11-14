@@ -125,6 +125,8 @@ setModel("tenantMembership", {
 });
 setModel("knowledgeDocument", { findMany: async () => [] });
 setModel("erpOrderSync", { findMany: async () => [] });
+// Último WhatsApp enviado ao cliente (último contato): nenhum neste teste.
+setModel("communicationConversation", { aggregate: async () => ({ _max: { lastOutboundAt: null } }) });
 setModel("activity", {
   aggregate: async () => ({ _max: { date: null, createdAt: null } }),
   count: async () => 0,

@@ -1832,3 +1832,22 @@ Resultado da validação de 14/11/2026 para os comportamentos do Evolution que e
   verificado diretamente; segue **a observar**.
 
 Pendências e limites conhecidos das telas continuam em `TD-WHATSAPP-CRM-SEND` ([TECH_DEBT.md](TECH_DEBT.md)).
+
+# WhatsApp como contato com o cliente — código pronto, aguardando merge (14/11/2026)
+
+Mensagem **enviada** pelo WhatsApp (pelo CRM ou pelo app do celular, de qualquer número da empresa, inclusive apagada
+depois) conta como contato com o cliente; mensagem só recebida não conta; nada cria `Activity`. Modelo híbrido:
+
+- **Gravado** em `Opportunity.lastContactAt` de todas as oportunidades abertas do cliente, nunca para trás, **uma vez
+  por conversa por dia de Brasília** (fica a hora da primeira enviada do dia); o vínculo tardio da conversa grava a
+  última enviada. Com isso "Propostas sem retorno", score, prioridades do dia, resumo diário, dicas da IA, insight e
+  mensagem de venda passam a considerar a conversa.
+- **Calculado na leitura** para o cliente: "Último contato" da tela do cliente (antes "Última atividade"), Resumo
+  automático, Sugestão inteligente, contexto da IA e Resumo inteligente da Timeline (deixam de dizer "sem contato
+  registrado" quando houve conversa). Vale também para as conversas antigas.
+- Histórico das oportunidades: script `backfillOpportunityWhatsAppLastContact` (simulação por padrão;
+  `--apply --expect=N`), **não rodado**. Sem migration.
+
+Detalhes em
+[communications/whatsapp-evolution.md](communications/whatsapp-evolution.md#whatsapp-como-contato-com-o-cliente);
+limites conhecidos em `TD-WHATSAPP-CRM-SEND` ([TECH_DEBT.md](TECH_DEBT.md)).

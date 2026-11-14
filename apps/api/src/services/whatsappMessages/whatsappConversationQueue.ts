@@ -3,13 +3,16 @@ import { splitPhoneField } from "@salesforce-pro/shared";
 import { prisma as defaultPrisma } from "../../config/prisma.js";
 import { displayPhone, normalizeWhatsAppContactPhone } from "../whatsappConnection/phoneMatch.js";
 import { scheduleClientPhoneIndexRefresh } from "./clientPhoneIndex.js";
+import { advanceClientOpenOpportunitiesLastContact, lastContactToRecord } from "./whatsappLastContact.js";
 import { EVOLUTION_PROVIDER } from "./whatsappMessageStore.js";
 
 // WhatsApp Fase B2: fila "Conversas não vinculadas" do dono do número (cada um vê só a própria, inclusive
 // gerente e diretor), vincular a um cliente e descartar.
 // - Vincular: vendedor só a cliente da carteira dele; gerente e diretor a qualquer cliente ativo do tenant.
 //   O telefone vira contato do cliente (para as próximas conversas casarem sozinhas), salvo quando já está
-//   no cliente ou quando a conversa é ambígua (o telefone está em outro cliente).
+//   no cliente ou quando a conversa é ambígua (o telefone está em outro cliente). A última mensagem enviada
+//   da conversa (antes do vínculo) conta como contato: avança o último contato das oportunidades abertas do
+//   cliente (whatsappLastContact.ts), na mesma transação.
 // - Descartar: apaga a conversa e as mensagens (cascata). Se o contato escrever de novo, volta para a fila.
 // Duas ações ao mesmo tempo: só a primeira muda a conversa; a outra recebe 409.
 
@@ -26,7 +29,7 @@ export class WhatsAppQueueError extends Error {
 }
 
 type QueueUser = { id: string; role: Role | string };
-type QueueDb = Pick<PrismaClient, "communicationConversation" | "communicationMessage" | "client" | "contact" | "clientPhoneIndex" | "$transaction">;
+type QueueDb = Pick<PrismaClient, "communicationConversation" | "communicationMessage" | "client" | "contact" | "clientPhoneIndex" | "opportunity" | "$transaction">;
 
 /** Conversas da fila de um dono de número: sem cliente, não vinculadas ou ambíguas. */
 export const unlinkedQueueWhere = (ownerUserId: string) => ({
@@ -145,7 +148,7 @@ export async function linkUnlinkedConversation(
   const where = { id: input.conversationId, ...unlinkedQueueWhere(input.user.id) };
   const conversation = await db.communicationConversation.findFirst({
     where,
-    select: { id: true, contactNormalized: true, contactName: true, linkStatus: true }
+    select: { id: true, contactNormalized: true, contactName: true, linkStatus: true, lastOutboundAt: true }
   });
   if (!conversation) throw new WhatsAppQueueError(404, "conversation_not_found", "Conversa não encontrada na sua fila.");
   const manager = input.user.role === Role.diretor || input.user.role === Role.gerente;
@@ -172,6 +175,8 @@ export async function linkUnlinkedConversation(
     });
     if (updated.count !== 1) throw new WhatsAppQueueError(409, "already_handled", "Esta conversa já foi vinculada ou descartada.");
     await tx.communicationMessage.updateMany({ where: { conversationId: conversation.id }, data: { tenantId: client.tenantId } });
+    const lastContactAt = lastContactToRecord({ clientId: client.id, previousLastOutboundAt: conversation.lastOutboundAt, outboundAt: null, linkedNow: true });
+    if (lastContactAt) await advanceClientOpenOpportunitiesLastContact(tx, client.id, lastContactAt);
     return ensureLinkedPhoneContact(tx, {
       phone: conversation.contactNormalized,
       pushName: conversation.contactName,

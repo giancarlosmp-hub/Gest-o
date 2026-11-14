@@ -4,6 +4,7 @@ import { env } from "../../config/env.js";
 import { isWhatsAppMessagesEnabled, isWhatsAppTranscriptionEnabled } from "../whatsappConnection/config.js";
 import { parseEvolutionMessageEvent, type ParsedEvolutionEvent } from "./evolutionMessageParser.js";
 import { PrismaWhatsAppMessageStore, type ConversationRow, type ConversationUpdate, type LinkStatus, type WhatsAppMessageStore } from "./whatsappMessageStore.js";
+import { lastContactToRecord } from "./whatsappLastContact.js";
 import { initialTranscription, whatsappTranscriptionQueue, type TranscriptionJob } from "./whatsappTranscriptionQueue.js";
 
 // WhatsApp Fase B: grava as mensagens do número comercial conectado (enviadas pelo app do celular e
@@ -24,6 +25,9 @@ import { initialTranscription, whatsappTranscriptionQueue, type TranscriptionJob
 //   original apagada ou já marcada: nada muda. A apagada pelo contato perde a marca junto com o texto.
 // - Tipo desconhecido ("[mensagem não suportada]"): WARN só com os nomes dos campos de data.message.
 // - Relógio: messageTimestamp do WhatsApp; ausente ou mais de 5 min no futuro, vale a hora de chegada.
+// - Último contato (whatsappLastContact.ts): a enviada (só ela) avança Opportunity.lastContactAt das
+//   oportunidades abertas do cliente, uma vez por conversa por dia de Brasília; o vínculo automático tardio
+//   grava a última enviada da conversa. Falha aqui só gera WARN: a mensagem continua gravada.
 // - Áudio com a transcrição ligada: grava mediaMetadata.transcription (pendente ou pulado) e, se pendente, põe
 //   na fila em memória a referência do arquivo (que não é gravada). A transcrição roda fora do webhook.
 // O resultado nunca traz texto, nome, número, JID ou id da mensagem: só códigos para log.
@@ -185,6 +189,8 @@ export class WhatsAppMessageIngestion {
       });
     }
 
+    // Antes de atualizar a conversa: a última enviada até aqui decide o último contato.
+    const previousLastOutboundAt = conversation.lastOutboundAt;
     await this.store.updateConversation(conversation.id, {
       numberOwnerUserId: connection.userId,
       lastMessageAt: later(conversation.lastMessageAt, timestamp),
@@ -194,6 +200,15 @@ export class WhatsAppMessageIngestion {
       ...(link !== "linked" && parsed.pushName ? { contactName: parsed.pushName } : {}),
       ...current.update
     });
+    await this.recordLastContact(
+      lastContactToRecord({
+        clientId: current.clientId,
+        previousLastOutboundAt,
+        outboundAt: parsed.fromMe ? timestamp : null,
+        linkedNow: Boolean(current.update.clientId)
+      }),
+      current.clientId
+    );
     return {
       ...base,
       status: "stored",
@@ -201,6 +216,15 @@ export class WhatsAppMessageIngestion {
       direction: directionLabel,
       ...(transcription ? { transcription: transcription.status === "pending" ? ("pending" as const) : ("skipped" as const) } : {})
     };
+  }
+
+  private async recordLastContact(at: Date | null, clientId: string | null) {
+    if (!at || !clientId) return;
+    try {
+      await this.store.advanceClientLastContact(clientId, at);
+    } catch {
+      logApiEvent("WARN", "[whatsapp] last contact not advanced", { source: "ingestion" });
+    }
   }
 
   private async edit(parsed: Extract<ParsedEvolutionEvent, { kind: "edit" }>, account: string, userId: string, now: Date): Promise<IngestionResult> {
