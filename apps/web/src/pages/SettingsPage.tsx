@@ -13,6 +13,7 @@ import SellerTerritoriesPanel from "../components/settings/SellerTerritoriesPane
 import CommercialAutomationsPanel from "../components/settings/CommercialAutomationsPanel";
 import CommercialPolicyPanel from "../components/settings/CommercialPolicyPanel";
 import WhatsAppDailySummaryPanel from "../components/settings/WhatsAppDailySummaryPanel";
+import WhatsAppCrmSendPanel from "../components/settings/WhatsAppCrmSendPanel";
 import KnowledgeBasePanel from "../components/settings/KnowledgeBasePanel";
 import { buildUserAdminFields } from "../components/settings/userAdminFields";
 
@@ -194,6 +195,7 @@ export default function SettingsPage() {
         <div className="space-y-4">
           <CommercialAutomationsPanel canEdit={user.role === "diretor"} />
           <WhatsAppDailySummaryPanel canEdit={user.role === "diretor"} />
+          <WhatsAppCrmSendPanel canEdit={user.role === "diretor"} />
         </div>
       ) : activeSection === "commercial-policy" ? (
         <CommercialPolicyPanel canEdit={user.role === "diretor"} />
