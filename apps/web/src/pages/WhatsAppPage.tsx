@@ -8,6 +8,7 @@ import { buildWhatsAppUrl } from "../lib/whatsappLink";
 import MyWhatsAppNumberCard from "../components/whatsapp/MyWhatsAppNumberCard";
 import UnlinkedConversationsCard from "../components/whatsapp/UnlinkedConversationsCard";
 import WhatsAppInbox from "../components/whatsapp/WhatsAppInbox";
+import WhatsAppReplyBox from "../components/whatsapp/WhatsAppReplyBox";
 import { useAuth } from "../context/AuthContext";
 
 type Client = {
@@ -145,6 +146,7 @@ export default function WhatsAppPage() {
         manager={user?.role === "diretor" || user?.role === "gerente"}
         initialConversationId={conversationParam}
         initialNewTarget={inboxNewTarget}
+        renderReply={(input) => <WhatsAppReplyBox {...input} />}
       />
 
       <div className="grid overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm md:grid-cols-[340px_1fr]">

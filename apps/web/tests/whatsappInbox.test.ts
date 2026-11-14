@@ -20,10 +20,12 @@ const testPlugin: Plugin = {
       'import { renderToStaticMarkup } from "react-dom/server";',
       'import { WhatsAppInboxListView } from "/src/components/whatsapp/WhatsAppInbox.tsx";',
       'import { WhatsAppConversationView } from "/src/components/whatsapp/WhatsAppConversation.tsx";',
+      'import { WhatsAppReplyBoxView } from "/src/components/whatsapp/WhatsAppReplyBox.tsx";',
       'export * from "/src/lib/whatsappInbox.ts";',
       "const noop = () => undefined;",
       "export const renderList = (props) => renderToStaticMarkup(createElement(WhatsAppInboxListView, { scope: 'mine', showTeam: false, items: [], selectedId: null, loading: false, error: false, hasMore: false, unreadTotal: 0, onScope: noop, onSelect: noop, onLoadMore: noop, ...props }));",
-      "export const renderConversation = (props) => renderToStaticMarkup(createElement(WhatsAppConversationView, { title: 'Cliente Ficticio', messages: [], loading: false, error: null, hasOlder: false, onLoadOlder: noop, ...props }));"
+      "export const renderConversation = (props) => renderToStaticMarkup(createElement(WhatsAppConversationView, { title: 'Cliente Ficticio', messages: [], loading: false, error: null, hasOlder: false, onLoadOlder: noop, ...props }));",
+      "export const renderReply = (props) => renderToStaticMarkup(createElement(WhatsAppReplyBoxView, { text: '', sending: false, generating: false, canGenerate: true, canSend: false, blockedReason: null, feedback: null, status: null, onText: noop, onGenerate: noop, onSend: noop, ...props }));"
     ].join("\n");
   }
 };
@@ -178,6 +180,27 @@ try {
   assert.match(readOnly, /data-inbox-read-only/);
   assert.doesNotMatch(readOnly, /textarea/);
   assert.match(textOf(mod.renderConversation({ emptyText: "Nenhuma mensagem ainda. A conversa é criada no primeiro envio." })), /criada no primeiro envio/);
+
+  // 8) Campo de resposta: contador, IA, envio, erro da API como veio, incerto como aviso, bloqueado sem campo.
+  const limits = { perMinute: 6, perDay: 150, firstContactsPerDay: 20, maxTextLength: 4000 };
+  const reply = mod.renderReply({ text: "Olá, tudo bem?", canSend: true, status: { limits, today: { total: 7, firstContacts: 2 } } });
+  assert.match(reply, /maxLength="4000"/);
+  assert.match(textOf(reply), /3986 caracteres restantes/);
+  assert.match(textOf(reply), /Gerar mensagem IA/);
+  assert.match(textOf(reply), /Hoje: 7 de 150 envios · 2 de 20 primeiros contatos/);
+  assert.doesNotMatch(reply, /<button[^>]*disabled=""[^>]*>.*Enviar/);
+  const sendingHtml = mod.renderReply({ text: "Olá", canSend: true, sending: true });
+  assert.match(textOf(sendingHtml), /Enviando\.\.\./);
+  assert.match(sendingHtml, /<button[^>]*disabled=""[^>]*>(?:(?!<\/button>).)*Gerar mensagem IA/);
+  const limitHtml = mod.renderReply({ feedback: { tone: "error", message: "Limite diário de envios atingido (150)." } });
+  assert.match(limitHtml, /role="alert"/);
+  assert.match(textOf(limitHtml), /Limite diário de envios atingido \(150\)\./);
+  const uncertainHtml = mod.renderReply({ feedback: { tone: "warning", message: "Pode ter sido enviada. Confira no celular antes de reenviar." } });
+  assert.match(uncertainHtml, /data-inbox-reply-feedback="warning"/);
+  const blocked = mod.renderReply({ blockedReason: "Envio pelo CRM desligado. Responda pelo celular." });
+  assert.match(blocked, /data-inbox-reply-blocked/);
+  assert.doesNotMatch(blocked, /textarea/);
+  assert.doesNotMatch(textOf(mod.renderReply({ canGenerate: false })), /Gerar mensagem IA/);
 
   console.log("whatsapp inbox tests passed");
 } finally {
