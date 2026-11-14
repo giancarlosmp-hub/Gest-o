@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createServer, type Plugin } from "vite";
 
@@ -112,6 +113,15 @@ try {
   assert.equal(mod.lastMessagePreview({ lastMessage: { direction: "outbound", type: "TEXT", text: "Bom dia", viaCrm: true } }), "Você (CRM): Bom dia");
   assert.equal(mod.lastMessagePreview({ lastMessage: { direction: "outbound", type: "TEXT", text: "Bom dia", viaCrm: false } }), "Você: Bom dia");
   assert.equal(mod.lastMessagePreview({ lastMessage: null }), "");
+  // Na aba "Equipe" (número de outro usuário): primeiro nome do dono do número; sem dono, "Equipe".
+  const teamOut = { direction: "outbound", type: "IMAGE", text: "", viaCrm: false } as const;
+  const owner = { id: "user-fict-2", name: "Fulano Ficticio da Silva" };
+  assert.equal(mod.lastMessagePreview({ lastMessage: teamOut, own: false, numberOwner: owner }), "Fulano: [mídia]");
+  assert.equal(mod.lastMessagePreview({ lastMessage: { ...teamOut, type: "TEXT", text: "Bom dia", viaCrm: true }, own: false, numberOwner: owner }), "Fulano (CRM): Bom dia");
+  assert.equal(mod.lastMessagePreview({ lastMessage: { ...teamOut, type: "TEXT", text: "Bom dia" }, own: false, numberOwner: null }), "Equipe: Bom dia");
+  assert.equal(mod.lastMessagePreview({ lastMessage: { ...teamOut, type: "TEXT", text: "Bom dia", viaCrm: true }, own: false, numberOwner: { id: "user-fict-3", name: "  " } }), "Equipe (CRM): Bom dia");
+  assert.equal(mod.lastMessagePreview({ lastMessage: { ...teamOut, type: "TEXT", text: "Bom dia" }, own: true, numberOwner: owner }), "Você: Bom dia");
+  assert.equal(mod.lastMessagePreview({ lastMessage: { direction: "inbound", type: "TEXT", text: "Oi", viaCrm: false }, own: false, numberOwner: owner }), "Oi");
   assert.equal(mod.messageBodyLabel({ type: "IMAGE", text: "" }), "[imagem]");
   assert.equal(mod.messageBodyLabel({ type: "IMAGE", text: "[imagem] legenda ficticia" }), "[imagem] legenda ficticia");
 
@@ -223,6 +233,20 @@ try {
   const waHtml = mod.renderPhones({ phones });
   assert.match(waHtml, /href="https:\/\/wa\.me\/5511900000101"/);
   assert.doesNotMatch(waHtml, /data-whatsapp-crm/);
+
+  // 10) 429 do campo de resposta só no campo: envio e "Gerar mensagem IA" pedem para não mostrar o aviso geral;
+  // o aviso geral continua para as outras requisições.
+  const rateLimit = await import("../src/lib/apiRateLimit.ts");
+  assert.equal(rateLimit.shouldShowRateLimitToast(undefined), true);
+  assert.equal(rateLimit.shouldShowRateLimitToast({}), true);
+  assert.equal(rateLimit.shouldShowRateLimitToast({ skipRateLimitToast: false }), true);
+  assert.equal(rateLimit.shouldShowRateLimitToast({ skipRateLimitToast: true }), false);
+  const source = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
+  const replyBox = source("../src/components/whatsapp/WhatsAppReplyBox.tsx");
+  assert.match(replyBox, /api\.post\("\/whatsapp\/inbox\/send", .*\{ skipRateLimitToast: true \}\)/);
+  assert.match(replyBox, /api\.post<.*"\/ai\/assistant-whatsapp-message", .*skipRateLimitToast: true \}\)/);
+  assert.equal(replyBox.match(/skipRateLimitToast/g)?.length, 2);
+  assert.match(source("../src/lib/apiClient.ts"), /if \(shouldShowRateLimitToast\(requestConfig\)\) toast\.error\("Muitas requisições/);
 
   console.log("whatsapp inbox tests passed");
 } finally {

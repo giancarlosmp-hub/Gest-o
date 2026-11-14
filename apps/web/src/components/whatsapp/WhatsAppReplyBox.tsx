@@ -118,7 +118,7 @@ export default function WhatsAppReplyBox({ target, clientId, own, canReply, stat
     setGenerating(true);
     setFeedback(null);
     try {
-      const response = await api.post<{ message?: string }>("/ai/assistant-whatsapp-message", { clientId }, { timeout: AI_REQUEST_TIMEOUT_MS });
+      const response = await api.post<{ message?: string }>("/ai/assistant-whatsapp-message", { clientId }, { timeout: AI_REQUEST_TIMEOUT_MS, skipRateLimitToast: true });
       if (response.data?.message) setText(response.data.message.slice(0, max));
       else setFeedback({ tone: "error", message: "A IA não devolveu mensagem. Escreva a sua." });
     } catch (error) {
@@ -134,7 +134,7 @@ export default function WhatsAppReplyBox({ target, clientId, own, canReply, stat
     setFeedback(null);
     let outcome;
     try {
-      const response = await api.post("/whatsapp/inbox/send", { ...target, text });
+      const response = await api.post("/whatsapp/inbox/send", { ...target, text }, { skipRateLimitToast: true });
       outcome = sendOutcomeFromResponse(response.data);
     } catch (error) {
       outcome = sendOutcomeFromError(error);

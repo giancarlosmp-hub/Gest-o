@@ -2,6 +2,7 @@ import axios from "axios";
 import { toast } from "sonner";
 import type { AxiosRequestConfig, AxiosResponse } from "axios";
 import { shouldWarnServerUnavailable } from "./networkError";
+import { shouldShowRateLimitToast } from "./apiRateLimit";
 
 type RetryableAxiosRequestConfig = AxiosRequestConfig & { _retry?: boolean };
 
@@ -242,7 +243,7 @@ api.interceptors.response.use((r) => r, async (error) => {
         params: error?.config?.params
       });
     }
-    toast.error("Muitas requisições. Aguarde alguns segundos.", { id: RATE_LIMIT_TOAST_ID });
+    if (shouldShowRateLimitToast(requestConfig)) toast.error("Muitas requisições. Aguarde alguns segundos.", { id: RATE_LIMIT_TOAST_ID });
   }
 
   if (isNetworkError) {

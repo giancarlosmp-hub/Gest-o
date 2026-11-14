@@ -1726,20 +1726,21 @@ Pendente:
 
 ### TD-WHATSAPP-CRM-SEND — WhatsApp Fase C (conversa pelo CRM)
 
-**Aberto, médio.** API (C1) em produção e telas (C2) prontas; envio desligado por padrão
+**Aberto, médio.** API (C1) e telas (C2) em produção; envio pelo CRM validado em produção em 14/11/2026 e ligado
+para todos os usuários com número conectado desde 14/11/2026
 ([communications/whatsapp-evolution.md](communications/whatsapp-evolution.md#fase-c--conversa-pelo-crm-api-c1)).
 Pendente:
 
-- **Ativação:** seguir o roteiro de ativação da seção C2 antes de liberar aos vendedores.
 - **Telas (C2), limites conhecidos:** aba "Equipe" sem filtro por vendedor; o botão "WhatsApp" do cliente só abre a
   conversa no CRM para telefone que já está no `ClientPhoneIndex` (índice desatualizado → wa.me até a reconstrução);
   sem "marcar como não lida" na tela (a rota existe).
 - **Conversa do dia e `lastContactAt` (follow-up aprovado em 11/11/2026):** conversa do dia (pelo CRM ou pelo app)
   deve atualizar o `lastContactAt` das oportunidades abertas do cliente, para os KPIs e as dicas da IA. Hoje só
   atividade registrada avança o `lastContactAt`; a mensagem pelo CRM não cria `Activity` (decisão).
-- **A confirmar no primeiro envio real** (roteiro na seção da Fase C): se o envio pela API volta como
-  `MESSAGES_UPSERT` `fromMe` ou só como `SEND_MESSAGE`; se o eco ou as respostas chegam como `@lid`; e se o envio
-  com o nono dígito chega a contas antigas do WhatsApp.
+- **`@lid` a observar:** na validação de 14/11/2026 a mensagem caiu na conversa do cliente certo, sem problema
+  observado, mas o formato do contato (se o eco ou as respostas chegam como `@lid`) não foi verificado diretamente.
+  Confirmados na mesma validação: o eco não duplica (a mensagem enviada pelo CRM aparece uma vez só, como "via CRM")
+  e o envio com o nono dígito chegou ao número certo do cliente.
 - **Limites em memória:** os contadores por minuto e "um envio de cada vez" valem para uma instância da API (é o
   caso de produção). Depois de reiniciar, o dia é retomado do banco, mas os envios **incertos** de antes não
   contam (não foram gravados).
