@@ -35,6 +35,8 @@ export type ClientSummaryContext = {
     updatedAt: Date;
   } | null;
   lastContact: Date | null;
+  // Houve mensagem enviada pelo WhatsApp (CRM ou app) ao cliente: conta como histórico de contato.
+  hasWhatsAppContact?: boolean;
   // Situação oficial da carteira: define o momento e a abordagem sem negociação aberta, como na Sugestão inteligente.
   portfolio: ClientAiPortfolio;
   // Cliente em cobrança (clientCollection.ts): o resumo não recomenda venda nem reativação.
@@ -115,7 +117,11 @@ const buildClientSummaryOutput = (clientContext: ClientSummaryContext, now: Date
   if (hasHotOpportunity) tags.add("cliente aquecido");
 
   const hasAnyHistory =
-    recentActivities.length > 0 || recentObservations.length > 0 || openOpportunities.length > 0 || Boolean(lastWonOpportunity);
+    recentActivities.length > 0 ||
+    recentObservations.length > 0 ||
+    openOpportunities.length > 0 ||
+    Boolean(lastWonOpportunity) ||
+    Boolean(clientContext.hasWhatsAppContact);
 
   if (!hasAnyHistory) {
     return {

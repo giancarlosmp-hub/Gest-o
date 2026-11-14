@@ -98,6 +98,8 @@ setModel("opportunity", {
 });
 setModel("goal", { findMany: async () => [] });
 setModel("activity", { findMany: async () => [], count: async () => 0, aggregate: async () => ({ _max: { date: null, createdAt: null } }) });
+// Último WhatsApp enviado ao cliente (último contato): nenhum neste teste.
+setModel("communicationConversation", { aggregate: async () => ({ _max: { lastOutboundAt: null } }) });
 setModel("appConfig", { upsert: async () => ({ value: "10" }) });
 
 const server = app.listen(0);

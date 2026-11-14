@@ -41,7 +41,7 @@ const SUGGESTION = { status: "acompanhamento", summary: "Resumo ficticio", recom
 
 const clientContext: ClientAiContextPayload = {
   client: { id: "cliente-ficticio-1", name: "Cliente Ficticio", fantasyName: null, isArchived: false, archiveReason: null, city: "Cidade Ficticia", state: "GO", region: "Centro", potentialHa: null },
-  commercialSummary: { openOpportunitiesCount: 0, totalCompletedActivities: 0, lastActivityAt: null, lastPurchaseDate: null, lastPurchaseValue: null },
+  commercialSummary: { openOpportunitiesCount: 0, totalCompletedActivities: 0, lastActivityAt: null, lastContactAt: null, lastPurchaseDate: null, lastPurchaseValue: null },
   portfolio: { status: "prospect", cooling: false, approach: "primeiraVenda", lastPurchase: null },
   recentActivities: [],
   recentOpportunities: [],

@@ -79,6 +79,7 @@ import { isClientCoolingActive, listPortfolioSegment, loadLastSentCrmOrderByClie
 import { loadClientAbcCurve } from "../services/clientAbcCurve.js";
 import { aiUsageConfigSchema, saveAiUsageConfig } from "../services/ai/aiUsageLimiter.js";
 import { generateClientSuggestion } from "../services/clientSuggestion.js";
+import { latestDateOf, loadClientLastWhatsAppSentAt } from "../services/clientWhatsAppContact.js";
 import { collectionStatusOf, loadClientCollection, loadClientIdsInCollection, withoutClientsInCollection } from "../services/clientCollection.js";
 import { isSellerObservationEvent } from "../services/sellerObservation.js";
 import { buildAssistantWhatsappContext, generateAssistantWhatsappMessage } from "../services/assistantWhatsapp.js";
@@ -4359,7 +4360,7 @@ router.get("/clients/:id", async (req, res) => {
 
   if (!data) return res.status(404).json({ message: "Não encontrado" });
 
-  const [openOpportunitiesCount, lastActivityAggregate, totalCompletedActivities, lastSentCrmOrderByClient] = await Promise.all([
+  const [openOpportunitiesCount, lastActivityAggregate, totalCompletedActivities, lastSentCrmOrderByClient, lastWhatsAppSentAt] = await Promise.all([
     prisma.opportunity.count({
       where: {
         clientId: data.id,
@@ -4383,12 +4384,16 @@ router.get("/clients/:id", async (req, res) => {
         done: true
       }
     }),
-    loadLastSentCrmOrderByClient({ id: data.id })
+    loadLastSentCrmOrderByClient({ id: data.id }),
+    loadClientLastWhatsAppSentAt(data.id)
   ]);
 
+  const lastActivityAt = lastActivityAggregate._max.date ?? lastActivityAggregate._max.createdAt ?? null;
   const commercialSummary = {
     openOpportunitiesCount,
-    lastActivityAt: lastActivityAggregate._max.date ?? lastActivityAggregate._max.createdAt ?? null,
+    lastActivityAt,
+    // "Último contato" da tela: atividade ou mensagem enviada pelo WhatsApp (CRM ou app), a mais recente.
+    lastContactAt: latestDateOf(lastActivityAt, lastWhatsAppSentAt),
     lastPurchaseDate: data.lastPurchaseDate ?? null,
     lastPurchaseValue: data.lastPurchaseValue ?? null,
     totalCompletedActivities,
@@ -5610,7 +5615,7 @@ router.get("/ai/client-summary/:clientId", async (req, res) => {
     return res.status(404).json({ message: "Cliente não encontrado" });
   }
 
-  const [lastSentCrmOrderByClient, recentActivities, openOpportunities, lastWonOpportunity] = await Promise.all([
+  const [lastSentCrmOrderByClient, recentActivities, openOpportunities, lastWonOpportunity, lastWhatsAppSentAt] = await Promise.all([
     loadLastSentCrmOrderByClient({ id: client.id }),
     prisma.activity.findMany({
       where: { clientId: client.id },
@@ -5654,7 +5659,8 @@ router.get("/ai/client-summary/:clientId", async (req, res) => {
         closedAt: true,
         createdAt: true
       }
-    })
+    }),
+    loadClientLastWhatsAppSentAt(client.id)
   ]);
 
   const recentObservations = recentActivities
@@ -5666,7 +5672,9 @@ router.get("/ai/client-summary/:clientId", async (req, res) => {
     ...recentActivities.map((activity) => activity.date || activity.dueDate || activity.createdAt),
     ...openOpportunities.map((opportunity) => opportunity.lastContactAt).filter(Boolean) as Date[],
     lastWonOpportunity?.closedAt || null,
-    lastWonOpportunity?.createdAt || null
+    lastWonOpportunity?.createdAt || null,
+    // Mensagem enviada pelo WhatsApp (CRM ou app) conta como contato.
+    lastWhatsAppSentAt
   ].filter(Boolean) as Date[];
 
   const lastContact = lastContactCandidates.length
@@ -5704,6 +5712,7 @@ router.get("/ai/client-summary/:clientId", async (req, res) => {
         }
       : null,
     lastContact,
+    hasWhatsAppContact: Boolean(lastWhatsAppSentAt),
     portfolio: summaryPortfolioOf(client, lastSentCrmOrderByClient),
     inCollection: collectionStatusOf(client) !== null
   });

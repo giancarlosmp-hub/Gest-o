@@ -112,6 +112,8 @@ setModel("tenantMembership", { findMany: async ({ where }: any) => (users.some((
 setModel("client", { findFirst: async ({ where }: any) => clients.find((row) => matches(row, where)) ?? null });
 setModel("opportunity", { count: async () => 0 });
 setModel("activity", { count: async () => 0, aggregate: async () => ({ _max: { date: null, createdAt: null } }) });
+// Último WhatsApp enviado ao cliente (último contato): nenhum neste teste.
+setModel("communicationConversation", { aggregate: async () => ({ _max: { lastOutboundAt: null } }) });
 setModel("erpOrderSync", { findMany: async () => [] });
 let partnersCache: string | null = JSON.stringify(partners);
 let appConfigReads = 0;

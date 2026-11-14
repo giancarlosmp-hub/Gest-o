@@ -132,6 +132,8 @@ setModel("activity", {
 });
 setModel("timelineEvent", { findFirst: async () => null, findMany: async () => [] });
 setModel("agendaEvent", { findMany: async () => [] });
+// Último WhatsApp enviado ao cliente (último contato): nenhum neste teste.
+setModel("communicationConversation", { aggregate: async () => ({ _max: { lastOutboundAt: null } }) });
 setModel("sellerTerritoryCity", { findMany: async () => [] });
 // Visitas pela carteira (valor estimado do cliente e última visita): valores padrão e nenhuma visita registrada.
 setModel("appConfig", { findMany: async () => [] });

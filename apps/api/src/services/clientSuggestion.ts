@@ -36,7 +36,7 @@ const buildSummary = (clientContext: ClientAiContextPayload) => {
     `Cliente: ${client.name}.`,
     `Situação da carteira: ${clientContext.inCollection ? CLIENT_IN_COLLECTION_LABEL : portfolioSituationLabel(portfolio)}.`,
     `Oportunidades abertas: ${commercialSummary.openOpportunitiesCount}.`,
-    `Última atividade: ${formatDatePtBr(commercialSummary.lastActivityAt)}.`,
+    `Último contato: ${formatDatePtBr(commercialSummary.lastContactAt)}.`,
     `Última compra: ${formatDatePtBr(portfolio.lastPurchase?.date)}.`
   ];
 
@@ -86,7 +86,8 @@ const COLLECTION_SUGGESTION: Omit<ClientSuggestionPayload, "source" | "summary">
 
 export const buildClientSuggestion = (clientContext: ClientAiContextPayload): ClientSuggestionPayload => {
   const { commercialSummary, portfolio } = clientContext;
-  const daysSinceLastActivity = getDaysSince(commercialSummary.lastActivityAt);
+  // Atividade ou mensagem enviada pelo WhatsApp (CRM ou app).
+  const daysSinceLastActivity = getDaysSince(commercialSummary.lastContactAt);
 
   if (clientContext.inCollection) {
     return { source: "deterministic", summary: buildSummary(clientContext), ...COLLECTION_SUGGESTION };
