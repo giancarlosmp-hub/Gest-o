@@ -6,7 +6,7 @@ import { PrismaWhatsAppMessageStore } from "../whatsappMessages/whatsappMessageS
 import type { ClientRecipient } from "./clientRecipient.js";
 import { CRM_SEND_CONFIG_KEY } from "./crmSendConfig.js";
 import { CRM_SEND_LIMITS, CrmSendLimiter, loadDayUsageFromDb } from "./crmSendLimits.js";
-import { CRM_SEND_HTTP_STATUS, CRM_SEND_MAX_TEXT_LENGTH, CRM_SEND_MESSAGES, sendCrmText, type CrmSendDeps } from "./crmConversationSender.js";
+import { CRM_SEND_HTTP_STATUS, CRM_SEND_MAX_TEXT_LENGTH, CRM_SEND_MESSAGES, recordCrmSentMessage, sendCrmText, type CrmSendDeps } from "./crmConversationSender.js";
 
 // WhatsApp Fase C: ponto único de envio pelo CRM com Prisma e Evolution falsos. Só dados fictícios.
 const models = ["user", "client", "opportunity", "opportunityItem", "opportunityChangeLog", "contact", "clientPhoneIndex", "communicationConversation", "communicationMessage", "appConfig", "whatsAppConnection", "tenantMembership"];
@@ -16,6 +16,10 @@ const { tables } = createWhatsAppConversationsTestDb(db);
 const ACCOUNT = "5511900000001";
 tables.whatsAppConnection.push({ id: "conn-a", userId: "seller-a", instanceName: "crm-ficticio-a", status: "CONNECTED", connectedPhone: ACCOUNT });
 tables.client.push({ id: "client-a", tenantId: "tenant-a", ownerSellerId: "seller-a", isArchived: false });
+// Oportunidades do cliente: a enviada pelo CRM conta como contato das abertas.
+tables.opportunity.push({ id: "opp-open", clientId: "client-a", stage: "proposta", lastContactAt: null });
+tables.opportunity.push({ id: "opp-won", clientId: "client-a", stage: "ganho", lastContactAt: null });
+const lastContactOf = (id: string) => (tables.opportunity.find((row) => row.id === id)!.lastContactAt as Date | null)?.toISOString() ?? null;
 for (let i = 0; i < 30; i++) {
   tables.clientPhoneIndex.push({ id: `idx-${i}`, phone: `5511900000${400 + i}`, clientId: "client-a", tenantId: "tenant-a", source: "erp" });
 }
@@ -109,6 +113,8 @@ try {
   assert.deepEqual(stored[0].metadata, { origin: "crm", sentByUserId: "seller-a", firstContact: true });
   assert.equal(first.message.direction, "outbound");
   assert.equal(first.message.text, "Olá, mensagem fictícia");
+  assert.equal(lastContactOf("opp-open"), "2026-11-10T13:00:00.000Z", "enviada pelo CRM avança o último contato");
+  assert.equal(lastContactOf("opp-won"), null, "oportunidade fechada não muda");
 
   // 4) Intervalo mínimo; depois, pela conversa, mesma conversa (sem criar outra).
   assert.equal(await code({ conversationId: first.conversationId }), "rate_interval");
@@ -117,6 +123,7 @@ try {
   assert(second.ok);
   assert.equal(second.conversationId, first.conversationId);
   assert.equal(tables.communicationConversation.filter((row) => row.externalConversationKey === "5511900000400").length, 1);
+  assert.equal(lastContactOf("opp-open"), "2026-11-10T13:00:00.000Z", "segunda enviada do mesmo dia não grava de novo");
 
   // 5) Eco do webhook ANTES da resposta do envio: mesma mensagem (mesmo id), só a origem vira "crm".
   advance(CRM_SEND_LIMITS.minIntervalMs);
@@ -204,6 +211,33 @@ try {
   // 12) Limite do dia: com o total no limite, nada sai; no dia seguinte volta.
   const full = new CrmSendLimiter(async () => ({ total: CRM_SEND_LIMITS.perDay, firstContacts: new Set() }), () => clock);
   assert.equal(await sendCrmText({ user: { id: "seller-a", role: "vendedor" }, tenantId: "tenant-a", target: { conversationId: first.conversationId }, text: "x" }, { ...deps, limiter: full }).then((r) => (r.ok ? "ok" : r.code)), "rate_day");
+
+  // 12b) Último contato ao gravar a enviada (direto, sem passar pelos limites; outro número e outro dia):
+  // conversa criada pelo eco sem vínculo e corrigida pelo envio grava; falha ao gravar não derruba o envio.
+  const otherStore = new PrismaWhatsAppMessageStore(db);
+  tables.client.push({ id: "client-b", tenantId: "tenant-a", ownerSellerId: "seller-b", isArchived: false });
+  tables.opportunity.push({ id: "opp-b", clientId: "client-b", stage: "negociacao", lastContactAt: null });
+  tables.communicationConversation.push({
+    id: "conv-eco-sem-vinculo",
+    provider: "evolution_whatsapp",
+    externalAccountId: "5511900000002",
+    externalConversationKey: "5511900000500",
+    clientId: null,
+    tenantId: null,
+    linkStatus: "unlinked",
+    lastMessageAt: new Date("2026-11-08T12:00:00.000Z"),
+    lastInboundAt: null,
+    lastOutboundAt: new Date("2026-11-08T12:00:00.000Z"),
+    unreadCount: 0
+  });
+  const recipientB = { clientId: "client-b", tenantId: "tenant-a", account: "5511900000002", phone: "5511900000500", senderUserId: "seller-b", firstContact: false } as unknown as ClientRecipient;
+  await recordCrmSentMessage(otherStore, recipientB, { messageId: "MSG-FICTICIA-B1", text: "Mensagem fictícia B", userId: "seller-b", at: new Date("2026-11-08T12:00:00.000Z") });
+  assert.equal(lastContactOf("opp-b"), "2026-11-08T12:00:00.000Z", "vínculo corrigido pelo envio grava mesmo no mesmo dia");
+  const failing = Object.assign(Object.create(otherStore), { advanceClientLastContact: async () => { throw new Error("falha ficticia"); } });
+  const recorded = await recordCrmSentMessage(failing, recipientB, { messageId: "MSG-FICTICIA-B2", text: "Mensagem fictícia B2", userId: "seller-b", at: new Date("2026-11-09T12:00:00.000Z") });
+  assert.equal(recorded.message.direction, "outbound", "falha no último contato não derruba o envio");
+  assert.equal(lastContactOf("opp-b"), "2026-11-08T12:00:00.000Z");
+  assert(logs.some((line) => line.includes("[whatsapp] last contact not advanced")));
 
   // 13) Logs do envio: só resultado e código. Nunca texto, telefone (completo ou parcial), nome, JID, id da
   // mensagem do WhatsApp, instância do Evolution nem chave/segredo.
