@@ -112,6 +112,15 @@ try {
   assert.equal(mod.lastMessagePreview({ lastMessage: { direction: "outbound", type: "TEXT", text: "Bom dia", viaCrm: true } }), "Você (CRM): Bom dia");
   assert.equal(mod.lastMessagePreview({ lastMessage: { direction: "outbound", type: "TEXT", text: "Bom dia", viaCrm: false } }), "Você: Bom dia");
   assert.equal(mod.lastMessagePreview({ lastMessage: null }), "");
+  // Na aba "Equipe" (número de outro usuário): primeiro nome do dono do número; sem dono, "Equipe".
+  const teamOut = { direction: "outbound", type: "IMAGE", text: "", viaCrm: false } as const;
+  const owner = { id: "user-fict-2", name: "Fulano Ficticio da Silva" };
+  assert.equal(mod.lastMessagePreview({ lastMessage: teamOut, own: false, numberOwner: owner }), "Fulano: [mídia]");
+  assert.equal(mod.lastMessagePreview({ lastMessage: { ...teamOut, type: "TEXT", text: "Bom dia", viaCrm: true }, own: false, numberOwner: owner }), "Fulano (CRM): Bom dia");
+  assert.equal(mod.lastMessagePreview({ lastMessage: { ...teamOut, type: "TEXT", text: "Bom dia" }, own: false, numberOwner: null }), "Equipe: Bom dia");
+  assert.equal(mod.lastMessagePreview({ lastMessage: { ...teamOut, type: "TEXT", text: "Bom dia", viaCrm: true }, own: false, numberOwner: { id: "user-fict-3", name: "  " } }), "Equipe (CRM): Bom dia");
+  assert.equal(mod.lastMessagePreview({ lastMessage: { ...teamOut, type: "TEXT", text: "Bom dia" }, own: true, numberOwner: owner }), "Você: Bom dia");
+  assert.equal(mod.lastMessagePreview({ lastMessage: { direction: "inbound", type: "TEXT", text: "Oi", viaCrm: false }, own: false, numberOwner: owner }), "Oi");
   assert.equal(mod.messageBodyLabel({ type: "IMAGE", text: "" }), "[imagem]");
   assert.equal(mod.messageBodyLabel({ type: "IMAGE", text: "[imagem] legenda ficticia" }), "[imagem] legenda ficticia");
 

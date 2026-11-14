@@ -111,13 +111,20 @@ export function conversationPath(input: { clientId: string; target: Pick<ClientP
   return `/whatsapp?clientId=${encodeURIComponent(input.clientId)}&phoneRef=${encodeURIComponent(input.target.ref)}`;
 }
 
+/** Quem enviou, na prévia: "Você" no próprio número; nos números da equipe, o primeiro nome do dono (ou "Equipe"). */
+const outboundAuthor = (item: { own?: boolean; numberOwner?: InboxListItem["numberOwner"] }) => {
+  if (item.own !== false) return "Você";
+  return item.numberOwner?.name.trim().split(/\s+/)[0] || "Equipe";
+};
+
 /** Trecho da última mensagem na lista. */
-export function lastMessagePreview(item: Pick<InboxListItem, "lastMessage">) {
+export function lastMessagePreview(item: Pick<InboxListItem, "lastMessage"> & Partial<Pick<InboxListItem, "own" | "numberOwner">>) {
   const last = item.lastMessage;
   if (!last) return "";
   const text = last.text || (last.type !== "TEXT" ? "[mídia]" : "");
   if (last.direction === "inbound") return text;
-  return `${last.viaCrm ? "Você (CRM)" : "Você"}: ${text}`;
+  const author = outboundAuthor(item);
+  return `${last.viaCrm ? `${author} (CRM)` : author}: ${text}`;
 }
 
 /** Rótulo da mídia (o CRM não guarda o arquivo): o texto gravado ou o tipo. */
