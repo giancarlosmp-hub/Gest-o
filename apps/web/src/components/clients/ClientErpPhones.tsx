@@ -1,7 +1,13 @@
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { MessageCircle, Phone } from "lucide-react";
+import api from "../../lib/apiClient";
+import { conversationPath, findPhoneTarget, type ClientTargets, type InboxStatus } from "../../lib/whatsappInbox";
 
 // Telefones e e-mails cadastrais do parceiro no ERP (GET /clients/:id → erpPhones/erpEmails). Contatos manuais
 // do CRM ficam na aba Contatos, separados. Fixo também ganha WhatsApp (WhatsApp Business), como botão secundário.
+// WhatsApp Fase C (C2): com o número do usuário conectado e o envio pelo CRM ligado, o botão "WhatsApp" abre a
+// conversa no CRM (/whatsapp); sem isso, ou com o telefone fora do índice, continua o wa.me.
 
 export type ClientErpPhone = {
   label: string;
@@ -17,11 +23,53 @@ type Props = {
   phones?: ClientErpPhone[] | null;
   emails?: ClientErpEmail[] | null;
   className?: string;
+  /** Cliente dos telefones: com ele, o botão "WhatsApp" pode abrir a conversa no CRM. */
+  clientId?: string | null;
+};
+
+type ViewProps = Omit<Props, "clientId"> & {
+  /** Caminho da conversa no CRM para o telefone, ou null (wa.me). */
+  crmPathFor?: (phone: ClientErpPhone) => string | null;
 };
 
 const buttonBase = "inline-flex min-h-11 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold";
 
-export default function ClientErpPhones({ phones, emails, className = "" }: Props) {
+/** Envio pelo CRM pronto para este usuário: os destinos do cliente; senão, null. Falha: null (wa.me). */
+function useCrmPhoneTargets(clientId: string | null | undefined) {
+  const [targets, setTargets] = useState<ClientTargets | null>(null);
+  useEffect(() => {
+    let active = true;
+    setTargets(null);
+    if (!clientId) return undefined;
+    (async () => {
+      try {
+        const status = await api.get<InboxStatus>("/whatsapp/inbox/status");
+        if (!active || !status.data.sendEnabled || !status.data.connected) return;
+        const response = await api.get<ClientTargets>("/whatsapp/inbox/client-targets", { params: { clientId } });
+        if (active && response.data.connected) setTargets(response.data);
+      } catch {
+        // Continua o wa.me.
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [clientId]);
+  return targets;
+}
+
+export default function ClientErpPhones({ clientId, ...props }: Props) {
+  const targets = useCrmPhoneTargets(clientId);
+  const crmPathFor = (phone: ClientErpPhone) => {
+    if (!clientId || !targets || !phone.whatsapp) return null;
+    const target = findPhoneTarget(targets.phones, phone.display);
+    return target ? conversationPath({ clientId, target }) : null;
+  };
+  return <ClientErpPhonesView {...props} crmPathFor={crmPathFor} />;
+}
+
+/** Parte visual, sem rede: usada pelo componente e pelos testes. */
+export function ClientErpPhonesView({ phones, emails, className = "", crmPathFor }: ViewProps) {
   const phoneList = phones ?? [];
   const emailList = emails ?? [];
 
@@ -49,15 +97,21 @@ export default function ClientErpPhones({ phones, emails, className = "" }: Prop
                 </a>
               ) : null}
               {phone.whatsapp ? (
-                <a
-                  href={phone.whatsapp}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className={`${buttonBase} ${phone.kind === "mobile" ? "bg-emerald-600 text-white hover:bg-emerald-700" : "border border-emerald-300 text-emerald-700 hover:bg-emerald-50"}`}
-                >
-                  <MessageCircle size={16} aria-hidden="true" />
-                  WhatsApp
-                </a>
+                (() => {
+                  const style = `${buttonBase} ${phone.kind === "mobile" ? "bg-emerald-600 text-white hover:bg-emerald-700" : "border border-emerald-300 text-emerald-700 hover:bg-emerald-50"}`;
+                  const crmPath = crmPathFor?.(phone) ?? null;
+                  return crmPath ? (
+                    <Link to={crmPath} className={style} data-whatsapp-crm title="Abrir a conversa no CRM">
+                      <MessageCircle size={16} aria-hidden="true" />
+                      WhatsApp
+                    </Link>
+                  ) : (
+                    <a href={phone.whatsapp} target="_blank" rel="noopener noreferrer" className={style}>
+                      <MessageCircle size={16} aria-hidden="true" />
+                      WhatsApp
+                    </a>
+                  );
+                })()
               ) : null}
             </li>
           ))}

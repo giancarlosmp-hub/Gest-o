@@ -21,11 +21,14 @@ const testPlugin: Plugin = {
       'import { WhatsAppInboxListView } from "/src/components/whatsapp/WhatsAppInbox.tsx";',
       'import { WhatsAppConversationView } from "/src/components/whatsapp/WhatsAppConversation.tsx";',
       'import { WhatsAppReplyBoxView } from "/src/components/whatsapp/WhatsAppReplyBox.tsx";',
+      'import { ClientErpPhonesView } from "/src/components/clients/ClientErpPhones.tsx";',
+      'import { MemoryRouter } from "react-router-dom";',
       'export * from "/src/lib/whatsappInbox.ts";',
       "const noop = () => undefined;",
       "export const renderList = (props) => renderToStaticMarkup(createElement(WhatsAppInboxListView, { scope: 'mine', showTeam: false, items: [], selectedId: null, loading: false, error: false, hasMore: false, unreadTotal: 0, onScope: noop, onSelect: noop, onLoadMore: noop, ...props }));",
       "export const renderConversation = (props) => renderToStaticMarkup(createElement(WhatsAppConversationView, { title: 'Cliente Ficticio', messages: [], loading: false, error: null, hasOlder: false, onLoadOlder: noop, ...props }));",
-      "export const renderReply = (props) => renderToStaticMarkup(createElement(WhatsAppReplyBoxView, { text: '', sending: false, generating: false, canGenerate: true, canSend: false, blockedReason: null, feedback: null, status: null, onText: noop, onGenerate: noop, onSend: noop, ...props }));"
+      "export const renderReply = (props) => renderToStaticMarkup(createElement(WhatsAppReplyBoxView, { text: '', sending: false, generating: false, canGenerate: true, canSend: false, blockedReason: null, feedback: null, status: null, onText: noop, onGenerate: noop, onSend: noop, ...props }));",
+      "export const renderPhones = (props) => renderToStaticMarkup(createElement(MemoryRouter, null, createElement(ClientErpPhonesView, props)));"
     ].join("\n");
   }
 };
@@ -201,6 +204,25 @@ try {
   assert.match(blocked, /data-inbox-reply-blocked/);
   assert.doesNotMatch(blocked, /textarea/);
   assert.doesNotMatch(textOf(mod.renderReply({ canGenerate: false })), /Gerar mensagem IA/);
+
+  // 9) Botão "WhatsApp" do cliente/oportunidade: conversa no CRM quando há caminho; senão, o wa.me de sempre.
+  const phones = [
+    { label: "Celular", display: "(11) 90000-0101", kind: "mobile", tel: "tel:+5511900000101", whatsapp: "https://wa.me/5511900000101" },
+    { label: "Principal", display: "(11) 3000-0102", kind: "landline", tel: "tel:+551130000102", whatsapp: "https://wa.me/551130000102" }
+  ];
+  const crmHtml = mod.renderPhones({
+    phones,
+    crmPathFor: (phone: { display: string }) => {
+      const target = mod.findPhoneTarget(targets, phone.display);
+      return target ? mod.conversationPath({ clientId: "client-1", target }) : null;
+    }
+  });
+  assert.match(crmHtml, /<a [^>]*data-whatsapp-crm="true"[^>]*href="\/whatsapp\?clientId=client-1&amp;phoneRef=ref-a"/);
+  assert.doesNotMatch(crmHtml, /wa\.me\/5511900000101/);
+  assert.match(crmHtml, /href="\/whatsapp\?conversationId=conv-b"/);
+  const waHtml = mod.renderPhones({ phones });
+  assert.match(waHtml, /href="https:\/\/wa\.me\/5511900000101"/);
+  assert.doesNotMatch(waHtml, /data-whatsapp-crm/);
 
   console.log("whatsapp inbox tests passed");
 } finally {

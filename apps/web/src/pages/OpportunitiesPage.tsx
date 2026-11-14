@@ -2468,6 +2468,7 @@ export default function OpportunitiesPage() {
 
             {drawerErpContacts && drawerErpContacts.clientId === selectedOpportunity.clientId ? (
               <ClientErpPhones
+                clientId={drawerErpContacts.clientId}
                 phones={drawerErpContacts.phones}
                 emails={drawerErpContacts.emails}
                 className="mb-4 rounded-lg border border-slate-200 p-4"
