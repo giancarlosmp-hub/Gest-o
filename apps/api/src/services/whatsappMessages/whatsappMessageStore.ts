@@ -11,6 +11,7 @@ import {
 import { prisma as defaultPrisma } from "../../config/prisma.js";
 import { normalizeWhatsAppContactPhone } from "../whatsappConnection/phoneMatch.js";
 import { findClientsByPhone, type ClientPhoneMatch } from "./clientPhoneIndex.js";
+import { advanceClientOpenOpportunitiesLastContact } from "./whatsappLastContact.js";
 
 // WhatsApp Fase B: o que a ingestão precisa do banco, atrás de uma interface (os testes usam uma versão em
 // memória). Conversa = número comercial (externalAccountId) + número do contato (externalConversationKey).
@@ -105,6 +106,8 @@ export interface WhatsAppMessageStore {
   createMessage(data: MessageCreate): Promise<"created" | "duplicate">;
   findMessage(account: string, externalMessageId: string): Promise<MessageRow | null>;
   updateMessage(id: string, data: MessageUpdate): Promise<void>;
+  /** Mensagem enviada conta como contato: avança o último contato das oportunidades abertas do cliente. */
+  advanceClientLastContact(clientId: string, at: Date): Promise<void>;
 }
 
 const isUniqueViolation = (error: unknown) => error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
@@ -241,5 +244,9 @@ export class PrismaWhatsAppMessageStore implements WhatsAppMessageStore {
         metadata: json(data.metadata)
       }
     });
+  }
+
+  async advanceClientLastContact(clientId: string, at: Date) {
+    await advanceClientOpenOpportunitiesLastContact(this.db, clientId, at);
   }
 }
