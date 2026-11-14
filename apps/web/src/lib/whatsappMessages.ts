@@ -1,6 +1,7 @@
 import { BRAZIL_TIME_ZONE } from "./brazilDate";
 
-// WhatsApp Fase B2: conversas gravadas do número comercial (Evolution), lidas pela API. Não existe envio.
+// WhatsApp Fase B2: conversas gravadas do número comercial (Evolution), lidas pela API. O envio pelo CRM
+// (Fase C) grava a mensagem com origem "crm" ("via CRM").
 
 /** Cartão "WhatsApp · dd/mm": uma conversa (número do vendedor + contato) num dia de Brasília. */
 export type WhatsAppDayCardItem = {
@@ -30,7 +31,8 @@ export type WhatsAppMessageItem = {
   type: string;
   text: string;
   at: string | null;
-  origin: "app" | "received";
+  /** Enviada pelo app do celular, pelo CRM (Fase C) ou recebida. */
+  origin: "app" | "crm" | "received";
   edited: boolean;
   /** Edição cifrada no WhatsApp: o texto mostrado é o original, o novo não é legível. */
   editedTextUnavailable: boolean;
@@ -102,7 +104,8 @@ export const formatWhatsAppTime = (iso: string | null | undefined) => {
   return value.toLocaleTimeString("pt-BR", { timeZone: BRAZIL_TIME_ZONE, hour: "2-digit", minute: "2-digit" });
 };
 
-export const whatsappOriginLabel = (message: Pick<WhatsAppMessageItem, "origin">) => (message.origin === "app" ? "via app" : "recebida");
+export const whatsappOriginLabel = (message: Pick<WhatsAppMessageItem, "origin">) =>
+  message.origin === "app" ? "via app" : message.origin === "crm" ? "via CRM" : "recebida";
 
 export const whatsappExpiryLabel = (days: number | null) => {
   if (days === null) return null;

@@ -77,6 +77,7 @@ try {
   assert.equal(mod.formatBrazilDayMonth("2026-11-06T01:30:00.000Z"), "05/11");
   assert.equal(mod.whatsappOriginLabel({ origin: "app" }), "via app");
   assert.equal(mod.whatsappOriginLabel({ origin: "received" }), "recebida");
+  assert.equal(mod.whatsappOriginLabel({ origin: "crm" }), "via CRM");
   assert.equal(mod.whatsappExpiryLabel(1), "expira em 1 dia");
   assert.equal(mod.whatsappExpiryLabel(6), "expira em 6 dias");
   assert.equal(mod.whatsappExpiryLabel(0), "expira hoje");
