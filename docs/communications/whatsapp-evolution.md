@@ -644,3 +644,75 @@ API (`POST /whatsapp/inbox/send`) ou pela tela do C2, uma mensagem curta a um cl
    (55 + DDD + 9 + número); confirmar que a mensagem chega ao aparelho e que o eco cai na mesma conversa (a
    ingestão acrescenta o 9). Se o Evolution responder `exists: false`, o CRM devolve `number_not_on_whatsapp` e
    nada sai: registrar e tratar em PR próprio.
+
+## Fase C — telas da conversa pelo CRM (web, C2)
+
+Só o web: usa as rotas do C1 sem mudar regras da API. Sem migration, sem variável nova, sem dependência nova.
+
+### Caixa de conversas (`/whatsapp`)
+
+- Bloco "Conversas" entre a fila de não vinculadas e o Assistente Comercial (os dois continuam como estavam).
+- **Meu número** (todos os perfis): conversas vinculadas do próprio número, da mais recente para a mais antiga, com
+  cliente, número mascarado, não lidas e trecho da última mensagem ("Você (CRM): …" quando saiu pelo CRM).
+- **Equipe** (gerente e diretor): conversas dos outros números do tenant, com o nome do dono do número. **Somente
+  leitura**: sem campo de resposta e sem `POST /inbox/read` (não zera as não lidas do vendedor). Sem filtro por
+  vendedor nesta fase.
+- Atualização só com a aba visível (`document.visibilityState`): lista e situação do envio a cada **20 s**; conversa
+  aberta a cada **5 s**, só o que mudou (`changedSince` = `serverTime` da resposta anterior), juntado por id.
+  Ao voltar para a aba, atualiza na hora.
+
+### Conversa aberta
+
+- Histórico com texto, transcrição do áudio (mesmo componente da linha do tempo), marcas "editada", "editada no
+  WhatsApp – texto novo não disponível" e "apagada no WhatsApp", mídia como rótulo (`[imagem]`, `[documento]`…) e
+  origem: **recebida**, **via app** ou **via CRM**. "Mensagens anteriores" carrega as 50 de antes.
+- Abrir marca como lida **só para o dono do número** (e de novo se chegar mensagem com a conversa aberta).
+- A linha do tempo do cliente e da oportunidade também passa a mostrar "via CRM" (antes aparecia "recebida").
+
+### Campo de resposta
+
+- Aparece só para o dono do número; sem envio ligado, sem número conectado ou com a conversa fora da carteira, mostra
+  o motivo no lugar do campo.
+- Até **4.000 caracteres**, com contador. "Gerar mensagem IA" (`POST /ai/assistant-whatsapp-message`, rota já
+  existente) só **preenche** o campo; o vendedor revisa e envia.
+- Uma ação por vez: enviar e gerar ficam bloqueados enquanto um dos dois está em andamento.
+- Erro da API mostrado **como veio** (limite, não conectado, número sem WhatsApp…). **Incerto** (202 `uncertain`, ou
+  sem resposta / tempo esgotado no navegador): aviso "Pode ter sido enviada. Confira no celular antes de reenviar.";
+  o texto fica no campo e nada é reenviado sozinho.
+- Abaixo do campo, o uso de hoje: envios e primeiros contatos contra os limites.
+
+### Botão "WhatsApp" do cliente e da oportunidade
+
+`ClientErpPhones` (tela do cliente, gaveta e tela da oportunidade) recebe o `clientId`. Com o envio ligado e o número
+do usuário conectado (`GET /inbox/status`), lê `GET /inbox/client-targets` e procura o telefone do ERP pelo número:
+
+- conversa já existente com esse telefone → `/whatsapp?conversationId=…`;
+- sem conversa → `/whatsapp?clientId=…&phoneRef=…`: conversa vazia, **criada no primeiro envio**
+  (`POST /inbox/send` com `{ clientId, phoneRef, text }`);
+- envio desligado, número desconectado, telefone fora do índice ou erro → continua o **wa.me**.
+
+### Configurações → Automações Comerciais → "Conversa pelo CRM no WhatsApp"
+
+Liga/desliga a chave (`PUT /inbox/send-config`): **só o diretor** edita; o gerente vê. Mostra os limites (lidos da
+API) e o aviso de risco de bloqueio do número. Ligada sem a gravação das conversas ou sem o Evolution: aviso de
+indisponível.
+
+### Roteiro de ativação
+
+Pré-requisitos: C1 e C2 em produção; gravação das conversas (Fase B) ligada; número do usuário de teste conectado.
+Nada disso liga o envio sozinho.
+
+1. **Diretor** liga a chave em Configurações → Automações Comerciais → "Conversa pelo CRM no WhatsApp".
+2. **Usuário de teste** (de preferência um gerente, com cliente de teste cujo contato é um aparelho da empresa): abre o
+   cliente, toca em "WhatsApp" no telefone do aparelho de teste e confere que abriu a conversa no CRM (não o wa.me).
+3. Envia uma mensagem curta. Confere: aparece "via CRM" na conversa, chega ao aparelho de teste e aparece também no
+   celular do remetente.
+4. Responde pelo aparelho de teste. Em até 5 s a resposta aparece na conversa aberta; a lista mostra a ordem e as
+   não lidas zeradas com a conversa aberta.
+5. Segue o **Roteiro do envio de teste** da Fase C (C1): eco sem duplicar, `@lid`, nono dígito.
+6. Gerente abre a aba "Equipe": vê a conversa sem campo de resposta, e as não lidas do vendedor não mudam.
+7. Desligar a chave: o campo de resposta mostra "Envio pelo CRM desligado" e o botão do cliente volta ao wa.me.
+8. Só depois disso, liberar aos vendedores (avisar dos limites e do risco de bloqueio).
+
+Algo errado em qualquer passo: o diretor desliga a chave (efeito imediato, sem deploy) e o caso vai para
+`TD-WHATSAPP-CRM-SEND`.

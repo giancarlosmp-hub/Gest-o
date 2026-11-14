@@ -1,4 +1,17 @@
-# WhatsApp Fase C (C1, API): conversar pelo CRM — código pronto, aguardando merge — 11/11/2026
+# WhatsApp Fase C (C2, web): telas da conversa pelo CRM — código pronto, aguardando merge — 14/11/2026
+
+- `/whatsapp`: caixa "Meu número" (conversas vinculadas, não lidas, trecho) e, para gerente e diretor, "Equipe"
+  somente leitura. Conversa com texto, transcrição, editada/apagada, mídia como rótulo e origem (recebida / via app /
+  via CRM); atualização só com a aba visível (lista 20 s, conversa 5 s incremental); abrir marca como lida só para o
+  dono. Assistente e fila de não vinculadas continuam.
+- Campo de resposta até 4.000 caracteres, "Gerar mensagem IA" só preenche, uma ação por vez, erro da API como veio
+  (incerto: conferir no celular antes de reenviar).
+- Botão "WhatsApp" do cliente e da oportunidade abre a conversa no CRM com o envio ligado e o número conectado;
+  senão, wa.me. Painel da chave em Configurações → Automações Comerciais (só diretor edita).
+- Só web, sem mudar a API. Envio continua **desligado**. Roteiro de ativação em
+  [communications/whatsapp-evolution.md](communications/whatsapp-evolution.md#roteiro-de-ativação).
+
+# WhatsApp Fase C (C1, API): conversar pelo CRM — em produção, envio desligado — 11/11/2026
 
 - Envio de texto pelo CRM, pelo número conectado do próprio usuário, para um cliente ativo (vendedor: só da
   carteira; gerente e diretor: qualquer cliente, pelo próprio número, nunca na conversa de outro número). Um destino
@@ -7,7 +20,7 @@
 - Limites por usuário: 6/min, 150/dia e 20 primeiros contatos/dia. Não lidas por conversa. Caixa "Meu número" e
   "Equipe" (gestão, somente leitura) na API.
 - **Envio desligado** por padrão (`AppConfig` `whatsappCrmSend.config`, só diretor liga). Sem migration e sem
-  variável nova. Telas no C2. Detalhes e roteiro do envio de teste em
+  variável nova. Telas no C2 (acima). Detalhes e roteiro do envio de teste em
   [communications/whatsapp-evolution.md](communications/whatsapp-evolution.md#fase-c--conversa-pelo-crm-api-c1);
   pendências em `TD-WHATSAPP-CRM-SEND`.
 

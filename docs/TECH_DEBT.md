@@ -1726,12 +1726,14 @@ Pendente:
 
 ### TD-WHATSAPP-CRM-SEND — WhatsApp Fase C (conversa pelo CRM)
 
-**Aberto, médio.** API pronta (C1) e envio desligado por padrão
+**Aberto, médio.** API (C1) em produção e telas (C2) prontas; envio desligado por padrão
 ([communications/whatsapp-evolution.md](communications/whatsapp-evolution.md#fase-c--conversa-pelo-crm-api-c1)).
 Pendente:
 
-- **Telas (C2):** caixa de conversas em `/whatsapp`, botão "WhatsApp" do cliente e da oportunidade abrindo a conversa
-  no CRM (wa.me só sem número conectado), "Gerar mensagem IA" no campo de resposta e o painel da chave.
+- **Ativação:** seguir o roteiro de ativação da seção C2 antes de liberar aos vendedores.
+- **Telas (C2), limites conhecidos:** aba "Equipe" sem filtro por vendedor; o botão "WhatsApp" do cliente só abre a
+  conversa no CRM para telefone que já está no `ClientPhoneIndex` (índice desatualizado → wa.me até a reconstrução);
+  sem "marcar como não lida" na tela (a rota existe).
 - **Conversa do dia e `lastContactAt` (follow-up aprovado em 11/11/2026):** conversa do dia (pelo CRM ou pelo app)
   deve atualizar o `lastContactAt` das oportunidades abertas do cliente, para os KPIs e as dicas da IA. Hoje só
   atividade registrada avança o `lastContactAt`; a mensagem pelo CRM não cria `Activity` (decisão).
