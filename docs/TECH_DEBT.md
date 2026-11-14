@@ -1726,7 +1726,7 @@ Pendente:
 
 ### TD-WHATSAPP-CRM-SEND — WhatsApp Fase C (conversa pelo CRM)
 
-**Aberto, médio.** API (C1) em produção e telas (C2) prontas; envio desligado por padrão
+**Aberto, médio.** API (C1) e telas (C2) em produção; envio pelo CRM validado em produção em 14/11/2026
 ([communications/whatsapp-evolution.md](communications/whatsapp-evolution.md#fase-c--conversa-pelo-crm-api-c1)).
 Pendente:
 

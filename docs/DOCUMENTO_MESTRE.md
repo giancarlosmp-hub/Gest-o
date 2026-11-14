@@ -1804,6 +1804,22 @@ mensagem enviada não cria `Activity`; envio com timeout de 10 s; novo método `
 `sendTextToCrmUser`, com trava estática que lista quem chama cada um. Logs nunca com texto, telefone, nome, JID, id
 da mensagem do WhatsApp, instância ou segredos; ids internos do CRM podem aparecer no log de acesso.
 
-Pendências em `TD-WHATSAPP-CRM-SEND` ([TECH_DEBT.md](TECH_DEBT.md)): telas do C2; conversa do dia atualizar o
+Pendências em `TD-WHATSAPP-CRM-SEND` ([TECH_DEBT.md](TECH_DEBT.md)): conversa do dia atualizar o
 `lastContactAt` das oportunidades abertas do cliente; três comportamentos do Evolution a confirmar no primeiro envio
-real (eco `fromMe` × `SEND_MESSAGE`, `@lid`, nono dígito).
+real (eco `fromMe` × `SEND_MESSAGE`, `@lid`, nono dígito). As telas saíram no C2 (seção abaixo).
+
+# WhatsApp Fase C: telas da conversa pelo CRM (C2) em produção (14/11/2026)
+
+O C2 (PR #1039, só web) está em produção: caixa de conversas em `/whatsapp` ("Meu número" e, para gerente e diretor,
+"Equipe" somente leitura), campo de resposta com "Gerar mensagem IA", botão "WhatsApp" do cliente e da oportunidade
+abrindo a conversa no CRM e painel de Configurações para ligar e desligar o envio. O **envio pelo CRM foi validado em
+produção em 14/11/2026**. Toda mensagem sai só por ação do vendedor; nada é enviado automaticamente. Detalhes e roteiro
+de ativação em
+[communications/whatsapp-evolution.md](communications/whatsapp-evolution.md#fase-c--telas-da-conversa-pelo-crm-web-c2).
+
+Ajustes pequenos depois da validação (só web): na aba "Equipe", a prévia da última mensagem enviada mostra o primeiro
+nome do dono do número ("Nome: …", "Nome (CRM): …"; sem dono, "Equipe") em vez de "Você"; o 429 do envio e do "Gerar
+mensagem IA" aparece só no campo de resposta, sem o aviso geral "Muitas requisições" (as outras telas não mudam);
+texto do topo de `/whatsapp` deixa claro que dá para responder pela caixa de conversas.
+
+Pendências e limites conhecidos das telas continuam em `TD-WHATSAPP-CRM-SEND` ([TECH_DEBT.md](TECH_DEBT.md)).
