@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import api from "../../lib/apiClient";
+import { clientLastContactOf } from "../../lib/clientLastContact";
 
 type ClientCommercialSummary = {
   openOpportunitiesCount?: number | null;
   lastActivityAt?: string | null;
+  lastContactAt?: string | null;
   lastPurchaseDate?: string | null;
   lastPurchaseValue?: number | null;
   totalCompletedActivities?: number | null;
@@ -152,7 +154,7 @@ export default function ClientAutoSummaryCard({ clientId }: ClientAutoSummaryCar
             <span className="font-semibold text-slate-800">Oportunidades abertas:</span> {fallbackSummary.openOpportunitiesCount ?? 0}
           </p>
           <p>
-            <span className="font-semibold text-slate-800">Última interação:</span> {formatDatePtBr(fallbackSummary.lastActivityAt)}
+            <span className="font-semibold text-slate-800">Último contato:</span> {formatDatePtBr(clientLastContactOf(fallbackSummary))}
           </p>
           <p>
             <span className="font-semibold text-slate-800">Última compra:</span> {formatDatePtBr(fallbackSummary.lastPurchaseDate)} ({formatCurrencyPtBr(fallbackSummary.lastPurchaseValue)})

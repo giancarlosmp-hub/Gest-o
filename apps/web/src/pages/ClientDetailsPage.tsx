@@ -14,10 +14,13 @@ import { canManageArchivedClients, canReactivateClient, clientArchiveBadgeLabel,
 import ClientMergeDuplicateDialog from "../components/clients/ClientMergeDuplicateDialog";
 import { PORTFOLIO_STATUS_LABELS, isValidOptionalContactEmail, type PortfolioStatus } from "@salesforce-pro/shared";
 import { portfolioStatusBadgeClass } from "../lib/portfolioStatusBadge";
+import { clientLastContactOf } from "../lib/clientLastContact";
 
 type CommercialSummary = {
   openOpportunitiesCount: number;
   lastActivityAt: string | null;
+  // Atividade ou mensagem enviada pelo WhatsApp (CRM ou app), a mais recente.
+  lastContactAt?: string | null;
   lastPurchaseDate: string | null;
   lastPurchaseValue: number | null;
   totalCompletedActivities: number;
@@ -593,9 +596,9 @@ export default function ClientDetailsPage() {
           </div>
 
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Última atividade</p>
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Último contato</p>
             <p className="mt-2 text-xl font-semibold text-slate-900">
-              {formatDate(client.commercialSummary?.lastActivityAt)}
+              {formatDate(clientLastContactOf(client.commercialSummary))}
             </p>
           </div>
 
