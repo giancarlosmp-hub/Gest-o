@@ -15,7 +15,16 @@ const testPlugin: Plugin = {
   },
   load(id) {
     if (id !== RENDER_ENTRY) return null;
-    return ['export * from "/src/lib/whatsappInbox.ts";'].join("\n");
+    return [
+      'import { createElement } from "react";',
+      'import { renderToStaticMarkup } from "react-dom/server";',
+      'import { WhatsAppInboxListView } from "/src/components/whatsapp/WhatsAppInbox.tsx";',
+      'import { WhatsAppConversationView } from "/src/components/whatsapp/WhatsAppConversation.tsx";',
+      'export * from "/src/lib/whatsappInbox.ts";',
+      "const noop = () => undefined;",
+      "export const renderList = (props) => renderToStaticMarkup(createElement(WhatsAppInboxListView, { scope: 'mine', showTeam: false, items: [], selectedId: null, loading: false, error: false, hasMore: false, unreadTotal: 0, onScope: noop, onSelect: noop, onLoadMore: noop, ...props }));",
+      "export const renderConversation = (props) => renderToStaticMarkup(createElement(WhatsAppConversationView, { title: 'Cliente Ficticio', messages: [], loading: false, error: null, hasOlder: false, onLoadOlder: noop, ...props }));"
+    ].join("\n");
   }
 };
 
@@ -116,6 +125,59 @@ try {
   assert.match(mod.replyBlockedReason({ status: { ...status, enabled: false, sendEnabled: false }, own: true, canReply: true }), /desligado/);
   assert.match(mod.replyBlockedReason({ status: { ...status, connected: false }, own: true, canReply: true }), /não está conectado/);
   assert.equal(mod.replyBlockedReason({ status, own: true, canReply: true }), null);
+
+  // 6) Lista: "Meu número" com não lidas e trecho; "Equipe" só para gestão, com o dono do número.
+  const textOf = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+  const item = (id: string, extra: Record<string, unknown> = {}) => ({
+    id,
+    client: { id: `client-${id}`, name: `Cliente Ficticio ${id}` },
+    contactDisplay: "(11) 9****-0101",
+    lastMessageAt: "2026-11-10T15:00:00.000Z",
+    unreadCount: 0,
+    numberOwner: { id: "seller-a", name: "Vendedor Ficticio A" },
+    own: true,
+    canReply: true,
+    lastMessage: { direction: "inbound", type: "TEXT", text: "Pode mandar a proposta?", viaCrm: false },
+    ...extra
+  });
+  const mine = mod.renderList({ items: [item("c1", { unreadCount: 3 }), item("c2")], unreadTotal: 3, selectedId: "c2" });
+  assert.match(textOf(mine), /Meu número 3/);
+  assert.doesNotMatch(mine, /Equipe/);
+  assert.match(mine, /aria-label="3 não lidas"/);
+  assert.match(textOf(mine), /Cliente Ficticio c1 .*10\/11 12:00/);
+  assert.match(textOf(mine), /Pode mandar a proposta\?/);
+  assert.match(mine, /data-inbox-item="c2" aria-current="true"|aria-current="true"[^>]*data-inbox-item="c2"/);
+  assert.doesNotMatch(textOf(mine), /número de Vendedor Ficticio A/);
+  const team = mod.renderList({ scope: "team", showTeam: true, items: [item("c3", { own: false, canReply: false })] });
+  assert.match(textOf(team), /Equipe/);
+  assert.match(textOf(team), /Somente leitura/);
+  assert.match(textOf(team), /número de Vendedor Ficticio A/);
+  assert.match(textOf(mod.renderList({})), /Nenhuma conversa vinculada no seu número/);
+  assert.match(textOf(mod.renderList({ error: true })), /Não foi possível carregar as conversas/);
+
+  // 7) Conversa: texto, origem, marcas, transcrição, mídia como rótulo; somente leitura; conversa nova vazia.
+  const thread = mod.renderConversation({
+    subtitle: "(11) 9****-0101",
+    hasOlder: true,
+    messages: [
+      message("t1", "2026-11-10T12:00:00.000Z", { text: "Bom dia, tudo bem?" }),
+      message("t2", "2026-11-10T12:01:00.000Z", { direction: "outbound", origin: "app", text: "Tudo sim", edited: true }),
+      message("t3", "2026-11-10T12:02:00.000Z", { direction: "outbound", origin: "crm", text: "Segue a proposta ficticia" }),
+      message("t4", "2026-11-10T12:03:00.000Z", { type: "AUDIO", text: "[áudio 0:42]", transcription: { status: "done", text: "Transcrição ficticia do áudio" } }),
+      message("t5", "2026-11-10T12:04:00.000Z", { type: "IMAGE", text: "" }),
+      message("t6", "2026-11-10T12:05:00.000Z", { deletedInWhatsApp: true, text: "Mensagem ficticia apagada" }),
+      message("t7", "2026-11-10T12:06:00.000Z", { editedTextUnavailable: true })
+    ]
+  });
+  const threadText = textOf(thread);
+  for (const expected of ["recebida", "via app", "via CRM", "editada", "🎤 0:42", "transcrição automática", "Transcrição ficticia do áudio", "[imagem]", "apagada no WhatsApp", "texto novo não disponível", "Mensagens anteriores", "10/11 09:00"]) {
+    assert.ok(threadText.includes(expected), `conversa sem "${expected}"`);
+  }
+  assert.doesNotMatch(thread, /data-inbox-read-only/);
+  const readOnly = mod.renderConversation({ readOnlyNote: "Somente leitura: conversa do número de outro usuário. Abrir não marca como lida." });
+  assert.match(readOnly, /data-inbox-read-only/);
+  assert.doesNotMatch(readOnly, /textarea/);
+  assert.match(textOf(mod.renderConversation({ emptyText: "Nenhuma mensagem ainda. A conversa é criada no primeiro envio." })), /criada no primeiro envio/);
 
   console.log("whatsapp inbox tests passed");
 } finally {
