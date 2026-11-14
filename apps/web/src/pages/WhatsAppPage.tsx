@@ -137,7 +137,7 @@ export default function WhatsAppPage() {
     <section className="space-y-4">
       <header className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <h1 className="text-2xl font-bold text-slate-900">Assistente Comercial WhatsApp</h1>
-        <p className="mt-1 text-sm text-slate-600">Gere, edite, copie e abra o WhatsApp. Nenhuma mensagem é enviada automaticamente.</p>
+        <p className="mt-1 text-sm text-slate-600">Responda o cliente pela caixa de conversas ou gere, edite e copie a mensagem para o WhatsApp. Toda mensagem só sai quando você clica em Enviar; nada é enviado automaticamente.</p>
       </header>
 
       <MyWhatsAppNumberCard queueVersion={queueVersion} />
