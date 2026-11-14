@@ -37,7 +37,7 @@ const counts = (card: WhatsAppDayCardItem) => {
   return parts.join(" · ");
 };
 
-function AudioTranscription({ transcription }: { transcription: WhatsAppTranscription }) {
+export function AudioTranscription({ transcription }: { transcription: WhatsAppTranscription }) {
   const [expanded, setExpanded] = useState(false);
   const note = whatsappTranscriptionNote(transcription);
   if (note) return <p className="mt-1 text-xs italic text-slate-500">{note}</p>;

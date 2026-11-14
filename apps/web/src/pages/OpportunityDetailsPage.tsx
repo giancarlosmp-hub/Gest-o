@@ -1369,7 +1369,7 @@ export default function OpportunityDetailsPage() {
 
       {item.clientId && clientErpSummary ? (
         <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm md:p-4">
-          <ClientErpPhones phones={clientErpSummary?.erpPhones} emails={clientErpSummary?.erpEmails} />
+          <ClientErpPhones clientId={item.clientId} phones={clientErpSummary?.erpPhones} emails={clientErpSummary?.erpEmails} />
         </section>
       ) : null}
 

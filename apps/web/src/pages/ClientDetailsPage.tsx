@@ -638,7 +638,7 @@ export default function ClientDetailsPage() {
       {hasErpData ? (
         <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           <h3 className="mb-3 text-lg font-semibold">Dados ERP</h3>
-          <ClientErpPhones phones={client.erpPhones} emails={client.erpEmails} className="mb-4 border-b border-slate-100 pb-4" />
+          <ClientErpPhones clientId={client.id} phones={client.erpPhones} emails={client.erpEmails} className="mb-4 border-b border-slate-100 pb-4" />
           <div className="grid gap-2 text-sm md:grid-cols-2 lg:grid-cols-3">
             <p><strong>Código:</strong> {erpData.clientCode || "-"}</p>
             <p><strong>Nome fantasia:</strong> {erpData.fantasyName || "-"}</p>
