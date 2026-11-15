@@ -1,3 +1,4 @@
+import { timelineEventAuthorLabel } from "@salesforce-pro/shared";
 import { formatDateBR } from "../lib/formatters";
 import { mergeTimeline, type WhatsAppDayCardItem } from "../lib/whatsappMessages";
 import WhatsAppDayCard from "./whatsapp/WhatsAppDayCard";
@@ -79,7 +80,7 @@ export default function TimelineEventList({
               <span className="text-xs text-slate-500">{formatDateBR(event.createdAt)}</span>
             </div>
             <p className="mt-1 text-slate-700">{event.description}</p>
-            <p className="mt-1 text-xs text-slate-500">por {event.ownerSeller?.name || "Sistema"}</p>
+            <p className="mt-1 text-xs text-slate-500">por {timelineEventAuthorLabel(event, "Sistema")}</p>
           </article>
         );
       }) : null}

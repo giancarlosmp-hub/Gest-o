@@ -29,6 +29,7 @@ import {
   isErpOrderSyncResendable,
   isSuccessfulErpOrderSync,
   normalizeErpParameterCode,
+  timelineEventAuthorLabel,
 } from "@salesforce-pro/shared";
 import { brazilMonthKey } from "../lib/brazilDate";
 import { OPPORTUNITY_ITEM_ERP_PRICE_DIFFERS_LABEL } from "../lib/opportunityItemPolicy";
@@ -1602,7 +1603,7 @@ export default function OpportunityDetailsPage() {
                 </div>
                 <p className="mt-1 text-slate-700">{event.description}</p>
                 <p className="mt-1 text-xs text-slate-500">
-                  por {event.ownerSeller?.name || "Usuário"}
+                  por {timelineEventAuthorLabel(event, "Usuário")}
                 </p>
               </div>
             ))

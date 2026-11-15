@@ -60,7 +60,13 @@ const events = [
     ownerSeller: { id: "seller-a", name: "Vendedor Ficticio A" },
     opportunity: { id: "opp-antiga", title: "Oportunidade ficticia antiga" }
   },
-  { id: "ev-sis", type: "status", description: "Registro ficticio sem autor", createdAt: "2026-01-10T12:00:00.000Z", ownerSeller: null }
+  { id: "ev-sis", type: "status", description: "Registro ficticio sem autor", createdAt: "2026-01-10T12:00:00.000Z", ownerSeller: null },
+  // Gerado pela sincronização do ERP: o ownerSellerId é o dono do cliente, mas o autor exibido é o sistema.
+  {
+    id: "ev-erp", type: "status", createdAt: "2026-01-10T11:00:00.000Z",
+    description: "Cliente atualizado via UltraFV3. Vendedor alterado de Vendedor Ficticio B para Vendedor Ficticio C. Oportunidades, atividades, autores e datas históricas foram preservados.",
+    ownerSeller: { id: "seller-c", name: "Vendedor Ficticio C" }
+  }
 ];
 
 try {
@@ -72,6 +78,11 @@ try {
   assert.match(html, /por Vendedor Ficticio A/);
   assert.match(html, /por Sistema/);
   assert.match(html, /Status ficticio do vendedor antigo/);
+
+  // Evento da sincronização do ERP: "por Sistema (sincronização ERP)", nunca "por <vendedor>".
+  assert.match(html, /por Sistema \(sincronização ERP\)/);
+  assert.doesNotMatch(html, /por Vendedor Ficticio C/);
+  assert.equal(html.match(/por Sistema \(sincronização ERP\)/g)?.length, 1, "só o evento da sincronização");
 
   // Nenhum link nem título de oportunidade: o vendedor novo não recebe atalho para a oportunidade antiga.
   assert.doesNotMatch(html, /<a\b/);

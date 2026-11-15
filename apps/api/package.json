@@ -44,7 +44,7 @@
     "test:erp-order-reconciliation": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/services/erpOrderReconciliation.test.ts",
     "test:erp-order-manual-resolution": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/services/erpOrderManualResolution.test.ts",
     "test:cleanup-rejected-order-fake-status": "npm run prisma:generate && tsx src/scripts/cleanupRejectedOrderFakeStatus.test.ts",
-    "test:simulate-client-portfolio-cleanup": "npm run prisma:generate && tsx src/scripts/simulateClientPortfolioCleanup.test.ts",
+    "test:simulate-client-portfolio-cleanup": "npm run prisma:generate && tsx src/scripts/simulateClientPortfolioCleanup.test.ts && tsx src/services/erpSyncTimelineAuthor.test.ts",
     "test:portfolio-cleanup-reactivation": "npm run prisma:generate && tsx src/services/portfolioCleanupReactivation.test.ts",
     "test:archive-portfolio-cleanup": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/scripts/archivePortfolioCleanup.test.ts",
     "test:opportunity-archived-client": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/routes/opportunityArchivedClient.http.test.ts",
