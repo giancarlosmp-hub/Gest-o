@@ -1811,3 +1811,30 @@ Pendente e riscos:
 - **Relatório de descontos por vendedor:** fica para outro PR; a base é o `OpportunityChangeLog`
   (`item.<linha>.discountPercent`, autor e data) e `discountTotal`/`grossTotal` dos itens.
 - **Política desligada:** o CRM não limita o desconto (só confere 0 a 100%); o ERP continua validando o dele.
+
+### TD-CLIENT-TIMELINE-OWNER-CHANGE — linha do tempo do cliente sumia na troca de vendedor
+
+**Resolvido no código, aguardando deploy.** `GET /events` filtrava os eventos por `TimelineEvent.ownerSellerId`.
+Quando o cliente mudava de carteira (UltraFV3/ERP), os eventos antigos ficavam com o vendedor anterior e sumiam para o
+vendedor novo. Agora, com `clientId`, a rota confere o acesso pela regra da ficha do cliente
+(`clientReadableForDetailsWhere`, a mesma do `GET /clients/:id`) e, com `opportunityId`, pela regra das rotas de
+oportunidade (`sellerWhere`). Quem passa vê todos os eventos, com o autor de cada um (`ownerSeller`); quem não passa
+recebe 404. Sem cliente nem oportunidade, o filtro continua sendo o vendedor do evento. Nenhum evento é regravado e
+não há migration. Cliente arquivado segue a ficha: o vendedor com oportunidade desse cliente vê o histórico inteiro.
+
+Limites conhecidos:
+
+- **Oportunidades não são transferidas na troca de carteira.** O vendedor antigo continua dono das oportunidades
+  antigas do cliente e vê os eventos delas pela oportunidade; o vendedor novo vê esses eventos na linha do tempo do
+  cliente, mas recebe 404 ao abrir a oportunidade. A lista (`TimelineEventList`) não mostra título nem link de
+  oportunidade, então não há atalho quebrado na tela.
+- **Índices:** `TimelineEvent` não tem índice além da chave primária. A leitura por cliente e por oportunidade percorre
+  a tabela (já era assim antes desta correção). Índices `(clientId, createdAt)` e `(opportunityId, createdAt)` exigem
+  migration e aprovação.
+
+### TD-EVENTS-CLIENT-TENANT-FILTER — `GET /events` e `GET /clients/:id` sem filtro de tenant
+
+**Prioridade alta.** Nenhuma das duas rotas filtra por tenant: o acesso é só por vendedor (`sellerWhere`) e, para
+gerente e diretor, não há restrição. Hoje há uma única empresa em operação, mas um segundo tenant permitiria que a
+gestão de um lesse cliente e linha do tempo do outro pelo ID. Corrigir junto com o isolamento de dados (TD-ER-004),
+com testes negativos entre tenants nas duas rotas.
