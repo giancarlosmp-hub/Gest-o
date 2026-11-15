@@ -84,7 +84,7 @@
     "smoke:pr18a3-ultrafv3-partners": "tsx src/scripts/pr18a3UltraFv3PartnerSyncSmoke.ts",
     "smoke:ultrafv3-partner-identity": "tsx src/scripts/ultraFv3PartnerIdentityMatchingSmoke.ts",
     "test:ultrafv3-partner-tenancy": "tsx src/services/ultraFv3PartnerTenantSafety.test.ts",
-    "test:ultrafv3-partners-customer-flag": "npm run prisma:generate && tsx src/services/ultraFv3PartnerCustomerFilter.test.ts && tsx src/services/clientDuplicateMergeSync.test.ts && tsx src/services/ultraFv3PartnerOwnerRule.test.ts",
+    "test:ultrafv3-partners-customer-flag": "npm run prisma:generate && tsx src/services/ultraFv3PartnerCustomerFilter.test.ts && tsx src/services/clientDuplicateMergeSync.test.ts && tsx src/services/ultraFv3PartnerOwnerRule.test.ts && tsx src/scripts/simulatePartnerOwnerRule.test.ts",
     "test:ultrafv3-partners-legacy-tenant": "npm run prisma:generate && tsx src/services/ultraFv3LegacyTenantDuplicate.test.ts",
     "test:erp-payment-method-eligibility": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/services/erpPaymentMethodEligibility.test.ts && tsx src/services/erpOrderCommercialPolicyGate.test.ts",
     "test:ultrafv3-financial-sync": "npm run prisma:generate && tsx src/services/ultraFv3FinancialSync.test.ts",
