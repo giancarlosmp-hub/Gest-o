@@ -469,6 +469,7 @@ const sellers = ["seller-a", "seller-b", "seller-c"].map((id, index) => ({
   erpCode: `90${index}`,
   erpLoginUsername: `login-${id}`,
   erpLoginPasswordEncrypted: encryptErpCredential(`senha-${id}`),
+  tenantMemberships: [{ tenantId: "tenant-a" }],
 }));
 
 const setModel = (model: string, methods: Record<string, unknown>) => {

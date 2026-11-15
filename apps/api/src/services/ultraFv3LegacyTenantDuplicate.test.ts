@@ -12,8 +12,8 @@ const { ultraFv3Client } = await import("./ultraFv3Client.js");
 type Row = Record<string, any>;
 const TENANT = "tenant-ficticio";
 const sellers: Row[] = [
-  { id: "seller-novo", name: "Vendedor Novo Ficticio", role: "vendedor", isActive: true, erpCode: "77", erpLoginUsername: "login-novo", erpLoginPasswordEncrypted: encryptErpCredential("senha-ficticia") },
-  { id: "seller-desligado", name: "Vendedor Desligado Ficticio", role: "vendedor", isActive: false, erpCode: "66", erpLoginUsername: null, erpLoginPasswordEncrypted: null },
+  { id: "seller-novo", name: "Vendedor Novo Ficticio", role: "vendedor", isActive: true, erpCode: "77", erpLoginUsername: "login-novo", erpLoginPasswordEncrypted: encryptErpCredential("senha-ficticia"), tenantMemberships: [{ tenantId: TENANT }] },
+  { id: "seller-desligado", name: "Vendedor Desligado Ficticio", role: "vendedor", isActive: false, erpCode: "66", erpLoginUsername: null, erpLoginPasswordEncrypted: null, tenantMemberships: [{ tenantId: TENANT }] },
 ];
 const VALID_DOCUMENT = "11222333000181"; // CNPJ fictício com dígitos válidos
 
@@ -112,13 +112,14 @@ setModel("erpSyncRun", {
 });
 (prisma as any).$transaction = async (fn: (tx: unknown) => Promise<unknown>) => fn(prisma);
 
-// ERP fictício: o vendedor novo agora devolve os dois parceiros legados e um parceiro inédito.
+// ERP fictício: o vendedor novo agora devolve os dois parceiros legados e um parceiro inédito, com ele
+// (erpCode 77) no campo Vendedor do cadastro, que é quem manda no dono.
 (ultraFv3Client as any).requestWithCredentials = async (path: string) => {
   assert.ok(path.startsWith("/partners"), path);
   return [
-    { PARCEIRO: "5001", RAZAO_SOCIAL: "Fazenda Legada Ficticia", CIDADE: "Cidade Ficticia", UF: "PR", IDN_CLIENTE: "S" },
-    { PARCEIRO: "5003", RAZAO_SOCIAL: "Sitio Legado Ficticio", CNPJ: "11.222.333/0001-81", CIDADE: "Cidade Ficticia", UF: "PR", IDN_CLIENTE: "S" },
-    { PARCEIRO: "5002", RAZAO_SOCIAL: "Cliente Novo Ficticio", CIDADE: "Outra Cidade Ficticia", UF: "SC", IDN_CLIENTE: "S" },
+    { PARCEIRO: "5001", RAZAO_SOCIAL: "Fazenda Legada Ficticia", CIDADE: "Cidade Ficticia", UF: "PR", IDN_CLIENTE: "S", VENDEDOR_DO_PARCEIRO: "77" },
+    { PARCEIRO: "5003", RAZAO_SOCIAL: "Sitio Legado Ficticio", CNPJ: "11.222.333/0001-81", CIDADE: "Cidade Ficticia", UF: "PR", IDN_CLIENTE: "S", VENDEDOR_DO_PARCEIRO: "77" },
+    { PARCEIRO: "5002", RAZAO_SOCIAL: "Cliente Novo Ficticio", CIDADE: "Outra Cidade Ficticia", UF: "SC", IDN_CLIENTE: "S", VENDEDOR_DO_PARCEIRO: "77" },
   ];
 };
 

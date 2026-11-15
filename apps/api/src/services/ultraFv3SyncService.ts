@@ -12,6 +12,13 @@ import { logApiEvent } from "../utils/logger.js";
 import { getErpRuntimeEnvironmentDiagnostics, getMissingErpRuntimeConfig, type ErpRuntimeEnvironmentDiagnostics } from "./erpRuntimeConfig.js";
 import { normalizeCnpj, normalizeState, normalizeText } from "../utils/normalize.js";
 import { incrementPartnerMatchCounter, resolvePartnerIdentityMatch } from "./partnerIdentityMatching.js";
+import {
+  buildErpSellerDirectory,
+  createPartnerOwnerChangeRound,
+  resolvePartnerOwner,
+  type ErpSellerDirectory,
+  type PartnerOwnerChangeRound,
+} from "./partnerOwnerRule.js";
 import { recordClientCodeChange } from "./clientCodeAuditService.js";
 import { scheduleClientPhoneIndexRebuild } from "./whatsappMessages/clientPhoneIndex.js";
 import { formatOrderStatusSyncWarning } from "./erpOrderStatusSyncWarning.js";
@@ -110,6 +117,11 @@ export type RunSyncOptions = {
    * /partners preenche e a limpeza de títulos lê. Sem ela, a limpeza não limpa ninguém.
    */
   partnerPortfolioRound?: PartnerPortfolioRound;
+  /**
+   * Clientes cujo dono já foi trocado nesta rodada do /partners (todas as passadas por vendedor de uma
+   * execução): no máximo uma troca por cliente por rodada.
+   */
+  partnerOwnerChangeRound?: PartnerOwnerChangeRound;
 };
 
 /** Por vendedor que concluiu o /partners na rodada: códigos do retorno bruto, antes do filtro IDN_CLIENTE. */
@@ -1566,6 +1578,12 @@ type PartnerPersistenceDiagnostics = {
   existingClientsNotCustomer?: number;
   /** Só contagem: clientes não arquivados do CRM com código vindo com vendedor do ERP sem usuário ativo no CRM. */
   existingClientsSellerWithoutActiveUser?: number;
+  /** Cliente existente manteve o dono: campo Vendedor vazio no ERP. */
+  ownerKeptErpSellerMissing?: number;
+  /** Cliente existente manteve o dono: campo Vendedor do ERP sem usuário ativo correspondente no CRM. */
+  ownerKeptErpSellerUnmatched?: number;
+  /** Troca de dono bloqueada: o cliente já tinha trocado de dono nesta rodada. */
+  ownerChangeBlockedInRound?: number;
   validAfterNormalization?: number;
   discardedAfterNormalization?: number;
   receivedWithDocument: number;
@@ -1945,15 +1963,17 @@ async function mergeDuplicateClientsIntoPrimary(
 
 async function persistPartnerPayload(
   payload: Record<string, unknown>,
-  ownerSellerId: string,
+  /** Vendedor cujo login trouxe o parceiro (no caminho global, o vendedor do ERP já resolvido). */
+  loginSellerId: string,
   authority: PartnerTenantAuthority,
   diagnostics: PartnerPersistenceDiagnostics,
   correlationId: string,
+  ownerContext: { directory: ErpSellerDirectory; changeRound: PartnerOwnerChangeRound },
 ) {
   if (!authority?.tenantId) {
     logApiEvent("WARN", "[ultrafv3 sync partners] partner skipped without tenant authority", {
       correlationId,
-      ownerSellerId,
+      ownerSellerId: loginSellerId,
     });
     return false;
   }
@@ -1962,7 +1982,7 @@ async function persistPartnerPayload(
     diagnostics.withoutCode += 1;
     return false;
   }
-  const { data, normalizedDocument, cnpj, mappedCity, mappedState } = buildPartnerMappedData(payload, ownerSellerId);
+  const { data, normalizedDocument, cnpj, mappedCity, mappedState } = buildPartnerMappedData(payload, loginSellerId);
   if (cnpj) diagnostics.receivedWithDocument += 1;
   else diagnostics.receivedWithoutDocument += 1;
 
@@ -2029,9 +2049,36 @@ async function persistPartnerPayload(
     });
   }
 
-  const primary = choosePrimaryPartnerClient(candidates, ownerSellerId);
+  const primary = choosePrimaryPartnerClient(candidates, loginSellerId);
   const duplicates = primary ? candidates.filter((candidate) => candidate.id !== primary.id) : [];
   if (candidates.length > 1) diagnostics.duplicatesFound += candidates.length;
+
+  // Dono: o campo Vendedor do cadastro do ERP manda, também na passada por vendedor (partnerOwnerRule.ts).
+  const ownerDecision = resolvePartnerOwner({
+    erpSellerCode: pickFirstString(payload, partnerSellerCodeKeys),
+    directory: ownerContext.directory,
+    tenantId: authority.tenantId,
+    loginSellerId,
+    currentOwnerId: primary?.ownerSellerId ?? null,
+  });
+  let ownerSellerId = ownerDecision.ownerSellerId;
+  if (ownerDecision.source === "kept_erp_seller_missing") {
+    diagnostics.ownerKeptErpSellerMissing = (diagnostics.ownerKeptErpSellerMissing ?? 0) + 1;
+  } else if (ownerDecision.source === "kept_erp_seller_unmatched") {
+    diagnostics.ownerKeptErpSellerUnmatched = (diagnostics.ownerKeptErpSellerUnmatched ?? 0) + 1;
+  }
+  // Rede de segurança: no máximo uma troca de dono por cliente por rodada.
+  if (primary && ownerSellerId !== primary.ownerSellerId && ownerContext.changeRound.has(primary.id)) {
+    diagnostics.ownerChangeBlockedInRound = (diagnostics.ownerChangeBlockedInRound ?? 0) + 1;
+    logApiEvent("WARN", "[ultrafv3 sync partners] owner change blocked: client already changed owner in this round", {
+      correlationId,
+      clientId: primary.id,
+      currentOwnerId: primary.ownerSellerId,
+      blockedOwnerId: ownerSellerId,
+      ownerSource: ownerDecision.source,
+    });
+    ownerSellerId = primary.ownerSellerId;
+  }
   // Arquivado pela limpeza da carteira: reativa só se o ERP diz que é cliente da carteira (IDN_CLIENTE = S e
   // vendedor do ERP de um usuário ativo do CRM); senão atualiza o cadastro e mantém o arquivamento.
   const portfolioCleanupArchived = Boolean(primary?.isArchived && isPortfolioCleanupArchiveReason(primary.archiveReason));
@@ -2115,7 +2162,10 @@ async function persistPartnerPayload(
     diagnostics.merged += duplicates.length;
     if (keepPortfolioCleanupArchive) diagnostics.portfolioCleanupKeptArchived = (diagnostics.portfolioCleanupKeptArchived ?? 0) + 1;
     if (reactivatePortfolioCleanup) diagnostics.portfolioCleanupReactivated = (diagnostics.portfolioCleanupReactivated ?? 0) + 1;
-    if (sellerChanged) diagnostics.sellerChangedCount += 1;
+    if (sellerChanged) {
+      diagnostics.sellerChangedCount += 1;
+      ownerContext.changeRound.add(primary.id);
+    }
     if (cityChanged || (currentCityPlaceholder && mappedCity)) diagnostics.cityCorrectedCount += 1;
     if (normalizedDocument) diagnostics.updatedDocumentCount += 1;
     if (resolution.matchStrategy === "code_exact") diagnostics.updatedByCode += 1;
@@ -2216,12 +2266,35 @@ async function tryCountExistingClientsInPartnerRound(rows: unknown[], correlatio
   }
 }
 
+/** Vendedores ativos com erpCode e vínculos de tenant ativos: mesma consulta do caminho global. */
+const findErpSellerUsers = () =>
+  prisma.user.findMany({
+    where: { role: "vendedor", erpCode: { not: null }, isActive: true },
+    select: {
+      id: true,
+      erpCode: true,
+      tenantMemberships: {
+        where: { status: "active", tenant: { status: "active" } },
+        select: { tenantId: true },
+        take: 2,
+      },
+    },
+  });
+const toErpSellerDirectory = (users: Array<{ id: string; erpCode: string | null; tenantMemberships: Array<{ tenantId: string }> }>) =>
+  buildErpSellerDirectory(users.map((user) => ({
+    id: user.id,
+    erpCode: user.erpCode,
+    tenantIds: user.tenantMemberships.map((membership) => membership.tenantId),
+  })));
+
 async function persistPartnerRowsForSeller(
   rows: unknown[],
   seller: SellerSyncUser,
   authority: PartnerTenantAuthority,
   correlationId: string,
+  changeRound: PartnerOwnerChangeRound,
 ) {
+  const ownerContext = { directory: toErpSellerDirectory(await findErpSellerUsers()), changeRound };
   const diagnostics: PartnerPersistenceDiagnostics = {
     received: rows.length,
     withoutCode: 0,
@@ -2260,7 +2333,7 @@ async function persistPartnerRowsForSeller(
       continue;
     }
     // partner-customer-filter:end
-    const persisted = await persistPartnerPayload(row as Record<string, unknown>, seller.id, authority, diagnostics, correlationId);
+    const persisted = await persistPartnerPayload(row as Record<string, unknown>, seller.id, authority, diagnostics, correlationId, ownerContext);
     if (persisted) syncedCount += 1;
   }
 
@@ -2283,18 +2356,11 @@ export async function syncPartners(options?: RunSyncOptions) {
       await cachePartnerRows(rows);
       // Antes de gravar: conta só clientes que já existiam no CRM.
       const roundCounts = await tryCountExistingClientsInPartnerRound(rows, correlationId);
-      const configuredSellers = await prisma.user.findMany({
-        where: { role: "vendedor", erpCode: { not: null }, isActive: true },
-        select: {
-          id: true,
-          erpCode: true,
-          tenantMemberships: {
-            where: { status: "active", tenant: { status: "active" } },
-            select: { tenantId: true },
-            take: 2,
-          },
-        },
-      });
+      const configuredSellers = await findErpSellerUsers();
+      const ownerContext = {
+        directory: toErpSellerDirectory(configuredSellers),
+        changeRound: options?.partnerOwnerChangeRound ?? createPartnerOwnerChangeRound(),
+      };
       const sellerBuckets = new Map<string, typeof configuredSellers>();
       for (const seller of configuredSellers) {
         const code = normalizePartnerCacheCode(seller.erpCode?.trim() || "");
@@ -2357,7 +2423,7 @@ export async function syncPartners(options?: RunSyncOptions) {
           actorUserId: options?.authenticatedActorUserId,
           allowLegacyAdoption: Boolean(options?.authenticatedTenantId && options.authenticatedActorUserId),
         };
-        const persisted = await persistPartnerPayload(payload, seller.id, authority, diagnostics, correlationId);
+        const persisted = await persistPartnerPayload(payload, seller.id, authority, diagnostics, correlationId, ownerContext);
         if (persisted) syncedCount += 1;
       }
       diagnostics.validAfterNormalization = syncedCount;
@@ -2562,6 +2628,7 @@ export async function syncPartnersByUser(
         seller,
         tenantAuthority,
         correlationId,
+        options?.partnerOwnerChangeRound ?? createPartnerOwnerChangeRound(),
       );
       Object.assign(result.diagnostics, roundCounts, {
         pagesConsulted: paged.pagination.pagesConsulted,
@@ -2680,7 +2747,12 @@ export async function syncPartnersForAllConfiguredSellers(
     portfolioCleanupReactivated: 0,
     existingClientsNotCustomer: 0,
     existingClientsSellerWithoutActiveUser: 0,
+    ownerKeptErpSellerMissing: 0,
+    ownerKeptErpSellerUnmatched: 0,
+    ownerChangeBlockedInRound: 0,
   };
+  // Todas as passadas desta execução compartilham a rede de segurança: uma troca de dono por cliente.
+  const partnerOwnerChangeRound = options?.partnerOwnerChangeRound ?? createPartnerOwnerChangeRound();
   const results: Array<{
     userId: string;
     sellerName: string;
@@ -2701,6 +2773,7 @@ export async function syncPartnersForAllConfiguredSellers(
     try {
       const result = await syncPartnersByUser(seller.id, {
         ...options,
+        partnerOwnerChangeRound,
         failIfLocked: false,
       });
       const skipped = Boolean(result.diagnostics?.skippedByLock);
@@ -2729,6 +2802,9 @@ export async function syncPartnersForAllConfiguredSellers(
       summary.portfolioCleanupReactivated += result.diagnostics?.portfolioCleanupReactivated ?? 0;
       summary.existingClientsNotCustomer += result.diagnostics?.existingClientsNotCustomer ?? 0;
       summary.existingClientsSellerWithoutActiveUser += result.diagnostics?.existingClientsSellerWithoutActiveUser ?? 0;
+      summary.ownerKeptErpSellerMissing += result.diagnostics?.ownerKeptErpSellerMissing ?? 0;
+      summary.ownerKeptErpSellerUnmatched += result.diagnostics?.ownerKeptErpSellerUnmatched ?? 0;
+      summary.ownerChangeBlockedInRound += result.diagnostics?.ownerChangeBlockedInRound ?? 0;
       results.push({
         userId: seller.id,
         sellerName: seller.name,
@@ -4207,6 +4283,10 @@ export async function syncPartnersAcrossSellers(options?: RunSyncOptions): Promi
       // Soma das rodadas por vendedor: o mesmo cliente pode contar mais de uma vez.
       existingClientsNotCustomer: summary.existingClientsNotCustomer,
       existingClientsSellerWithoutActiveUser: summary.existingClientsSellerWithoutActiveUser,
+      sellerChangedCount: summary.sellerChangedCount,
+      ownerKeptErpSellerMissing: summary.ownerKeptErpSellerMissing,
+      ownerKeptErpSellerUnmatched: summary.ownerKeptErpSellerUnmatched,
+      ownerChangeBlockedInRound: summary.ownerChangeBlockedInRound,
     },
     ...(warnings.length ? { warning: warnings.join(" ") } : {}),
   };
@@ -4258,7 +4338,7 @@ async function runSellerPortfolioSync(baseOptions: RunSyncOptions) {
       status: summary.status,
       durationMs: Date.now() - partnersStartedAt,
       syncedCount: summary.processed,
-      diagnostics: { sellerCount: summary.sellerCount, successCount: summary.successCount, emptyCount: summary.emptyCount, errorCount: summary.errorCount, skippedCount: summary.skippedCount, created: summary.created, updated: summary.updated, skippedNotCustomer: summary.skippedNotCustomer, skippedCustomerFlagMissing: summary.skippedCustomerFlagMissing, portfolioCleanupKeptArchived: summary.portfolioCleanupKeptArchived, portfolioCleanupReactivated: summary.portfolioCleanupReactivated, existingClientsNotCustomer: summary.existingClientsNotCustomer, existingClientsSellerWithoutActiveUser: summary.existingClientsSellerWithoutActiveUser },
+      diagnostics: { sellerCount: summary.sellerCount, successCount: summary.successCount, emptyCount: summary.emptyCount, errorCount: summary.errorCount, skippedCount: summary.skippedCount, created: summary.created, updated: summary.updated, skippedNotCustomer: summary.skippedNotCustomer, skippedCustomerFlagMissing: summary.skippedCustomerFlagMissing, portfolioCleanupKeptArchived: summary.portfolioCleanupKeptArchived, portfolioCleanupReactivated: summary.portfolioCleanupReactivated, existingClientsNotCustomer: summary.existingClientsNotCustomer, existingClientsSellerWithoutActiveUser: summary.existingClientsSellerWithoutActiveUser, sellerChangedCount: summary.sellerChangedCount, ownerKeptErpSellerMissing: summary.ownerKeptErpSellerMissing, ownerKeptErpSellerUnmatched: summary.ownerKeptErpSellerUnmatched, ownerChangeBlockedInRound: summary.ownerChangeBlockedInRound },
       ...(summary.skippedCustomerFlagMissing ? { error: customerFlagMissingWarning(summary.skippedCustomerFlagMissing) } : {}),
     };
   } catch (error) {
