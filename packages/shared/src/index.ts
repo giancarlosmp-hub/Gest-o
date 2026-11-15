@@ -10,6 +10,7 @@ export * from "./agendaNotDoneReasons.js";
 export * from "./proposalNoResponse.js";
 export * from "./brazilPhone.js";
 export * from "./commercialPolicy.js";
+export * from "./erpSyncTimeline.js";
 
 /** The browser-facing route. Reverse proxies may forward it with or without
  * `/api`; the API registers both forms, but callers must only use this value. */

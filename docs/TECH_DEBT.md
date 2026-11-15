@@ -1832,6 +1832,51 @@ Limites conhecidos:
   a tabela (já era assim antes desta correção). Índices `(clientId, createdAt)` e `(opportunityId, createdAt)` exigem
   migration e aprovação.
 
+### TD-ERP-PARTNER-OWNER-FLIP — dono do cliente alternava entre dois vendedores a cada sincronização
+
+**Resolvido no código, aguardando deploy.** Sem credencial global, a sincronização de parceiros (agendador de hora
+em hora das 07h às 19h, botão "todos vendedores" e Sincronização Completa) roda uma passada por vendedor com login
+FV3, em ordem alfabética. Até esta correção, o dono do cliente era o vendedor do login que trouxe o parceiro; quando
+dois logins viam o mesmo cliente, cada passada gravava o próprio vendedor e o dono alternava duas vezes por rodada.
+
+Regra nova (`apps/api/src/services/partnerOwnerRule.ts`, usada pela sincronização e pela simulação):
+
+- O campo Vendedor do cadastro do ERP (`VENDEDOR_DO_PARCEIRO` e chaves equivalentes) manda no dono. Usuário
+  correspondente: um único vendedor ativo com aquele `erpCode`, com um vínculo de tenant ativo igual ao do cliente
+  (mesma regra do caminho global), mesmo sem login FV3.
+- Campo vazio, ou sem usuário correspondente: cliente existente mantém o dono; cliente novo fica com o vendedor do
+  login.
+- Rede de segurança: no máximo uma troca de dono por cliente por rodada (as passadas de uma execução compartilham o
+  controle). O evento "Vendedor alterado" só é criado quando a troca é gravada.
+- Contadores no Histórico: `sellerChangedCount`, `ownerKeptErpSellerMissing`, `ownerKeptErpSellerUnmatched`,
+  `ownerChangeBlockedInRound`.
+
+Simulação somente leitura antes do deploy (container da API, sem argumentos, sem modo de gravação):
+
+```bash
+node dist/scripts/simulatePartnerOwnerRule.js
+```
+
+Lê o cache do `/partners` (linhas vistas nas últimas 48 horas, `IDN_CLIENTE = S`) numa transação `READ ONLY`, acha o
+cliente pelo código do parceiro e mostra quantos clientes mudariam de dono por (dono atual → novo dono), com ids
+internos de usuário, e quantos ficam sem mudança, sem vendedor no cadastro ou com vendedor sem usuário ativo. Nunca
+mostra nome, documento, código ou id de cliente.
+
+Limites conhecidos:
+
+- **Carteira trocada só no UltraFV3:** se a carteira/rota de um cliente for passada para outro vendedor sem trocar o
+  campo Vendedor do cadastro, o CRM mantém o vendedor do cadastro. Para mudar o dono, trocar o campo Vendedor no ERP.
+- **Vendedor do ERP sem usuário ativo no CRM** (inativo, sem `erpCode`, código repetido ou de outro tenant): o cliente
+  mantém o dono atual, mesmo que seja um usuário desligado.
+- **ERP inconsistente entre logins** (o mesmo parceiro com vendedores diferentes em cada login): a rede de segurança
+  limita a uma troca por rodada, mas não impede uma troca por rodada; o contador `ownerChangeBlockedInRound` acusa.
+- **Autor "Sistema (sincronização ERP)" pelo texto:** `TimelineEvent` não tem campo de origem; a tela reconhece os
+  eventos pelo texto (`packages/shared/src/erpSyncTimeline.ts`). Um teste de contrato confere os textos contra o
+  código que os grava.
+- **Eventos repetidos antigos:** continuam no banco (dezenas por dia desde 13/10/2026 em poucos clientes) e também
+  ocupam a janela de eventos do resumo inteligente da linha do tempo. Limpeza com simulação e
+  `--apply --expect=N` em PR separado.
+
 ### TD-EVENTS-CLIENT-TENANT-FILTER — `GET /events` e `GET /clients/:id` sem filtro de tenant
 
 **Prioridade alta.** Nenhuma das duas rotas filtra por tenant: o acesso é só por vendedor (`sellerWhere`) e, para
