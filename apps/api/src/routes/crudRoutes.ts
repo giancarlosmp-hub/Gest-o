@@ -8921,9 +8921,22 @@ router.get("/events", async (req, res) => {
   const take = Number.isFinite(takeRaw) ? Math.min(Math.max(Math.trunc(takeRaw), 1), 100) : 20;
   const cursor = req.query.cursor as string | undefined;
 
+  // A linha do tempo é do cliente (ou da oportunidade): quem pode abrir o cliente ou a oportunidade vê todo o
+  // histórico, com o autor de cada evento, mesmo depois da troca de vendedor. O acesso segue a ficha do cliente
+  // (clientReadableForDetailsWhere) e as rotas de oportunidade (sellerWhere). Sem cliente nem oportunidade, o
+  // filtro continua sendo o vendedor do evento.
+  if (clientId) {
+    const client = await prisma.client.findFirst({ where: { id: clientId, ...clientReadableForDetailsWhere(req) }, select: { id: true } });
+    if (!client) return res.status(404).json({ message: "Cliente não encontrado" });
+  }
+  if (opportunityId) {
+    const opportunity = await prisma.opportunity.findFirst({ where: { id: opportunityId, ...sellerWhere(req) }, select: { id: true } });
+    if (!opportunity) return res.status(404).json({ message: "Oportunidade não encontrada" });
+  }
+
   const events = await prisma.timelineEvent.findMany({
     where: buildTimelineEventWhere({
-      baseWhere: sellerWhere(req),
+      baseWhere: clientId || opportunityId ? {} : sellerWhere(req),
       opportunityId,
       clientId
     }),
