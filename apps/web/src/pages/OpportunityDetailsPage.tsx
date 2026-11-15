@@ -29,6 +29,7 @@ import {
   isErpOrderSyncResendable,
   isSuccessfulErpOrderSync,
   normalizeErpParameterCode,
+  relativeDaysLabel,
   timelineEventAuthorLabel,
 } from "@salesforce-pro/shared";
 import { brazilMonthKey } from "../lib/brazilDate";
@@ -1358,7 +1359,7 @@ export default function OpportunityDetailsPage() {
 
       {item.daysOverdue && item.daysOverdue > 0 ? (
         <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
-          Atenção: oportunidade atrasada há {item.daysOverdue} dia(s).
+          Atenção: oportunidade atrasada {relativeDaysLabel(item.daysOverdue)}.
         </div>
       ) : null}
       {!canOpenErpOrder ? (

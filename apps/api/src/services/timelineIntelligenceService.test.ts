@@ -91,7 +91,24 @@ test("mensagem enviada pelo WhatsApp conta como contato no resumo e renova o cac
   assert.equal(signals.lastContactAt?.getTime(), sentAt.getTime());
   const summary = service.buildDeterministicResult(withWhatsApp, signals).summary;
   assert.doesNotMatch(summary, /sem contato registrado/);
-  assert.match(summary, /último contato há 2 dias/);
+  assert.match(summary, /último contato há [23] dias/);
+
+  // "hoje"/"ontem" pelo calendário de Brasília (agora fixo: 10h de 15/11 em Brasília).
+  const fixedNow = new Date("2026-11-15T13:00:00.000Z");
+  const summaryAt = (lastContactAt: Date | null, opportunityCreatedAt?: Date) => {
+    const context = { ...without, opportunity: opportunityCreatedAt ? { stage: "proposta", followUpDate: new Date("2026-11-30T12:00:00.000Z"), createdAt: opportunityCreatedAt, closedAt: null } : null } as any;
+    const fixedSignals = { ...service.analyzeDeterministically(context), now: fixedNow, lastContactAt, noRecentContactDays: lastContactAt ? 0 : null };
+    return service.buildDeterministicResult(context, fixedSignals).summary;
+  };
+  assert.match(summaryAt(new Date("2026-11-15T11:00:00.000Z")), /, último contato hoje\./);
+  assert.match(summaryAt(new Date("2026-11-14T21:00:00.000Z")), /, último contato ontem\./, "18h de ontem, menos de 24 h");
+  assert.match(summaryAt(new Date("2026-11-13T23:00:00.000Z")), /, último contato há 2 dias\./);
+  assert.match(summaryAt(null, new Date("2026-11-15T03:00:00.000Z")), /^Oportunidade aberta hoje, /);
+  assert.match(summaryAt(null, new Date("2026-11-15T02:59:00.000Z")), /^Oportunidade aberta ontem, /);
+  assert.match(summaryAt(null, new Date("2026-11-10T12:00:00.000Z")), /^Oportunidade aberta há 5 dias, /);
+  for (const text of [summaryAt(new Date("2026-11-15T11:00:00.000Z"), new Date("2026-11-15T12:00:00.000Z")), summaryAt(new Date("2026-11-14T12:00:00.000Z"))]) {
+    assert.doesNotMatch(text, /há [01] dias?/);
+  }
   // Conversa nova muda a chave do cache: o resumo antigo ("sem contato") não volta.
   assert.notEqual(
     service.buildCacheKey(withWhatsApp, input, signals.lastRelevantEventAt),

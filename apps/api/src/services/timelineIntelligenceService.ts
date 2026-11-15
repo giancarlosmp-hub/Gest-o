@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { relativeDaysSinceLabel } from "@salesforce-pro/shared";
 import { prisma } from "../config/prisma.js";
 import { logApiEvent } from "../utils/logger.js";
 import { parseAiJsonObject } from "./ai/aiResponseParser.js";
@@ -134,9 +135,9 @@ export class TimelineIntelligenceService {
   }
 
   buildDeterministicResult(context: NonNullable<Context>, signals: ReturnType<TimelineIntelligenceService["analyzeDeterministically"]>): TimelineIntelligenceResult {
-    const subject = context.opportunity ? `Oportunidade aberta há ${daysSince(context.opportunity.createdAt, signals.now)} dias` : `Cliente ${portfolioSituationLabel(context.portfolio).toLowerCase()}`;
+    const subject = context.opportunity ? `Oportunidade aberta ${relativeDaysSinceLabel(context.opportunity.createdAt, signals.now)}` : `Cliente ${portfolioSituationLabel(context.portfolio).toLowerCase()}`;
     const follow = signals.overdueFollowUp ? ", com follow-up vencido" : "";
-    const contact = signals.noRecentContactDays === null ? ", sem contato registrado" : `, último contato há ${signals.noRecentContactDays} dias`;
+    const contact = signals.lastContactAt === null ? ", sem contato registrado" : `, último contato ${relativeDaysSinceLabel(signals.lastContactAt, signals.now)}`;
     const summary = `${subject}${follow}${contact}. Prioridade ${signals.priority.level}. Próxima ação recomendada: ${signals.priority.nextAction}.`;
     const highlights = [...context.events.slice(-2).map((e) => ({ type: /whatsapp/i.test(e.description) ? "whatsapp" as const : "opportunity" as const, title: "Evento da timeline", description: e.description, occurredAt: e.createdAt.toISOString(), importance: "medium" as const })), ...context.activities.slice(-1).map((a) => ({ type: a.type.includes("follow") ? "follow_up" as const : "activity" as const, title: a.done ? "Atividade concluída" : "Atividade registrada", description: a.description || a.notes || a.type, occurredAt: (a.date ?? a.dueDate ?? a.createdAt).toISOString(), importance: a.done ? "medium" as const : "low" as const }))].slice(0, 3);
     return { summary, status: signals.status, highlights, changes: signals.progressed ? [{ description: "Houve mudança recente na evolução comercial.", evidence: context.changeLogs.map((c) => `${c.field}: ${c.oldValue ?? "-"} → ${c.newValue ?? "-"}`).slice(0, 2) }] : [], risks: signals.risks, positiveSignals: signals.progressed ? ["Progressão de etapa identificada"] : [], recommendedNextAction: signals.priority.nextAction, priority: { score: signals.priority.score, level: signals.priority.level, reasons: signals.priority.reasons }, generatedAt: new Date().toISOString(), source: "deterministic" };

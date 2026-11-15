@@ -1873,9 +1873,23 @@ Limites conhecidos:
 - **Autor "Sistema (sincronização ERP)" pelo texto:** `TimelineEvent` não tem campo de origem; a tela reconhece os
   eventos pelo texto (`packages/shared/src/erpSyncTimeline.ts`). Um teste de contrato confere os textos contra o
   código que os grava.
-- **Eventos repetidos antigos:** continuam no banco (dezenas por dia desde 13/10/2026 em poucos clientes) e também
-  ocupam a janela de eventos do resumo inteligente da linha do tempo. Limpeza com simulação e
-  `--apply --expect=N` em PR separado.
+- **Eventos repetidos antigos:** continuam no banco (desde 18/08/2026, com picos em 08/09 e diários de 13/10 a
+  15/11/2026) e também ocupam a janela de eventos do resumo inteligente da linha do tempo. **Script pronto, não
+  rodado:** `cleanupErpOwnerFlipEvents` (container da API). Por cliente, apaga só trocas de vendedor da
+  sincronização desfeitas depois (o dono anterior volta a ser o dono) e mantém a primeira troca e a que leva ao dono
+  atual. Sequência que não confere com os textos, dono atual diferente, horário empatado ou cliente ausente deixam o
+  cliente inteiro de fora. Ordem de uso:
+
+  ```bash
+  node dist/scripts/cleanupErpOwnerFlipEvents.js                                   # simulação (READ ONLY)
+  node dist/scripts/cleanupErpOwnerFlipEvents.js --apply --expect=N --backup-dir=<dir>
+  node dist/scripts/cleanupErpOwnerFlipEvents.js                                   # conferência: eventosParaApagar = 0
+  node dist/scripts/cleanupErpOwnerFlipEvents.js --restore=<arquivo> [--apply]     # só se precisar desfazer
+  ```
+
+  O backup (JSON, permissão 600) é gravado antes de apagar; se a gravação falhar, nada é apagado. Copiar o arquivo
+  para fora do container logo depois do apply. O resumo inteligente fica em cache na memória da API por até 30
+  minutos.
 
 ### TD-EVENTS-CLIENT-TENANT-FILTER — `GET /events` e `GET /clients/:id` sem filtro de tenant
 
@@ -1883,3 +1897,16 @@ Limites conhecidos:
 gerente e diretor, não há restrição. Hoje há uma única empresa em operação, mas um segundo tenant permitiria que a
 gestão de um lesse cliente e linha do tempo do outro pelo ID. Corrigir junto com o isolamento de dados (TD-ER-004),
 com testes negativos entre tenants nas duas rotas.
+
+### TD-VPS-TAILSCALE-DEPENDENCY — ERP e DNS dos containers dependem do Tailscale da VPS
+
+**Prioridade alta.** A integração com o ERP (`ULTRAFV3_BASE_URL`) passa pelo Tailscale da VPS, e o DNS dos
+containers também depende dele. Em 15/11/2026 a VPS saiu da conta do Tailscale e os containers ficaram sem DNS:
+IA, transcrição de áudio do WhatsApp e ERP pararam juntos. A expiração de chave do Tailscale está desativada.
+
+Falta alerta ou monitoramento que avise quando a VPS sai do Tailscale ou quando os containers perdem o DNS. O
+diagnóstico existente (`scripts/diagnose-ultrafv3-reachability.sh`) olha o alcance do UltraFV3, não o Tailscale da
+VPS nem o DNS dos containers.
+
+Relacionado: incidente de 31/08/2026 (máquina do ERP fora do Tailscale) em `docs/DEPLOY_GUIDE.md`, seção "PR827
+final — histórico legado e incidente UltraFV3/Tailscale".
