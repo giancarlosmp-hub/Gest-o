@@ -1,3 +1,17 @@
+# Dono do cliente na sincronização UltraFV3 segue o campo Vendedor do ERP — código pronto, aguardando merge — 15/11/2026
+
+- Desde 13/10/2026 a sincronização de parceiros roda vendedor por vendedor, e o dono do cliente era o vendedor do
+  login que trouxe o parceiro no `/partners`. Cliente visto por dois logins (carteira/rota no UltraFV3) trocava de
+  dono duas vezes a cada rodada, com um evento "Vendedor alterado" a cada troca.
+- Agora o campo Vendedor do cadastro do ERP (`VENDEDOR_DO_PARCEIRO`) manda no dono também na passada por vendedor:
+  usuário ativo com o mesmo `erpCode` (mesmo sem login FV3). Campo vazio ou sem usuário correspondente: mantém o dono;
+  cliente novo fica com o vendedor do login. No máximo uma troca de dono por cliente por rodada (contador
+  `ownerChangeBlockedInRound` no Histórico).
+- Eventos da sincronização na linha do tempo aparecem como "por Sistema (sincronização ERP)".
+- Antes do deploy: simulação somente leitura `node dist/scripts/simulatePartnerOwnerRule.js` (contagens por dono
+  atual → novo dono, só ids de usuário). Sem migration. Limpeza dos eventos repetidos antigos: PR separado. Detalhes
+  e limites em `TD-ERP-PARTNER-OWNER-FLIP` ([TECH_DEBT.md](TECH_DEBT.md)).
+
 # WhatsApp como contato com o cliente — código pronto, aguardando merge — 14/11/2026
 
 - Mensagem enviada pelo WhatsApp (CRM ou app, qualquer número da empresa) conta como contato; só recebida não conta;
