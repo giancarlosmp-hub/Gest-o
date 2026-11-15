@@ -8,6 +8,7 @@ export * from "./clientCollection.js";
 export * from "./agendaDiscipline.js";
 export * from "./agendaNotDoneReasons.js";
 export * from "./proposalNoResponse.js";
+export * from "./relativeDays.js";
 export * from "./brazilPhone.js";
 export * from "./commercialPolicy.js";
 export * from "./erpSyncTimeline.js";

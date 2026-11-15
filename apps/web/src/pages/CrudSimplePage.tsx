@@ -1,7 +1,7 @@
 import { ChangeEvent, FormEvent, MouseEvent, useEffect, useMemo, useState } from "react";
 import { MoreHorizontal } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { ABC_CLASSES, CLIENT_IN_COLLECTION_LABEL, COOLING_STATUS_FILTER, COOLING_STATUS_FILTER_LABEL, PORTFOLIO_STATUSES, PORTFOLIO_STATUS_LABELS, isAbcClass, isClientStatusFilter, isPortfolioStatus, normalizeBrazilPhone } from "@salesforce-pro/shared";
+import { ABC_CLASSES, CLIENT_IN_COLLECTION_LABEL, COOLING_STATUS_FILTER, COOLING_STATUS_FILTER_LABEL, PORTFOLIO_STATUSES, PORTFOLIO_STATUS_LABELS, isAbcClass, isClientStatusFilter, isPortfolioStatus, normalizeBrazilPhone, relativeDaysLabel } from "@salesforce-pro/shared";
 import api from "../lib/apiClient";
 import { toast } from "sonner";
 import { useAuth } from "../context/AuthContext";
@@ -626,7 +626,7 @@ export default function CrudSimplePage({
     return (
       <span className="mt-1 flex w-fit flex-wrap gap-x-1 rounded-lg bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-800 ring-1 ring-red-200">
         <span>{CLIENT_IN_COLLECTION_LABEL}</span>
-        <span className="font-normal">· título mais antigo vencido há {oldestOverdueDays} dias · {formatCurrency(overdueTitlesTotal)} vencidos</span>
+        <span className="font-normal">· título mais antigo vencido {relativeDaysLabel(oldestOverdueDays)} · {formatCurrency(overdueTitlesTotal)} vencidos</span>
       </span>
     );
   };

@@ -1,4 +1,4 @@
-import { isProposalWithoutResponse, proposalDaysWithoutContact } from "@salesforce-pro/shared";
+import { isProposalWithoutResponse, proposalDaysWithoutContact, relativeDaysLabel } from "@salesforce-pro/shared";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Bot, CalendarClock, CheckSquare, Clock3, GripVertical, MessageCircleWarning, RefreshCw, SunMoon, UsersRound } from "lucide-react";
 import { Link } from "react-router-dom";
@@ -776,7 +776,7 @@ export default function HomePage() {
         clientId: client.clientId,
         clientName: client.clientName,
         opportunityTitle: topPipelinePriority.title,
-        reason: `${getPipelinePriorityLabel(topPipelinePriority.priorityType)} há ${topPipelinePriority.daysLate} dia(s).`,
+        reason: `${getPipelinePriorityLabel(topPipelinePriority.priorityType)} ${relativeDaysLabel(topPipelinePriority.daysLate)}.`,
         suggestedAction: topPipelinePriority.priorityType === "followup_overdue"
           ? "Retomar o follow-up e atualizar a próxima etapa."
           : "Abrir a oportunidade e registrar a ação comercial de hoje.",
@@ -1092,7 +1092,7 @@ export default function HomePage() {
                 <p className="truncate text-sm font-medium text-slate-900">{item.clientName}</p>
                 <p className="truncate text-xs text-slate-600">
                   {item.title || "Oportunidade"}
-                  {item.daysLate > 0 ? ` · há ${item.daysLate} dia(s)` : ""}
+                  {item.daysLate > 0 ? ` · ${relativeDaysLabel(item.daysLate)}` : ""}
                 </p>
               </div>
               <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${SELLER_DAY_TAG_CLASS[item.tag]}`}>{SELLER_DAY_TAG_LABEL[item.tag]}</span>
