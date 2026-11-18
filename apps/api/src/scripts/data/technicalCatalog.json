@@ -1,0 +1,543 @@
+{
+  "format": "technicalCatalog/v1",
+  "revisadoEm": "2026-11-18",
+  "regras": [
+    "Pureza e germinação padrão: o menor padrão mínimo do MAPA entre as categorias comercializadas (C1, C2, S1 e S2), ou seja, o piso legal do lote.",
+    "Valor padrão tirado de uma faixa da fonte: ponto médio da faixa (espaçamento arredondado para múltiplo de 5 cm quando a fonte indica tendência). A derivação fica escrita no campo.",
+    "Forrageiras (braquiárias, panicuns, capim-sudão, azevém): população vazia. A recomendação é em kg de sementes puras viáveis (SPV) ou pontos de valor cultural (VC) por hectare, que só cabe no modelo por categoria.",
+    "Campo sem fonte conferida no documento original fica vazio (null), com o motivo.",
+    "kg/ha mínimo igual ao máximo quando a fonte indica um valor único."
+  ],
+  "fontes": {
+    "MAPA-IN45-2013": {
+      "orgao": "MAPA",
+      "titulo": "Instrução Normativa nº 45, de 17 de setembro de 2013 — padrões de identidade e qualidade de sementes de grandes culturas (texto consolidado publicado pelo MAPA)",
+      "ano": 2013,
+      "link": "https://www.gov.br/agricultura/pt-br/assuntos/insumos-agropecuarios/insumos-agricolas/sementes-e-mudas/publicacoes-sementes-e-mudas/copy_of_INN45de17desetembrode2013.pdf"
+    },
+    "MAPA-IN30-2008": {
+      "orgao": "MAPA",
+      "titulo": "Instrução Normativa nº 30, de 21 de maio de 2008 — normas e padrões de sementes de forrageiras de clima tropical (texto consolidado publicado pelo MAPA)",
+      "ano": 2008,
+      "link": "https://www.gov.br/agricultura/pt-br/assuntos/insumos-agropecuarios/insumos-agricolas/sementes-e-mudas/publicacoes-sementes-e-mudas/INN30de21demaiode2008.pdf"
+    },
+    "MAPA-IN31-2025": {
+      "orgao": "MAPA",
+      "titulo": "Instrução Normativa nº 31/2025 — altera os anexos de padrões da IN nº 44, de 22 de novembro de 2016 (forrageiras de clima temperado), DOU de 30/10/2025",
+      "ano": 2025,
+      "link": "https://www.legisweb.com.br/legislacao/?id=485626"
+    },
+    "EMBRAPA-CPACT-DOC527-2022": {
+      "orgao": "Embrapa Clima Temperado",
+      "titulo": "Documentos 527 — Alternativas para diversificação da agricultura familiar de base ecológica 2022, cap. Adubação verde na agricultura sustentável, Tabela 3",
+      "ano": 2022,
+      "link": "https://www.infoteca.cnptia.embrapa.br/infoteca/bitstream/doc/1149635/1/CPACT-Doc-527-pag27.pdf"
+    },
+    "EMBRAPA-CPACT-DOC227-2008": {
+      "orgao": "Embrapa Clima Temperado",
+      "titulo": "Documentos 227 — Indicações técnicas para produção de sementes de plantas recuperadoras de solo para a agricultura familiar",
+      "ano": 2008,
+      "link": "https://www.infoteca.cnptia.embrapa.br/infoteca/bitstream/doc/746693/1/documento227.pdf"
+    },
+    "EMBRAPA-CPACT-FOLDER-FORRAGEIRO-2024": {
+      "orgao": "Embrapa Clima Temperado",
+      "titulo": "Folder Planejamento forrageiro (fevereiro de 2024), tabela de pastagens e silagens",
+      "ano": 2024,
+      "link": "https://www.infoteca.cnptia.embrapa.br/infoteca/bitstream/doc/1162145/1/FOLDER-Planejamento-Forrageiro-fev-2024.pdf"
+    },
+    "EMBRAPA-IDR-TRIGO-TRITICALE-2023": {
+      "orgao": "Embrapa e IDR-Paraná",
+      "titulo": "Cultivares de trigo e triticale BRS e IPR — Catálogo 01/2023, Tabelas 1 e 2",
+      "ano": 2023,
+      "link": "https://www.infoteca.cnptia.embrapa.br/infoteca/bitstream/doc/1152850/1/Catal-Trigo-Triticale.pdf"
+    },
+    "EMBRAPA-SOJA-SP17-2020": {
+      "orgao": "Embrapa Soja",
+      "titulo": "Sistemas de Produção 17 — Tecnologias de produção de soja, cap. 4 Instalação da lavoura",
+      "ano": 2020,
+      "link": "https://www.alice.cnptia.embrapa.br/alice/bitstream/doc/1128397/1/p.-81-92-de-SP-17-2020-online.pdf"
+    },
+    "EMBRAPA-SOJA-FOLDER-2020": {
+      "orgao": "Embrapa Soja",
+      "titulo": "Folder 01/2020 — Produção sustentável de soja",
+      "ano": 2020,
+      "link": "https://www.infoteca.cnptia.embrapa.br/infoteca/bitstream/doc/1124080/1/Folder-01-prod.sustentavel-soja-2020.pdf"
+    },
+    "EMBRAPA-MILHO-SP1-PLANTIO": {
+      "orgao": "Embrapa Milho e Sorgo",
+      "titulo": "Sistema de Produção 1 — Cultivo do Milho, Plantio: densidade e espaçamento (Tabela 1, cultivares da safra 2004/05)",
+      "ano": null,
+      "link": "https://ainfo.cnptia.embrapa.br/digital/bitstream/item/27362/1/Plantio-espacamento.pdf"
+    },
+    "EMBRAPA-SORGO-SP2-PLANTIO": {
+      "orgao": "Embrapa Milho e Sorgo",
+      "titulo": "Sistema de Produção 2 — Cultivo do Sorgo, Plantio: semeadura",
+      "ano": null,
+      "link": "https://ainfo.cnptia.embrapa.br/digital/bitstream/item/27484/1/Plantio-semeadura.pdf"
+    },
+    "EMBRAPA-SORGO-BRS661-2024": {
+      "orgao": "Embrapa Milho e Sorgo (obtentora)",
+      "titulo": "Folder Sorgo forrageiro BRS 661 (maio de 2024), características da cultivar",
+      "ano": 2024,
+      "link": "https://www.infoteca.cnptia.embrapa.br/infoteca/bitstream/doc/1165236/1/Sorgo-forrageiro-BRS-661.pdf"
+    },
+    "EMBRAPA-FEIJAO-DOC236-2008": {
+      "orgao": "Embrapa Arroz e Feijão",
+      "titulo": "Documentos 236 — Arranjos espaciais de plantas de feijoeiro comum de diferentes tipos de crescimento",
+      "ano": 2008,
+      "link": "https://www.infoteca.cnptia.embrapa.br/infoteca/bitstream/doc/216597/1/doc236.pdf"
+    },
+    "EMBRAPA-COMTEC142-2019": {
+      "orgao": "Embrapa",
+      "titulo": "Comunicado Técnico 142 — Densidades de semeadura no estabelecimento de cultivares de gramíneas forrageiras, Tabela 2 (recomendação comercial)",
+      "ano": 2019,
+      "link": "https://www.infoteca.cnptia.embrapa.br/infoteca/bitstream/doc/1118564/1/ComTec142.pdf"
+    },
+    "EMBRAPA-CNPASA-CT06-2022": {
+      "orgao": "Embrapa Pesca e Aquicultura",
+      "titulo": "Comunicado Técnico 06 — Cálculo de taxas de semeadura dos capins Mombaça e Marandu, Tabela 1",
+      "ano": 2022,
+      "link": "https://www.infoteca.cnptia.embrapa.br/infoteca/bitstream/doc/1139902/1/ct06-2022.pdf"
+    },
+    "EMBRAPA-ESTILOSANTES-CG-2001": {
+      "orgao": "Embrapa Gado de Corte e parceiras",
+      "titulo": "Folder Estilosantes Campo Grande (abril de 2001), Como plantar",
+      "ano": 2001,
+      "link": "https://www.infoteca.cnptia.embrapa.br/infoteca/bitstream/doc/990053/1/Estilosantecampogrande.pdf"
+    }
+  },
+  "culturas": [
+    {
+      "slug": "aveia-branca",
+      "label": "Aveia Branca",
+      "category": "Grãos",
+      "notes": "Pureza e germinação: padrão mínimo do MAPA. Densidade de semeadura ainda sem fonte conferida.",
+      "campos": {
+        "defaultKgHaMin": { "value": null, "reason": "Indicações da Comissão Brasileira de Pesquisa de Aveia não conferidas no documento original nesta versão." },
+        "defaultKgHaMax": { "value": null, "reason": "Idem." },
+        "populationTargetDefault": { "value": null, "reason": "Idem (200 a 300 sementes viáveis/m² aparece só em citações secundárias)." },
+        "rowSpacingCmDefault": { "value": null, "reason": "Idem." },
+        "pmsDefault": { "value": null, "reason": "Sem fonte de PMS de referência conferida." },
+        "germinationDefault": { "value": 80, "sources": ["MAPA-IN45-2013"], "detail": "Anexo VI (aveia branca e amarela): germinação mínima 80% em C1, C2, S1 e S2 (básica 70%)." },
+        "purityDefault": { "value": 98, "sources": ["MAPA-IN45-2013"], "detail": "Anexo VI: semente pura mínima 98% em todas as categorias." },
+        "goalsJson": { "value": {}, "reason": "Sem faixas por finalidade com fonte conferida." }
+      }
+    },
+    {
+      "slug": "aveia-preta",
+      "label": "Aveia Preta",
+      "category": "Cobertura",
+      "notes": "Pastejo: 50 a 70 kg/ha (BRS Pampeana). Adubação verde: 80 kg/ha. Pureza e germinação: padrão mínimo do MAPA.",
+      "campos": {
+        "defaultKgHaMin": { "value": 50, "sources": ["EMBRAPA-CPACT-FOLDER-FORRAGEIRO-2024"], "detail": "Aveia-preta BRS Pampeana, pastagem de inverno: densidade 50 a 70 kg/ha." },
+        "defaultKgHaMax": { "value": 80, "sources": ["EMBRAPA-CPACT-DOC527-2022"], "detail": "Tabela 3, adubação verde: aveia preta 80 kg/ha." },
+        "populationTargetDefault": { "value": null, "reason": "As fontes dão kg/ha, não plantas/ha." },
+        "rowSpacingCmDefault": { "value": 20, "sources": ["EMBRAPA-CPACT-DOC527-2022", "EMBRAPA-CPACT-FOLDER-FORRAGEIRO-2024"], "detail": "Doc 527: 0,2 m entre linhas; folder 2024: 12 a 20 cm." },
+        "pmsDefault": { "value": null, "reason": "Sem fonte de PMS de referência conferida." },
+        "germinationDefault": { "value": 80, "sources": ["MAPA-IN31-2025"], "detail": "Anexo I (Avena strigosa): germinação mínima 80% em C1/C2 e S1/S2 (básica 70%)." },
+        "purityDefault": { "value": 96, "sources": ["MAPA-IN31-2025"], "detail": "Anexo I: semente pura mínima 98% (básica, C1/C2), 97% (S1), 96% (S2); usado o piso 96%." },
+        "goalsJson": {
+          "value": { "pastejo": { "min": 50, "max": 70 }, "cobertura": { "min": 80, "max": 80 } },
+          "sources": ["EMBRAPA-CPACT-FOLDER-FORRAGEIRO-2024", "EMBRAPA-CPACT-DOC527-2022"],
+          "detail": "Pastejo: folder 2024 (50 a 70 kg/ha). Cobertura/adubação verde: Doc 527 (80 kg/ha)."
+        }
+      }
+    },
+    {
+      "slug": "brachiaria-brizantha",
+      "label": "Brachiaria Brizantha",
+      "category": "Forrageiras",
+      "notes": "Recomendação em kg de sementes puras viáveis (SPV) por hectare: Marandu 2,8 a 3,0 kg SPV/ha. kg/ha do lote = kg SPV ÷ (VC ÷ 100).",
+      "campos": {
+        "defaultKgHaMin": { "value": null, "reason": "Forrageira: a fonte dá kg de SPV/ha, que depende do VC do lote; não cabe em kg/ha fixo." },
+        "defaultKgHaMax": { "value": null, "reason": "Idem." },
+        "populationTargetDefault": { "value": null, "reason": "Forrageira: semeadura por SPV ou pontos de VC, não por plantas/ha." },
+        "rowSpacingCmDefault": { "value": null, "reason": "Semeadura usual a lanço; sem espaçamento de referência conferido." },
+        "pmsDefault": { "value": 8.6, "sources": ["EMBRAPA-CNPASA-CT06-2022"], "detail": "Tabela 1: semente nua de Marandu, lotes de 2019 e 2020: 8,5997 g e 8,7451 g." },
+        "germinationDefault": { "value": 60, "sources": ["MAPA-IN30-2008"], "detail": "Anexo III (Brachiaria brizantha): germinação mínima 60% em todas as categorias." },
+        "purityDefault": { "value": 60, "sources": ["MAPA-IN30-2008"], "detail": "Anexo III: semente pura mínima 80% (básica, C1/C2) e 60% (S1/S2); usado o piso 60%." },
+        "goalsJson": { "value": {}, "reason": "Faixas por finalidade em kg/ha não se aplicam a forrageiras no modelo atual." }
+      },
+      "semCampoNoModeloAtual": "Marandu: 2,8 kg SPV/ha (recomendação comercial citada no Comunicado Técnico 142/2019, Tabela 2) e 3,0 kg SPV/ha (dose de referência do Comunicado Técnico 06/2022)."
+    },
+    {
+      "slug": "brachiaria-decumbens",
+      "label": "Brachiaria Decumbens",
+      "category": "Forrageiras",
+      "notes": "Pureza e germinação: padrão mínimo do MAPA. Taxa de semeadura (kg SPV/ha) ainda sem fonte conferida.",
+      "campos": {
+        "defaultKgHaMin": { "value": null, "reason": "Forrageira: recomendação em SPV/VC; sem taxa conferida para decumbens." },
+        "defaultKgHaMax": { "value": null, "reason": "Idem." },
+        "populationTargetDefault": { "value": null, "reason": "Forrageira: semeadura por SPV ou pontos de VC, não por plantas/ha." },
+        "rowSpacingCmDefault": { "value": null, "reason": "Sem espaçamento de referência conferido." },
+        "pmsDefault": { "value": null, "reason": "Sem fonte de PMS conferida." },
+        "germinationDefault": { "value": 60, "sources": ["MAPA-IN30-2008"], "detail": "Anexo III (Brachiaria decumbens): germinação mínima 60% em todas as categorias." },
+        "purityDefault": { "value": 60, "sources": ["MAPA-IN30-2008"], "detail": "Anexo III: semente pura mínima 80% (básica, C1/C2) e 60% (S1/S2); usado o piso 60%." },
+        "goalsJson": { "value": {}, "reason": "Não se aplica a forrageiras no modelo atual." }
+      }
+    },
+    {
+      "slug": "mulato-ii",
+      "label": "Brachiaria Híbrida Mulato II",
+      "category": "Forrageiras",
+      "notes": "Recomendação comercial citada pela Embrapa: 12 kg SPV/ha. Confirme com a obtentora.",
+      "campos": {
+        "defaultKgHaMin": { "value": null, "reason": "Forrageira: a fonte dá kg de SPV/ha, que depende do VC do lote." },
+        "defaultKgHaMax": { "value": null, "reason": "Idem." },
+        "populationTargetDefault": { "value": null, "reason": "Forrageira: semeadura por SPV ou pontos de VC, não por plantas/ha." },
+        "rowSpacingCmDefault": { "value": null, "reason": "Sem espaçamento de referência conferido." },
+        "pmsDefault": { "value": null, "reason": "Sem fonte de PMS conferida." },
+        "germinationDefault": { "value": null, "reason": "Híbrido de Brachiaria não listado nominalmente no Anexo III da IN 30/2008." },
+        "purityDefault": { "value": null, "reason": "Idem." },
+        "goalsJson": { "value": {}, "reason": "Não se aplica a forrageiras no modelo atual." }
+      },
+      "semCampoNoModeloAtual": "12,0 kg SPV/ha (recomendação comercial, Comunicado Técnico 142/2019, Tabela 2). Valor alto em relação às outras braquiárias da mesma tabela: conferir com a obtentora."
+    },
+    {
+      "slug": "brachiaria-ruziziensis",
+      "label": "Brachiaria Ruziziensis",
+      "category": "Forrageiras",
+      "notes": "Pureza e germinação: padrão mínimo do MAPA. Taxa de semeadura (kg SPV/ha) ainda sem fonte conferida.",
+      "campos": {
+        "defaultKgHaMin": { "value": null, "reason": "Forrageira: recomendação em SPV/VC; sem taxa conferida para ruziziensis." },
+        "defaultKgHaMax": { "value": null, "reason": "Idem." },
+        "populationTargetDefault": { "value": null, "reason": "Forrageira: semeadura por SPV ou pontos de VC, não por plantas/ha." },
+        "rowSpacingCmDefault": { "value": null, "reason": "Sem espaçamento de referência conferido." },
+        "pmsDefault": { "value": null, "reason": "Sem fonte de PMS conferida." },
+        "germinationDefault": { "value": 60, "sources": ["MAPA-IN30-2008"], "detail": "Anexo III (Brachiaria ruziziensis): germinação mínima 60% em todas as categorias." },
+        "purityDefault": { "value": 60, "sources": ["MAPA-IN30-2008"], "detail": "Anexo III: semente pura mínima 80% (básica, C1/C2) e 60% (S1/S2); usado o piso 60%." },
+        "goalsJson": { "value": {}, "reason": "Não se aplica a forrageiras no modelo atual." }
+      }
+    },
+    {
+      "slug": "capim-sudao",
+      "label": "Capim-Sudão",
+      "category": "Forrageiras",
+      "notes": "Pureza e germinação: padrão mínimo do MAPA. Densidade de semeadura ainda sem fonte conferida.",
+      "campos": {
+        "defaultKgHaMin": { "value": null, "reason": "Sem recomendação de densidade conferida em documento da Embrapa." },
+        "defaultKgHaMax": { "value": null, "reason": "Idem." },
+        "populationTargetDefault": { "value": null, "reason": "Forrageira: população fica vazia no modelo atual." },
+        "rowSpacingCmDefault": { "value": null, "reason": "Sem espaçamento de referência conferido." },
+        "pmsDefault": { "value": null, "reason": "Sem fonte de PMS conferida." },
+        "germinationDefault": { "value": 60, "sources": ["MAPA-IN31-2025"], "detail": "Anexo I (Sorghum sudanense): germinação mínima 60% em todas as categorias." },
+        "purityDefault": { "value": 95, "sources": ["MAPA-IN31-2025"], "detail": "Anexo I: semente pura mínima 97% (básica, C1/C2) e 95% (S1, S2); usado o piso 95%." },
+        "goalsJson": { "value": {}, "reason": "Sem faixas por finalidade com fonte conferida." }
+      }
+    },
+    {
+      "slug": "centeio",
+      "label": "Centeio",
+      "category": "Cobertura",
+      "notes": "Adubação verde ou forragem: 60 kg/ha; produção de sementes: 40 kg/ha. 17 a 20 cm entre linhas.",
+      "campos": {
+        "defaultKgHaMin": { "value": 40, "sources": ["EMBRAPA-CPACT-DOC227-2008"], "detail": "250 plantas/m² para produção de sementes = 40 kg/ha." },
+        "defaultKgHaMax": { "value": 60, "sources": ["EMBRAPA-CPACT-DOC227-2008", "EMBRAPA-CPACT-DOC527-2022"], "detail": "Doc 227: 330 plantas/m² para forragem = 60 kg/ha. Doc 527, Tabela 3: 60 kg/ha." },
+        "populationTargetDefault": { "value": 3300000, "sources": ["EMBRAPA-CPACT-DOC227-2008"], "detail": "330 plantas/m² para forragem (= 3.300.000 plantas/ha)." },
+        "rowSpacingCmDefault": { "value": 20, "sources": ["EMBRAPA-CPACT-DOC227-2008", "EMBRAPA-CPACT-DOC527-2022"], "detail": "Doc 227: 17 a 20 cm; Doc 527: 0,2 m." },
+        "pmsDefault": { "value": null, "reason": "Sem fonte de PMS conferida." },
+        "germinationDefault": { "value": 80, "sources": ["MAPA-IN45-2013"], "detail": "Anexo VIII (centeio): germinação mínima 80% em C1, C2, S1 e S2 (básica 70%)." },
+        "purityDefault": { "value": 98, "sources": ["MAPA-IN45-2013"], "detail": "Anexo VIII: semente pura mínima 98% em todas as categorias." },
+        "goalsJson": {
+          "value": { "cobertura": { "min": 60, "max": 60 } },
+          "sources": ["EMBRAPA-CPACT-DOC527-2022", "EMBRAPA-CPACT-DOC227-2008"],
+          "detail": "Adubação verde 60 kg/ha (Doc 527); forragem 60 kg/ha (Doc 227)."
+        }
+      }
+    },
+    {
+      "slug": "crotalaria-juncea",
+      "label": "Crotalária Juncea",
+      "category": "Leguminosas",
+      "notes": "Adubação verde: 30 kg/ha a 0,5 m entre linhas.",
+      "campos": {
+        "defaultKgHaMin": { "value": 30, "sources": ["EMBRAPA-CPACT-DOC527-2022"], "detail": "Tabela 3: Crotalaria juncea 30 kg/ha (valor único)." },
+        "defaultKgHaMax": { "value": 30, "sources": ["EMBRAPA-CPACT-DOC527-2022"], "detail": "Idem." },
+        "populationTargetDefault": { "value": null, "reason": "A fonte dá kg/ha, não plantas/ha." },
+        "rowSpacingCmDefault": { "value": 50, "sources": ["EMBRAPA-CPACT-DOC527-2022"], "detail": "Tabela 3: 0,5 m entre linhas." },
+        "pmsDefault": { "value": null, "reason": "Sem fonte de PMS conferida." },
+        "germinationDefault": { "value": 60, "sources": ["MAPA-IN30-2008"], "detail": "Anexo IV (Crotalaria juncea): germinação mínima 60% em todas as categorias." },
+        "purityDefault": { "value": 98, "sources": ["MAPA-IN30-2008"], "detail": "Anexo IV: semente pura mínima 98% em todas as categorias." },
+        "goalsJson": { "value": {}, "reason": "Fonte única para cobertura; sem outras finalidades." }
+      }
+    },
+    {
+      "slug": "crotalaria-spectabilis",
+      "label": "Crotalária Spectabilis",
+      "category": "Leguminosas",
+      "notes": "Cobertura: 12 a 15 kg/ha, cerca de 45 cm entre linhas (25 a 50 cm).",
+      "campos": {
+        "defaultKgHaMin": { "value": 12, "sources": ["EMBRAPA-CPACT-DOC227-2008"], "detail": "Cerca de 10 kg/ha para produção de sementes, mais 20% para cobertura de solo = 12 kg/ha." },
+        "defaultKgHaMax": { "value": 15, "sources": ["EMBRAPA-CPACT-DOC527-2022"], "detail": "Tabela 3: Crotalaria spectabilis 15 kg/ha." },
+        "populationTargetDefault": { "value": null, "reason": "As fontes dão kg/ha e sementes por metro, não plantas/ha." },
+        "rowSpacingCmDefault": { "value": 45, "sources": ["EMBRAPA-CPACT-DOC227-2008"], "detail": "45 cm entre linhas, podendo variar de 25 a 50 cm (Doc 527: 0,5 m)." },
+        "pmsDefault": { "value": null, "reason": "Sem fonte de PMS conferida." },
+        "germinationDefault": { "value": 60, "sources": ["MAPA-IN30-2008"], "detail": "Anexo IV (Crotalaria spectabilis): germinação mínima 60% em todas as categorias." },
+        "purityDefault": { "value": 95, "sources": ["MAPA-IN30-2008"], "detail": "Anexo IV: semente pura mínima 95% em todas as categorias." },
+        "goalsJson": { "value": {}, "reason": "Sem outras finalidades com fonte conferida." }
+      }
+    },
+    {
+      "slug": "ervilhaca",
+      "label": "Ervilhaca",
+      "category": "Leguminosas",
+      "notes": "Adubação verde: 50 a 80 kg/ha. Para sementes, consorciar com centeio ou triticale.",
+      "campos": {
+        "defaultKgHaMin": { "value": 50, "sources": ["EMBRAPA-CPACT-DOC527-2022"], "detail": "Tabela 3: ervilhaca 50 kg/ha." },
+        "defaultKgHaMax": { "value": 80, "sources": ["EMBRAPA-CPACT-DOC227-2008"], "detail": "80 kg/ha para uso como adubo verde (40 kg/ha para produção de sementes)." },
+        "populationTargetDefault": { "value": null, "reason": "As fontes dão kg/ha, não plantas/ha." },
+        "rowSpacingCmDefault": { "value": 50, "sources": ["EMBRAPA-CPACT-DOC527-2022"], "detail": "Tabela 3: 0,5 m entre linhas." },
+        "pmsDefault": { "value": null, "reason": "Sem fonte de PMS conferida." },
+        "germinationDefault": { "value": 70, "sources": ["MAPA-IN31-2025"], "detail": "Anexo III (Vicia sativa): germinação mínima 70% em todas as categorias." },
+        "purityDefault": { "value": 95, "sources": ["MAPA-IN31-2025"], "detail": "Anexo III: semente pura mínima 97% (básica, C1/C2, S1) e 95% (S2); usado o piso 95%." },
+        "goalsJson": { "value": {}, "reason": "Fontes tratam só de adubação verde e produção de sementes." }
+      }
+    },
+    {
+      "slug": "estilosantes",
+      "label": "Estilosantes",
+      "category": "Leguminosas",
+      "notes": "Campo Grande em consórcio: 2 a 2,5 kg SPV/ha (200 a 250 pontos de VC/ha); reduzir 20% a 30% a semente do capim.",
+      "campos": {
+        "defaultKgHaMin": { "value": null, "reason": "A fonte dá kg de SPV/ha (pontos de VC), que depende do VC do lote." },
+        "defaultKgHaMax": { "value": null, "reason": "Idem." },
+        "populationTargetDefault": { "value": null, "reason": "Recomendação por SPV/pontos de VC, não por plantas/ha." },
+        "rowSpacingCmDefault": { "value": null, "reason": "Semeadura recomendada a lanço." },
+        "pmsDefault": { "value": null, "reason": "Sem fonte de PMS conferida." },
+        "germinationDefault": { "value": 60, "sources": ["MAPA-IN30-2008"], "detail": "Anexo IV (Stylosanthes capitata, S. guianensis e S. macrocephala): germinação mínima 60%." },
+        "purityDefault": { "value": 95, "sources": ["MAPA-IN30-2008"], "detail": "Anexo IV: semente pura mínima 95% nas três espécies." },
+        "goalsJson": { "value": {}, "reason": "Não se aplica no modelo atual." }
+      },
+      "semCampoNoModeloAtual": "Estilosantes Campo Grande em consórcio: 2 a 2,5 kg SPV/ha = 200 a 250 pontos de VC/ha (folder Embrapa, 2001)."
+    },
+    {
+      "slug": "milheto",
+      "label": "Milheto",
+      "category": "Cobertura",
+      "notes": "Adubação verde: 15 kg/ha a 0,4 m entre linhas.",
+      "campos": {
+        "defaultKgHaMin": { "value": 15, "sources": ["EMBRAPA-CPACT-DOC527-2022"], "detail": "Tabela 3: milheto 15 kg/ha (valor único)." },
+        "defaultKgHaMax": { "value": 15, "sources": ["EMBRAPA-CPACT-DOC527-2022"], "detail": "Idem." },
+        "populationTargetDefault": { "value": null, "reason": "A fonte dá kg/ha, não plantas/ha." },
+        "rowSpacingCmDefault": { "value": 40, "sources": ["EMBRAPA-CPACT-DOC527-2022"], "detail": "Tabela 3: 0,4 m entre linhas." },
+        "pmsDefault": { "value": null, "reason": "Sem fonte de PMS conferida." },
+        "germinationDefault": { "value": 75, "sources": ["MAPA-IN30-2008"], "detail": "Anexo III (Pennisetum glaucum): germinação mínima 75% em todas as categorias." },
+        "purityDefault": { "value": 95, "sources": ["MAPA-IN30-2008"], "detail": "Anexo III: semente pura mínima 95% em todas as categorias." },
+        "goalsJson": { "value": {}, "reason": "Sem outras finalidades com fonte conferida." }
+      }
+    },
+    {
+      "slug": "milho",
+      "label": "Milho",
+      "category": "Grãos",
+      "notes": "Use a densidade indicada pela obtentora do híbrido. Referência Embrapa para híbridos simples e triplos: 50 a 60 mil plantas/ha (até 80 mil).",
+      "campos": {
+        "defaultKgHaMin": { "value": null, "reason": "Sem PMS e sem faixa de kg/ha com fonte conferida; a faixa anterior (14 a 24) não tinha fonte." },
+        "defaultKgHaMax": { "value": null, "reason": "Idem." },
+        "populationTargetDefault": { "value": 55000, "sources": ["EMBRAPA-MILHO-SP1-PLANTIO"], "detail": "Tabela 1: híbridos triplos e simples 50.000 a 60.000 até 80.000 plantas/ha; ponto médio da faixa base." },
+        "rowSpacingCmDefault": { "value": 50, "sources": ["EMBRAPA-MILHO-SP1-PLANTIO"], "detail": "Espaçamento tradicional 80 a 90 cm, com tendência de redução para 45 a 50 cm." },
+        "pmsDefault": { "value": null, "reason": "Sem fonte de PMS conferida; o valor anterior (32 g) é incompatível com milho." },
+        "germinationDefault": { "value": 85, "sources": ["MAPA-IN45-2013"], "detail": "Anexo XXI (milho cultivares híbridas): germinação mínima 85% para híbridos simples e outros híbridos (C1, C2, S1)." },
+        "purityDefault": { "value": 98, "sources": ["MAPA-IN45-2013"], "detail": "Anexo XXI: semente pura mínima 98% em todas as categorias." },
+        "goalsJson": { "value": {}, "reason": "Faixas anteriores (grão 14–20, silagem 18–24) não tinham fonte." }
+      }
+    },
+    {
+      "slug": "nabo-forrageiro",
+      "label": "Nabo Forrageiro",
+      "category": "Cobertura",
+      "notes": "Cobertura: 12 a 15 kg/ha, 40 cm entre linhas e 20 a 25 sementes por metro.",
+      "campos": {
+        "defaultKgHaMin": { "value": 12, "sources": ["EMBRAPA-CPACT-DOC227-2008"], "detail": "Consumo de aproximadamente 12 kg/ha." },
+        "defaultKgHaMax": { "value": 15, "sources": ["EMBRAPA-CPACT-DOC527-2022"], "detail": "Tabela 3: nabo forrageiro 15 kg/ha." },
+        "populationTargetDefault": { "value": null, "reason": "As fontes dão kg/ha e sementes por metro, não plantas/ha." },
+        "rowSpacingCmDefault": { "value": 40, "sources": ["EMBRAPA-CPACT-DOC227-2008"], "detail": "40 cm entre linhas, 20 a 25 sementes por metro (Doc 527: 0,3 m)." },
+        "pmsDefault": { "value": null, "reason": "Sem fonte de PMS conferida." },
+        "germinationDefault": { "value": 65, "sources": ["MAPA-IN31-2025"], "detail": "Anexo V (Raphanus sativus var. oleiformis): germinação mínima 65% em C1/C2, S1 e S2 (básica 60%). A IN 30/2008 (Anexo V) traz 60%; vale a norma mais recente." },
+        "purityDefault": { "value": 95, "sources": ["MAPA-IN31-2025"], "detail": "Anexo V: semente pura mínima 97% (básica, C1/C2, S1) e 95% (S2); usado o piso 95%. A IN 30/2008 traz 98%." },
+        "goalsJson": { "value": {}, "reason": "Sem outras finalidades com fonte conferida." }
+      }
+    },
+    {
+      "slug": "panicum-mombaca",
+      "label": "Panicum Mombaça",
+      "category": "Forrageiras",
+      "notes": "Recomendação em kg de sementes puras viáveis (SPV) por hectare: 1,6 a 1,8 kg SPV/ha. kg/ha do lote = kg SPV ÷ (VC ÷ 100).",
+      "campos": {
+        "defaultKgHaMin": { "value": null, "reason": "Forrageira: a fonte dá kg de SPV/ha, que depende do VC do lote." },
+        "defaultKgHaMax": { "value": null, "reason": "Idem." },
+        "populationTargetDefault": { "value": null, "reason": "Forrageira: semeadura por SPV ou pontos de VC, não por plantas/ha." },
+        "rowSpacingCmDefault": { "value": null, "reason": "Semeadura usual a lanço; sem espaçamento de referência conferido." },
+        "pmsDefault": { "value": 1.43, "sources": ["EMBRAPA-CNPASA-CT06-2022"], "detail": "Tabela 1: semente nua de Mombaça, lotes de 2019 e 2020: 1,4353 g e 1,4286 g." },
+        "germinationDefault": { "value": 40, "sources": ["MAPA-IN30-2008"], "detail": "Anexo III (Panicum maximum): germinação mínima 40% em todas as categorias." },
+        "purityDefault": { "value": 40, "sources": ["MAPA-IN30-2008"], "detail": "Anexo III: semente pura mínima 50% (básica, C1/C2) e 40% (S1/S2); usado o piso 40%." },
+        "goalsJson": { "value": {}, "reason": "Não se aplica a forrageiras no modelo atual." }
+      },
+      "semCampoNoModeloAtual": "Mombaça: 1,6 kg SPV/ha (dose de referência do Comunicado Técnico 06/2022) e 1,8 kg SPV/ha (recomendação comercial, Comunicado Técnico 142/2019)."
+    },
+    {
+      "slug": "panicum-quenia",
+      "label": "Panicum Quênia",
+      "category": "Forrageiras",
+      "notes": "Pureza e germinação: padrão mínimo do MAPA para Panicum maximum. Taxa de semeadura (kg SPV/ha) ainda sem fonte conferida.",
+      "campos": {
+        "defaultKgHaMin": { "value": null, "reason": "Forrageira: recomendação em SPV/VC; sem taxa conferida para BRS Quênia." },
+        "defaultKgHaMax": { "value": null, "reason": "Idem." },
+        "populationTargetDefault": { "value": null, "reason": "Forrageira: semeadura por SPV ou pontos de VC, não por plantas/ha." },
+        "rowSpacingCmDefault": { "value": null, "reason": "Sem espaçamento de referência conferido." },
+        "pmsDefault": { "value": null, "reason": "Sem fonte de PMS conferida." },
+        "germinationDefault": { "value": 40, "sources": ["MAPA-IN30-2008"], "detail": "Anexo III (Panicum maximum, espécie da cultivar BRS Quênia): germinação mínima 40%." },
+        "purityDefault": { "value": 40, "sources": ["MAPA-IN30-2008"], "detail": "Anexo III: semente pura mínima 50% (básica, C1/C2) e 40% (S1/S2); usado o piso 40%." },
+        "goalsJson": { "value": {}, "reason": "Não se aplica a forrageiras no modelo atual." }
+      }
+    },
+    {
+      "slug": "sorgo",
+      "label": "Sorgo",
+      "category": "Grãos",
+      "notes": "Granífero: 140 a 170 mil plantas/ha na colheita. Silagem (sorgo forrageiro): 8 a 10 kg/ha, 45 a 70 cm entre linhas.",
+      "campos": {
+        "defaultKgHaMin": { "value": null, "reason": "Sem faixa geral de kg/ha com fonte conferida para sorgo granífero; a faixa anterior (8 a 18) não tinha fonte." },
+        "defaultKgHaMax": { "value": null, "reason": "Idem." },
+        "populationTargetDefault": { "value": 155000, "sources": ["EMBRAPA-SORGO-SP2-PLANTIO"], "detail": "Sorgo granífero: 140 a 170 mil plantas/ha na colheita; ponto médio." },
+        "rowSpacingCmDefault": { "value": 50, "sources": ["EMBRAPA-SORGO-SP2-PLANTIO"], "detail": "Espaçamento de 50 a 90 cm (40 a 90 cm conforme a região), com tendência de espaçamentos reduzidos." },
+        "pmsDefault": { "value": null, "reason": "Sem fonte de PMS conferida." },
+        "germinationDefault": { "value": 75, "sources": ["MAPA-IN45-2013"], "detail": "Anexos XXIV e XXV (sorgo variedades e híbridos): germinação mínima 80% (C1/C2) e 75% (S1/S2); usado o piso 75%." },
+        "purityDefault": { "value": 98, "sources": ["MAPA-IN45-2013"], "detail": "Anexos XXIV e XXV: semente pura mínima 98% em todas as categorias." },
+        "goalsJson": {
+          "value": { "silagem": { "min": 8, "max": 10 } },
+          "sources": ["EMBRAPA-CPACT-FOLDER-FORRAGEIRO-2024"],
+          "detail": "Sorgo-forrageiro BRS 716 Biomassa e BRS Ponta Negra, silagem de verão: densidade 8 a 10 kg/ha. A faixa anterior de grão (8 a 12) não tinha fonte."
+        }
+      }
+    },
+    {
+      "slug": "sorgo-brs-661",
+      "label": "Sorgo BRS 661",
+      "category": "Grãos",
+      "notes": "Cultivar de sorgo forrageiro para silagem (Embrapa): 100 mil plantas/ha.",
+      "campos": {
+        "defaultKgHaMin": { "value": null, "reason": "O folder da cultivar não dá kg/ha; o PMS do folder não pôde ser lido com segurança." },
+        "defaultKgHaMax": { "value": null, "reason": "Idem." },
+        "populationTargetDefault": { "value": 100000, "sources": ["EMBRAPA-SORGO-BRS661-2024"], "detail": "Características da cultivar: densidade de 100.000 plantas/ha (variável com região e época)." },
+        "rowSpacingCmDefault": { "value": null, "reason": "O folder da cultivar não indica espaçamento." },
+        "pmsDefault": { "value": null, "reason": "Campo do folder ilegível na extração do texto; não usado." },
+        "germinationDefault": { "value": 75, "sources": ["MAPA-IN45-2013", "EMBRAPA-SORGO-BRS661-2024"], "detail": "Folder: tipo variedade. Anexo XXIV (sorgo variedades): germinação mínima 80% (C1/C2) e 75% (S1/S2); usado o piso 75%." },
+        "purityDefault": { "value": 98, "sources": ["MAPA-IN45-2013"], "detail": "Anexo XXIV: semente pura mínima 98% em todas as categorias." },
+        "goalsJson": { "value": {}, "reason": "Finalidade única (silagem), sem faixa de kg/ha com fonte da obtentora." }
+      }
+    },
+    {
+      "slug": "trigo",
+      "label": "Trigo",
+      "category": "Grãos",
+      "notes": "250 a 350 sementes viáveis/m², 17 a 20 cm entre linhas. A dose em kg/ha depende do PMS e da germinação do lote.",
+      "campos": {
+        "defaultKgHaMin": { "value": 90, "sources": ["EMBRAPA-IDR-TRIGO-TRITICALE-2023"], "detail": "Tabela 1 (300 sementes/m²): PMS 30 g e germinação 100% = 90 kg/ha." },
+        "defaultKgHaMax": { "value": 188, "sources": ["EMBRAPA-IDR-TRIGO-TRITICALE-2023"], "detail": "Tabela 1 (300 sementes/m²): PMS 50 g e germinação 80% = 188 kg/ha." },
+        "populationTargetDefault": { "value": 3000000, "sources": ["EMBRAPA-IDR-TRIGO-TRITICALE-2023"], "detail": "250 a 350 sementes viáveis/m²; ponto médio 300/m² (base da Tabela 1)." },
+        "rowSpacingCmDefault": { "value": 17, "sources": ["EMBRAPA-IDR-TRIGO-TRITICALE-2023"], "detail": "17 a 20 cm entre linhas; Tabela 2 calculada para 17 cm." },
+        "pmsDefault": { "value": 38, "sources": ["EMBRAPA-IDR-TRIGO-TRITICALE-2023"], "detail": "Tabela 2: PMS das 10 cultivares de trigo entre 34 e 43 g; mediana 37,5 g, arredondada." },
+        "germinationDefault": { "value": 80, "sources": ["MAPA-IN45-2013"], "detail": "Anexo XXVII (trigo): germinação mínima 80% em C1, C2, S1 e S2 (básica 70%)." },
+        "purityDefault": { "value": 98, "sources": ["MAPA-IN45-2013"], "detail": "Anexo XXVII: semente pura mínima 98% em todas as categorias." },
+        "goalsJson": { "value": {}, "reason": "Sem faixas por finalidade com fonte conferida." }
+      }
+    },
+    {
+      "slug": "trigo-mourisco",
+      "label": "Trigo Mourisco",
+      "category": "Cobertura",
+      "notes": "Densidade e padrões de sementes ainda sem fonte conferida.",
+      "campos": {
+        "defaultKgHaMin": { "value": null, "reason": "Sem recomendação de densidade em kg/ha de órgão de pesquisa conferida (só fonte comercial)." },
+        "defaultKgHaMax": { "value": null, "reason": "Idem." },
+        "populationTargetDefault": { "value": null, "reason": "Só ensaio acadêmico regional (plantas/m), sem recomendação oficial." },
+        "rowSpacingCmDefault": { "value": null, "reason": "Idem." },
+        "pmsDefault": { "value": null, "reason": "Sem fonte de PMS conferida." },
+        "germinationDefault": { "value": null, "reason": "Sem padrão específico; o Anexo XXX da IN 45/2013 (espécies inscritas no RNC sem padrão próprio) pode se aplicar, mas não foi confirmado." },
+        "purityDefault": { "value": null, "reason": "Idem." },
+        "goalsJson": { "value": {}, "reason": "Sem faixas com fonte conferida." }
+      }
+    },
+    {
+      "slug": "triticale",
+      "label": "Triticale",
+      "category": "Grãos",
+      "notes": "250 a 400 sementes viáveis/m² conforme a cultivar, 17 a 20 cm entre linhas.",
+      "campos": {
+        "defaultKgHaMin": { "value": 90, "sources": ["EMBRAPA-IDR-TRIGO-TRITICALE-2023"], "detail": "Tabela 1 (trigo e triticale, 300 sementes/m²): PMS 30 g e germinação 100% = 90 kg/ha." },
+        "defaultKgHaMax": { "value": 188, "sources": ["EMBRAPA-IDR-TRIGO-TRITICALE-2023"], "detail": "Tabela 1 (300 sementes/m²): PMS 50 g e germinação 80% = 188 kg/ha. Cultivares indicadas para 350 a 400 sementes/m² podem passar disso." },
+        "populationTargetDefault": { "value": 3250000, "sources": ["EMBRAPA-IDR-TRIGO-TRITICALE-2023"], "detail": "Tabela 2: cultivares de triticale de 250 a 400 sementes viáveis/m²; ponto médio 325/m²." },
+        "rowSpacingCmDefault": { "value": 17, "sources": ["EMBRAPA-IDR-TRIGO-TRITICALE-2023"], "detail": "17 a 20 cm entre linhas; Tabela 2 calculada para 17 cm." },
+        "pmsDefault": { "value": 43, "sources": ["EMBRAPA-IDR-TRIGO-TRITICALE-2023"], "detail": "Tabela 2: PMS das 6 cultivares de triticale entre 39 e 46 g; mediana 43 g." },
+        "germinationDefault": { "value": 80, "sources": ["MAPA-IN45-2013"], "detail": "Anexo XXIX (triticale): germinação mínima 80% em C1, C2, S1 e S2 (básica 70%)." },
+        "purityDefault": { "value": 98, "sources": ["MAPA-IN45-2013"], "detail": "Anexo XXIX: semente pura mínima 98% em todas as categorias." },
+        "goalsJson": { "value": {}, "reason": "Sem faixas por finalidade com fonte conferida." }
+      }
+    },
+    {
+      "slug": "soja",
+      "label": "Soja",
+      "category": "Grãos",
+      "notes": "Use a população indicada pela obtentora da cultivar. Referência: cerca de 300 mil plantas/ha, 40 a 50 cm entre linhas.",
+      "campos": {
+        "defaultKgHaMin": { "value": null, "reason": "Sem PMS e sem faixa de kg/ha com fonte conferida; a Embrapa indica usar a recomendação da obtentora." },
+        "defaultKgHaMax": { "value": null, "reason": "Idem." },
+        "populationTargetDefault": { "value": 300000, "sources": ["EMBRAPA-SOJA-FOLDER-2020"], "detail": "A população ideal varia entre as cultivares, mas fica próxima a 300 mil plantas/ha." },
+        "rowSpacingCmDefault": { "value": 45, "sources": ["EMBRAPA-SOJA-SP17-2020"], "detail": "Faixa de espaçamento mais usada: 40 a 50 cm; ponto médio." },
+        "pmsDefault": { "value": null, "reason": "Sem fonte de PMS conferida (varia muito entre cultivares)." },
+        "germinationDefault": { "value": 80, "sources": ["MAPA-IN45-2013"], "detail": "Anexo XXIII (soja): germinação mínima 80% em C1, C2, S1 e S2 (básica 75%)." },
+        "purityDefault": { "value": 99, "sources": ["MAPA-IN45-2013"], "detail": "Anexo XXIII: semente pura mínima 99% em todas as categorias." },
+        "goalsJson": { "value": {}, "reason": "Sem faixas por finalidade com fonte conferida." }
+      }
+    },
+    {
+      "slug": "feijao",
+      "label": "Feijão",
+      "category": "Grãos",
+      "notes": "Feijão comum solteiro: 200 a 240 mil plantas/ha, 40 a 50 cm entre linhas com 10 a 12 plantas por metro.",
+      "campos": {
+        "defaultKgHaMin": { "value": null, "reason": "Sem PMS e sem faixa de kg/ha com fonte conferida." },
+        "defaultKgHaMax": { "value": null, "reason": "Idem." },
+        "populationTargetDefault": { "value": 220000, "sources": ["EMBRAPA-FEIJAO-DOC236-2008"], "detail": "Populações de 200 a 240 mil plantas/ha; ponto médio." },
+        "rowSpacingCmDefault": { "value": 45, "sources": ["EMBRAPA-FEIJAO-DOC236-2008"], "detail": "Arranjo mais usado: 40 a 50 cm entre linhas; ponto médio." },
+        "pmsDefault": { "value": null, "reason": "Sem fonte de PMS conferida (varia muito entre cultivares)." },
+        "germinationDefault": { "value": 80, "sources": ["MAPA-IN45-2013"], "detail": "Anexo XI (feijão): germinação mínima 80% em C1, C2, S1 e S2 (básica 70%)." },
+        "purityDefault": { "value": 98, "sources": ["MAPA-IN45-2013"], "detail": "Anexo XI: semente pura mínima 98% em todas as categorias." },
+        "goalsJson": { "value": {}, "reason": "Sem faixas por finalidade com fonte conferida." }
+      }
+    },
+    {
+      "slug": "azevem",
+      "label": "Azevém",
+      "category": "Forrageiras",
+      "notes": "Pastagem de inverno: 20 a 25 kg/ha, 12 a 20 cm entre linhas.",
+      "campos": {
+        "defaultKgHaMin": { "value": 20, "sources": ["EMBRAPA-CPACT-FOLDER-FORRAGEIRO-2024"], "detail": "Azevém, pastagem de inverno: densidade 20 a 25 kg/ha." },
+        "defaultKgHaMax": { "value": 25, "sources": ["EMBRAPA-CPACT-FOLDER-FORRAGEIRO-2024"], "detail": "Idem." },
+        "populationTargetDefault": { "value": null, "reason": "Forrageira: população fica vazia no modelo atual." },
+        "rowSpacingCmDefault": { "value": 16, "sources": ["EMBRAPA-CPACT-FOLDER-FORRAGEIRO-2024"], "detail": "12 a 20 cm entre linhas; ponto médio." },
+        "pmsDefault": { "value": null, "reason": "Sem fonte de PMS conferida." },
+        "germinationDefault": { "value": 70, "sources": ["MAPA-IN31-2025"], "detail": "Anexo I (Lolium multiflorum): germinação mínima 70% em C1/C2 e S1/S2 (básica 60%)." },
+        "purityDefault": { "value": 95, "sources": ["MAPA-IN31-2025"], "detail": "Anexo I: semente pura mínima 97% (básica, C1/C2, S1) e 95% (S2); usado o piso 95%." },
+        "goalsJson": { "value": {}, "reason": "Fonte trata só de pastagem." }
+      }
+    },
+    {
+      "slug": "tremoco-branco",
+      "label": "Tremoço Branco",
+      "category": "Leguminosas",
+      "notes": "Adubação verde: 80 a 90 kg/ha, 50 cm entre linhas e 12 a 15 sementes por metro.",
+      "campos": {
+        "defaultKgHaMin": { "value": 80, "sources": ["EMBRAPA-CPACT-DOC227-2008"], "detail": "Densidade recomendada de 80 a 90 kg/ha." },
+        "defaultKgHaMax": { "value": 90, "sources": ["EMBRAPA-CPACT-DOC227-2008"], "detail": "Idem." },
+        "populationTargetDefault": { "value": null, "reason": "A fonte dá kg/ha e sementes por metro, não plantas/ha." },
+        "rowSpacingCmDefault": { "value": 50, "sources": ["EMBRAPA-CPACT-DOC227-2008"], "detail": "50 cm entre linhas, 12 a 15 sementes por metro." },
+        "pmsDefault": { "value": null, "reason": "Sem fonte de PMS conferida." },
+        "germinationDefault": { "value": 80, "sources": ["MAPA-IN31-2025"], "detail": "Anexo III (Lupinus albus): germinação mínima 80% em C1/C2 e S1/S2 (básica 70%)." },
+        "purityDefault": { "value": 95, "sources": ["MAPA-IN31-2025"], "detail": "Anexo III: semente pura mínima 98% (básica, C1/C2, S1) e 95% (S2); usado o piso 95%." },
+        "goalsJson": { "value": {}, "reason": "Fonte trata só de adubação verde." }
+      }
+    }
+  ]
+}
