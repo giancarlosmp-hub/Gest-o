@@ -1,9 +1,18 @@
 // Contas do Assistente Técnico (Calculadora de Semeadura e Valor Cultural), sem React, para a tela e os
 // testes usarem a mesma regra.
 
+/**
+ * Lê número digitado no padrão brasileiro: vírgula decimal ("12,5"), ponto de milhar ("180.000",
+ * "1.234,5") ou ponto decimal ("12.5"). Ponto seguido de exatamente três dígitos, sem vírgula, é milhar.
+ */
 export function parseDecimal(value: string | null | undefined): number | null {
-  const normalized = (value ?? "").replace(",", ".").trim();
+  let normalized = (value ?? "").replace(/\s+/g, "");
   if (!normalized) return null;
+  if (normalized.includes(",")) {
+    normalized = normalized.replace(/\./g, "").replace(",", ".");
+  } else if (/^-?\d{1,3}(\.\d{3})+$/.test(normalized)) {
+    normalized = normalized.replace(/\./g, "");
+  }
   const number = Number(normalized);
   return Number.isFinite(number) ? number : null;
 }
@@ -35,32 +44,43 @@ export type SeedingInput = {
   pms: number;
   germination: number;
   purity: number;
-  fieldCorrectionPercent: number;
+  /** Perda a campo (%): sementes que não viram planta. A conta divide por (1 − perda). */
+  fieldLossPercent: number;
 };
+
+export const MAX_FIELD_LOSS_PERCENT = 50;
 
 export type SeedingResult = {
   ready: boolean;
   plantsM2: number;
   seedsM2: number;
   seedsPerMeter: number;
-  /** kg/ha só pela qualidade do lote (germinação × pureza), antes da correção de campo. */
+  /** kg/ha só pela qualidade do lote (germinação × pureza), antes da perda a campo. */
   kgHaBase: number;
-  /** kg/ha final, já com a correção de campo. */
+  /** kg/ha final, já com a perda a campo. */
   kgHa: number;
+  /** Perda a campo usada na conta, depois do limite (0 a 50%). */
+  fieldLossApplied: number;
+  /** Aviso quando o valor digitado saiu do limite e a conta usou outro. */
+  fieldLossWarning: "above_max" | "negative" | null;
 };
 
 export function calculateSeeding(input: SeedingInput): SeedingResult {
-  const { populationHa, rowSpacingCm, pms, germination, purity, fieldCorrectionPercent } = input;
+  const { populationHa, rowSpacingCm, pms, germination, purity, fieldLossPercent } = input;
   const plantsM2 = populationHa / 10000;
   const qualityFactor = (germination / 100) * (purity / 100);
-  const fieldFactor = 1 + fieldCorrectionPercent / 100;
 
-  if (qualityFactor <= 0 || fieldFactor <= 0 || rowSpacingCm <= 0 || pms <= 0 || populationHa <= 0) {
-    return { ready: false, plantsM2, seedsM2: 0, seedsPerMeter: 0, kgHaBase: 0, kgHa: 0 };
+  const fieldLossWarning =
+    fieldLossPercent > MAX_FIELD_LOSS_PERCENT ? "above_max" : fieldLossPercent < 0 ? "negative" : null;
+  const fieldLossApplied = Math.min(MAX_FIELD_LOSS_PERCENT, Math.max(0, Number.isFinite(fieldLossPercent) ? fieldLossPercent : 0));
+  const survivalFactor = 1 - fieldLossApplied / 100;
+
+  if (qualityFactor <= 0 || rowSpacingCm <= 0 || pms <= 0 || populationHa <= 0) {
+    return { ready: false, plantsM2, seedsM2: 0, seedsPerMeter: 0, kgHaBase: 0, kgHa: 0, fieldLossApplied, fieldLossWarning };
   }
 
   const seedsHaBase = populationHa / qualityFactor;
-  const seedsHa = seedsHaBase * fieldFactor;
+  const seedsHa = seedsHaBase / survivalFactor;
   const seedsM2 = seedsHa / 10000;
   const seedsPerMeter = seedsM2 * (rowSpacingCm / 100);
 
@@ -72,7 +92,15 @@ export function calculateSeeding(input: SeedingInput): SeedingResult {
     seedsPerMeter,
     kgHaBase: (seedsHaBase * pms) / 1000000,
     kgHa: (seedsHa * pms) / 1000000,
+    fieldLossApplied,
+    fieldLossWarning,
   };
+}
+
+export function fieldLossWarningMessage(warning: SeedingResult["fieldLossWarning"]) {
+  if (warning === "above_max") return `Perda a campo acima de ${MAX_FIELD_LOSS_PERCENT}%: a conta usa ${MAX_FIELD_LOSS_PERCENT}%. Confira o valor.`;
+  if (warning === "negative") return "Perda a campo não pode ser negativa: a conta usa 0%.";
+  return null;
 }
 
 export type VcInput = {
@@ -214,4 +242,28 @@ export function kgHaRangeMessage(check: KgHaRangeCheck) {
     case "within":
       return `Dentro da faixa de referência (${formatKgHaRange(check.range)}).`;
   }
+}
+
+const formatNumber = (value: number, digits: number) =>
+  value.toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: digits });
+
+/** Texto do "Copiar resultado" da Calculadora de Semeadura (para colar no WhatsApp). */
+export function seedingSummaryText(params: {
+  cultureLabel: string;
+  goalLabel?: string;
+  input: SeedingInput;
+  result: SeedingResult;
+  range: KgHaRange | null;
+}) {
+  const { cultureLabel, goalLabel: goal, input, result, range } = params;
+  if (!result.ready) return "";
+  const title = goal ? `${cultureLabel} (${goal})` : cultureLabel;
+  const lines = [
+    `${title}: ${formatNumber(result.kgHa, 2)} kg/ha`,
+    `População ${formatNumber(input.populationHa, 0)} plantas/ha, espaçamento ${formatNumber(input.rowSpacingCm, 1)} cm, PMS ${formatNumber(input.pms, 2)} g, germinação ${formatNumber(input.germination, 1)}%, pureza ${formatNumber(input.purity, 1)}%, perda a campo ${formatNumber(result.fieldLossApplied, 1)}%.`,
+    `${formatNumber(result.seedsPerMeter, 1)} sementes por metro.`,
+  ];
+  if (range) lines.push(`Faixa de referência: ${formatKgHaRange(range)}.`);
+  lines.push("Estimativa de apoio; não substitui a recomendação de um engenheiro agrônomo.");
+  return lines.join("\n");
 }

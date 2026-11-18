@@ -14,14 +14,22 @@ import {
   checkKgHaRange,
   cultureGoalOptions,
   cultureSeedingDefaults,
+  fieldLossWarningMessage,
   formatKgHaRange,
   kgHaRangeMessage,
   parseDecimal,
   resolveKgHaRange,
+  seedingSummaryText,
 } from "../lib/technicalAssistant";
 
 const cardClass =
   "rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6";
+
+const helpClass = "mt-1 block text-xs text-slate-500";
+
+// Campos numéricos como texto com teclado decimal: aceita vírgula no celular (type="number" recusa em
+// alguns aparelhos) e a conta lê com parseDecimal.
+const decimalInputProps = { type: "text", inputMode: "decimal", autoComplete: "off" } as const;
 
 const inputClass =
   "mt-1 w-full max-w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-800 shadow-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200";
@@ -34,7 +42,7 @@ type SemeaduraForm = {
   pms: string;
   germinacao: string;
   pureza: string;
-  correcaoCampo: string;
+  perdaCampo: string;
 };
 
 const initialForm: SemeaduraForm = {
@@ -45,7 +53,7 @@ const initialForm: SemeaduraForm = {
   pms: "",
   germinacao: "",
   pureza: "",
-  correcaoCampo: "0",
+  perdaCampo: "0",
 };
 
 type VcForm = {
@@ -173,7 +181,7 @@ export default function AssistenteTecnico() {
         pms: parseNumber(form.pms),
         germination: parseNumber(form.germinacao),
         purity: parseNumber(form.pureza),
-        fieldCorrectionPercent: parseNumber(form.correcaoCampo),
+        fieldLossPercent: parseNumber(form.perdaCampo),
       }),
     [form]
   );
@@ -194,6 +202,45 @@ export default function AssistenteTecnico() {
   );
 
   const selectedGoalLabel = goalOptions.find((option) => option.key === form.objetivo)?.label ?? "";
+
+  const fieldLossMessage = fieldLossWarningMessage(results.fieldLossWarning);
+
+  const seedingSummary = useMemo(
+    () =>
+      selectedCulture
+        ? seedingSummaryText({
+            cultureLabel: selectedCulture.label,
+            goalLabel: selectedGoalLabel,
+            input: {
+              populationHa: parseNumber(form.populacaoHa),
+              rowSpacingCm: parseNumber(form.espacamentoCm),
+              pms: parseNumber(form.pms),
+              germination: parseNumber(form.germinacao),
+              purity: parseNumber(form.pureza),
+              fieldLossPercent: parseNumber(form.perdaCampo),
+            },
+            result: results,
+            range: referenceRange,
+          })
+        : "",
+    [selectedCulture, selectedGoalLabel, form, results, referenceRange]
+  );
+
+  const [seedingMessage, setSeedingMessage] = useState("");
+
+  useEffect(() => {
+    setSeedingMessage("");
+  }, [seedingSummary]);
+
+  const handleCopySeeding = async () => {
+    if (!seedingSummary) return;
+    try {
+      await navigator.clipboard.writeText(seedingSummary);
+      setSeedingMessage("Resultado copiado para envio no WhatsApp.");
+    } catch {
+      setSeedingMessage("Não foi possível copiar automaticamente neste dispositivo.");
+    }
+  };
 
   // ======== VC (Valor Cultural) ========
 
@@ -377,6 +424,10 @@ export default function AssistenteTecnico() {
         </p>
       </header>
 
+      <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+        Os resultados são estimativas de apoio e não substituem a recomendação de um engenheiro agrônomo.
+      </p>
+
       {fallbackMessage ? (
         <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
           {fallbackMessage}
@@ -443,69 +494,87 @@ export default function AssistenteTecnico() {
             <label className="block text-sm text-slate-700">
               População desejada (plantas/ha)
               <input
+                {...decimalInputProps}
                 value={form.populacaoHa}
                 onChange={(e) =>
                   setForm((prev) => ({ ...prev, populacaoHa: e.target.value }))
                 }
                 className={inputClass}
               />
+              <span className={helpClass}>Plantas estabelecidas por hectare.</span>
             </label>
 
             <label className="block text-sm text-slate-700">
-              Espaçamento (cm)
+              Espaçamento entre linhas (cm)
               <input
+                {...decimalInputProps}
                 value={form.espacamentoCm}
                 onChange={(e) =>
                   setForm((prev) => ({ ...prev, espacamentoCm: e.target.value }))
                 }
                 className={inputClass}
               />
+              <span className={helpClass}>Usado só para sementes por metro.</span>
             </label>
 
             <label className="block text-sm text-slate-700">
               PMS (g)
               <input
+                {...decimalInputProps}
                 value={form.pms}
                 onChange={(e) =>
                   setForm((prev) => ({ ...prev, pms: e.target.value }))
                 }
                 className={inputClass}
               />
+              <span className={helpClass}>PMS = peso de 1.000 sementes, em gramas (do boletim do lote).</span>
             </label>
 
             <label className="block text-sm text-slate-700">
               Germinação (%)
               <input
+                {...decimalInputProps}
                 value={form.germinacao}
                 onChange={(e) =>
                   setForm((prev) => ({ ...prev, germinacao: e.target.value }))
                 }
                 className={inputClass}
               />
+              <span className={helpClass}>Do boletim de análise do lote.</span>
             </label>
 
             <label className="block text-sm text-slate-700">
               Pureza (%)
               <input
+                {...decimalInputProps}
                 value={form.pureza}
                 onChange={(e) =>
                   setForm((prev) => ({ ...prev, pureza: e.target.value }))
                 }
                 className={inputClass}
               />
+              <span className={helpClass}>Do boletim de análise do lote.</span>
             </label>
 
             <label className="block text-sm text-slate-700">
-              Correção de campo (%)
+              Perda a campo (%)
               <input
-                value={form.correcaoCampo}
+                {...decimalInputProps}
+                value={form.perdaCampo}
                 onChange={(e) =>
-                  setForm((prev) => ({ ...prev, correcaoCampo: e.target.value }))
+                  setForm((prev) => ({ ...prev, perdaCampo: e.target.value }))
                 }
                 className={inputClass}
               />
+              <span className={helpClass}>Sementes que não viram planta (falha de emergência, pragas, pássaros). Ex.: 20% → semeia 25% a mais. Máximo 50%.</span>
             </label>
           </div>
+
+          {fieldLossMessage ? (
+            <p className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              {fieldLossMessage}
+            </p>
+          ) : null}
 
           <div className="mt-5 grid grid-cols-1 gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-2 lg:grid-cols-4">
             <div>
@@ -535,12 +604,26 @@ export default function AssistenteTecnico() {
               </p>
               <p className="text-sm font-semibold text-emerald-700">kg/ha</p>
             </div>
-            <div className="rounded-lg border border-slate-200 bg-white p-3 sm:col-span-2 lg:col-span-1">
-              <p className="text-xs uppercase text-slate-500">Dose base</p>
-              <p className="text-lg font-semibold text-slate-900">
-                {formatValue(results.kgHa)} kg/ha
-              </p>
-            </div>
+            {results.ready && results.fieldLossApplied > 0 ? (
+              <div className="rounded-lg border border-slate-200 bg-white p-3 sm:col-span-2 lg:col-span-1">
+                <p className="text-xs uppercase text-slate-500">Sem perda a campo</p>
+                <p className="text-lg font-semibold text-slate-900">
+                  {formatValue(results.kgHaBase)} kg/ha
+                </p>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handleCopySeeding}
+              disabled={!seedingSummary}
+              className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Copiar resultado
+            </button>
+            {seedingMessage ? <span className="text-sm text-slate-600">{seedingMessage}</span> : null}
           </div>
 
           {rangeCheck ? (
@@ -659,9 +742,7 @@ export default function AssistenteTecnico() {
           <label className="block text-sm text-slate-700">
             Pureza (%)
             <input
-              type="number"
-              min="0"
-              max="100"
+              {...decimalInputProps}
               value={vcForm.pureza}
               onChange={(event) =>
                 setVcForm((prev) => ({ ...prev, pureza: event.target.value }))
@@ -673,9 +754,7 @@ export default function AssistenteTecnico() {
           <label className="block text-sm text-slate-700">
             Germinação (%)
             <input
-              type="number"
-              min="0"
-              max="100"
+              {...decimalInputProps}
               value={vcForm.germinacao}
               onChange={(event) =>
                 setVcForm((prev) => ({ ...prev, germinacao: event.target.value }))
@@ -701,9 +780,7 @@ export default function AssistenteTecnico() {
           <label className="block text-sm text-slate-700">
             Sementes duras (%)
             <input
-              type="number"
-              min="0"
-              max="100"
+              {...decimalInputProps}
               disabled={!vcForm.considerarSementesDuras}
               value={vcForm.sementesDuras}
               onChange={(event) =>
@@ -716,8 +793,7 @@ export default function AssistenteTecnico() {
           <label className="block text-sm text-slate-700">
             Dose física (kg/ha)
             <input
-              type="number"
-              min="0"
+              {...decimalInputProps}
               value={vcForm.doseFisica}
               onChange={(event) =>
                 setVcForm((prev) => ({
@@ -733,8 +809,7 @@ export default function AssistenteTecnico() {
           <label className="block text-sm text-slate-700">
             Dose efetiva (SPV) desejada (kg/ha)
             <input
-              type="number"
-              min="0"
+              {...decimalInputProps}
               value={vcForm.doseSpv}
               onChange={(event) =>
                 setVcForm((prev) => ({
@@ -756,7 +831,7 @@ export default function AssistenteTecnico() {
             <strong>Fator de correção</strong> = 100 / VC (quanto multiplicar para corrigir dose pela qualidade do lote).
           </p>
           <p className="mt-2 text-xs text-slate-500">
-            * VC é correção de qualidade do lote; não substitui recomendação agronômica.
+            * VC corrige a dose pela qualidade do lote (pureza e germinação).
           </p>
         </div>
 

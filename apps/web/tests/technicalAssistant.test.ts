@@ -1,13 +1,16 @@
 import assert from "node:assert/strict";
 import {
+  MAX_FIELD_LOSS_PERCENT,
   calculateSeeding,
   calculateVc,
   checkKgHaRange,
   cultureGoalOptions,
   cultureSeedingDefaults,
+  fieldLossWarningMessage,
   kgHaRangeMessage,
   parseDecimal,
   resolveKgHaRange,
+  seedingSummaryText,
 } from "../src/lib/technicalAssistant";
 
 // Contas do Assistente Técnico (src/lib/technicalAssistant.ts). Só culturas e lotes fictícios.
@@ -19,6 +22,11 @@ assert.equal(parseDecimal("12,5"), 12.5);
 assert.equal(parseDecimal(" 98 "), 98);
 assert.equal(parseDecimal(""), null);
 assert.equal(parseDecimal("abc"), null);
+assert.equal(parseDecimal("12.5"), 12.5, "ponto decimal continua valendo");
+assert.equal(parseDecimal("180.000"), 180000, "ponto de milhar (3 dígitos depois do ponto)");
+assert.equal(parseDecimal("1.234,5"), 1234.5, "milhar com vírgula decimal");
+assert.equal(parseDecimal("1.250.000"), 1250000);
+assert.equal(parseDecimal("0,85"), 0.85);
 
 // ---- Padrões da cultura: trocar de cultura substitui todos os campos, inclusive os já preenchidos ----
 const cultureA = { populationTargetDefault: 100000, rowSpacingCmDefault: 40, pmsDefault: 20, germinationDefault: 85, purityDefault: 97 };
@@ -33,7 +41,7 @@ assert.deepEqual(
 // ---- Semeadura ----
 // Lote fictício: 200.000 plantas/ha, 50 cm, PMS 25 g, germinação 80%, pureza 100%, sem perda.
 // Sementes/ha = 200.000 ÷ 0,8 = 250.000 → kg/ha = 250.000 × 25 ÷ 1.000.000 = 6,25.
-const base = { populationHa: 200000, rowSpacingCm: 50, pms: 25, germination: 80, purity: 100, fieldCorrectionPercent: 0 };
+const base = { populationHa: 200000, rowSpacingCm: 50, pms: 25, germination: 80, purity: 100, fieldLossPercent: 0 };
 const seeding = calculateSeeding(base);
 assert.equal(seeding.ready, true);
 close(seeding.plantsM2, 20, "plantas/m²");
@@ -41,6 +49,32 @@ close(seeding.seedsM2, 25, "sementes/m²");
 close(seeding.seedsPerMeter, 12.5, "sementes por metro (25/m² × 0,5 m)");
 close(seeding.kgHa, 6.25, "kg/ha");
 close(seeding.kgHaBase, 6.25, "kg/ha base sem correção");
+
+assert.equal(seeding.fieldLossApplied, 0);
+assert.equal(seeding.fieldLossWarning, null);
+
+// Perda a campo divide por (1 − perda): 20% → 6,25 ÷ 0,8 = 7,8125 (25% a mais, não 20%).
+const withLoss = calculateSeeding({ ...base, fieldLossPercent: 20 });
+close(withLoss.kgHa, 7.8125, "kg/ha com 20% de perda");
+close(withLoss.kgHaBase, 6.25, "kg/ha sem perda continua o mesmo");
+close(withLoss.seedsM2, 31.25, "sementes/m² com perda");
+assert.equal(withLoss.fieldLossApplied, 20);
+
+// Limite de 50%: acima disso a conta usa 50% e avisa.
+assert.equal(MAX_FIELD_LOSS_PERCENT, 50);
+const atMax = calculateSeeding({ ...base, fieldLossPercent: 50 });
+close(atMax.kgHa, 12.5, "50% de perda dobra a dose");
+assert.equal(atMax.fieldLossWarning, null, "50% exato não avisa");
+const overMax = calculateSeeding({ ...base, fieldLossPercent: 80 });
+close(overMax.kgHa, 12.5, "acima de 50% usa 50%");
+assert.equal(overMax.fieldLossApplied, 50);
+assert.equal(overMax.fieldLossWarning, "above_max");
+assert.equal(fieldLossWarningMessage("above_max"), "Perda a campo acima de 50%: a conta usa 50%. Confira o valor.");
+const negative = calculateSeeding({ ...base, fieldLossPercent: -10 });
+close(negative.kgHa, 6.25, "perda negativa usa 0%");
+assert.equal(negative.fieldLossWarning, "negative");
+assert.equal(fieldLossWarningMessage("negative"), "Perda a campo não pode ser negativa: a conta usa 0%.");
+assert.equal(fieldLossWarningMessage(null), null);
 
 // Espaçamento muda só sementes por metro, não o kg/ha.
 const wider = calculateSeeding({ ...base, rowSpacingCm: 100 });
@@ -129,5 +163,33 @@ assert.deepEqual(resolveKgHaRange(fakeCulture, "grao"), { min: 8, max: 12 }, "ob
 assert.deepEqual(resolveKgHaRange(fakeCulture, "inexistente"), { min: 8, max: 18 });
 assert.equal(resolveKgHaRange({ defaultKgHaMin: null, defaultKgHaMax: 10, goalsJson: {} }, ""), null, "faixa incompleta = sem faixa");
 assert.deepEqual(checkKgHaRange(10, resolveKgHaRange(fakeCulture, "silagem")), { status: "below", range: { min: 12, max: 18 } });
+
+// ---- Texto do "Copiar resultado" ----
+const summary = seedingSummaryText({
+  cultureLabel: "Cultura Teste",
+  goalLabel: "Grão",
+  input: { ...base, fieldLossPercent: 20 },
+  result: withLoss,
+  range: { min: 6, max: 9 },
+});
+assert.equal(
+  summary,
+  [
+    "Cultura Teste (Grão): 7,81 kg/ha",
+    "População 200.000 plantas/ha, espaçamento 50 cm, PMS 25 g, germinação 80%, pureza 100%, perda a campo 20%.",
+    "15,6 sementes por metro.",
+    "Faixa de referência: 6–9 kg/ha.",
+    "Estimativa de apoio; não substitui a recomendação de um engenheiro agrônomo.",
+  ].join("\n")
+);
+assert.equal(
+  seedingSummaryText({ cultureLabel: "Cultura Teste", input: base, result: calculateSeeding({ ...base, pms: 0 }), range: null }),
+  "",
+  "sem resultado não há o que copiar"
+);
+assert.ok(
+  !seedingSummaryText({ cultureLabel: "Cultura Teste", input: base, result: seeding, range: null }).includes("Faixa"),
+  "sem faixa, o texto não inventa uma"
+);
 
 console.log("technicalAssistant.test.ts: ok");
