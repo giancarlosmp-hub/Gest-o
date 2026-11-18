@@ -1898,6 +1898,15 @@ gerente e diretor, não há restrição. Hoje há uma única empresa em operaç�
 gestão de um lesse cliente e linha do tempo do outro pelo ID. Corrigir junto com o isolamento de dados (TD-ER-004),
 com testes negativos entre tenants nas duas rotas.
 
+### TD-TECHNICAL-CALC-PMS — calculadora sem PMS padrão não calcula
+
+**Prioridade média, próximo PR do Assistente Técnico.** O Catálogo Técnico preenchido com fonte
+(`apps/api/src/scripts/data/technicalCatalog.json`) deixa o PMS vazio onde não há fonte, porque ele depende do lote e
+da cultivar (soja, milho, feijão, sorgo, aveias, centeio, nabo, crotalárias e outras). Sem PMS, a Calculadora de
+Semeadura não mostra kg/ha. Ajuste de tela: quando a cultura não tem PMS padrão, a calculadora pede "Informe o PMS do
+lote (peso de 1.000 sementes, na etiqueta ou no laudo)" no campo PMS, em vez de não calcular, e calcula assim que o
+valor é digitado. Com o arquivo atual, só trigo e triticale têm todos os padrões para a conta.
+
 ### TD-VPS-TAILSCALE-DEPENDENCY — ERP e DNS dos containers dependem do Tailscale da VPS
 
 **Prioridade alta.** A integração com o ERP (`ULTRAFV3_BASE_URL`) passa pelo Tailscale da VPS, e o DNS dos
