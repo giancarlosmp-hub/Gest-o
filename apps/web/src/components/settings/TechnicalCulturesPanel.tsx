@@ -9,7 +9,7 @@ const extractFriendlyCultureError = (error: unknown) => {
   const normalized = message.toLowerCase();
 
   if (normalized.includes("slug") && (normalized.includes("já") || normalized.includes("duplicate") || normalized.includes("exists"))) {
-    return "Slug já existente. Escolha outro identificador para a cultura.";
+    return "Já existe uma cultura com este código. Escolha outro.";
   }
 
   if (normalized.includes("nome da cultura") || normalized.includes("label") || normalized.includes("nome")) {
@@ -152,12 +152,12 @@ export default function TechnicalCulturesPanel() {
 
   const save = async () => {
     if (isDegradedMode) {
-      toast.error("Catálogo em modo degradado. Salvar está bloqueado até reconectar com a API.");
+      toast.error("Sem conexão com o servidor. Não é possível salvar agora; tente de novo em instantes.");
       return;
     }
 
     if (!form.label.trim() || !form.slug.trim() || !form.category.trim()) {
-      toast.error("Preencha nome, slug e categoria.");
+      toast.error("Preencha nome, código e categoria.");
       return;
     }
 
@@ -205,11 +205,11 @@ export default function TechnicalCulturesPanel() {
       const persisted = refreshed?.some((item) => item.id === response.data.id);
 
       if (!persisted) {
-        toast.error("Não foi possível confirmar a persistência na API após salvar. Tente recarregar.");
+        toast.error("Não foi possível confirmar se a cultura foi salva. Recarregue a página e confira.");
         return;
       }
 
-      toast.success("Cultura salva com sucesso.");
+      toast.success("Cultura salva.");
       setSaveSuccess(true);
       setEditing(null);
       setIsFormOpen(false);
@@ -236,13 +236,13 @@ export default function TechnicalCulturesPanel() {
 
       {isDegradedMode ? (
         <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          Modo degradado ativo: sem persistência confiável na API. A edição foi bloqueada até a conexão ser restabelecida.
+          Sem conexão com o servidor. A edição fica bloqueada até a conexão voltar.
         </div>
       ) : null}
 
       {saveSuccess ? (
         <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
-          Persistência confirmada na API. Dados sincronizados com o backend.
+          Alterações salvas.
         </div>
       ) : null}
 
@@ -271,8 +271,8 @@ export default function TechnicalCulturesPanel() {
                       <th className="px-3 py-2.5 font-semibold">Nome</th>
                       <th className="px-3 py-2.5 font-semibold">Categoria</th>
                       <th className="px-3 py-2.5 font-semibold">Ativo</th>
-                      <th className="px-3 py-2.5 font-semibold">kg/ha min</th>
-                      <th className="px-3 py-2.5 font-semibold">kg/ha max</th>
+                      <th className="px-3 py-2.5 font-semibold">kg/ha mín.</th>
+                      <th className="px-3 py-2.5 font-semibold">kg/ha máx.</th>
                       <th className="px-3 py-2.5 font-semibold">Ações</th>
                     </tr>
                   </thead>
@@ -292,7 +292,7 @@ export default function TechnicalCulturesPanel() {
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-3">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{editing ? "Modo edição" : "Modo criação"}</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{editing ? "Edição" : "Cadastro"}</p>
               <h4 className="text-sm font-semibold text-slate-900">{editing ? `Editando cultura: ${editing.label}` : "Nova cultura"}</h4>
             </div>
             <button type="button" className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700" onClick={() => openEditor()}>
@@ -303,8 +303,8 @@ export default function TechnicalCulturesPanel() {
           <div className="max-h-[56vh] space-y-4 overflow-y-auto pr-1">
           <div className="grid gap-3 md:grid-cols-2">
             <label className="text-xs font-medium text-slate-700">
-              Slug
-              <input className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" value={form.slug} onChange={(e) => setForm((prev) => ({ ...prev, slug: e.target.value.toLowerCase().replace(/\s+/g, "-") }))} />
+              Código (sem espaços)
+              <input className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" placeholder="ex.: aveia-preta" value={form.slug} onChange={(e) => setForm((prev) => ({ ...prev, slug: e.target.value.toLowerCase().replace(/\s+/g, "-") }))} />
             </label>
 
             <label className="text-xs font-medium text-slate-700">
@@ -343,7 +343,7 @@ export default function TechnicalCulturesPanel() {
             </label>
 
             <label className="text-xs font-medium text-slate-700">
-              PMS padrão
+              PMS padrão (g, peso de 1.000 sementes)
               <input className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" value={form.pmsDefault ?? ""} onChange={(e) => setForm((prev) => ({ ...prev, pmsDefault: toNumber(e.target.value) }))} />
             </label>
 

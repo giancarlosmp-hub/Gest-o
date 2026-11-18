@@ -127,9 +127,9 @@ export default function AssistenteTecnico() {
 
         setCultures(CULTURE_FALLBACKS);
         setFallbackMessage(
-          "Não foi possível carregar o catálogo da API. Exibindo catálogo local temporário."
+          "Não foi possível carregar as culturas agora. Mostrando uma lista reduzida; recarregue a página para tentar de novo."
         );
-        toast.warning("Catálogo temporário ativo. Verifique conexão com a API.");
+        toast.warning("Sem conexão com o servidor: lista reduzida de culturas.");
       } finally {
         if (mounted) setLoading(false);
       }
