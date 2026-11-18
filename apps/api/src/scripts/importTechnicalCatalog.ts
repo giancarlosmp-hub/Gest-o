@@ -7,7 +7,11 @@
  *   - nunca apaga cultura e nunca muda isActive de cultura existente (cultura nova nasce ativa);
  *   - grava label, category, kg/ha mín./máx., população, espaçamento, PMS, germinação, pureza,
  *     observações (notes) e faixas por objetivo (goalsJson); campo null no arquivo apaga o valor;
- *   - todo número do arquivo tem fonte; campo vazio tem motivo (o arquivo é recusado sem isso).
+ *   - todo número do arquivo tem fonte; campo vazio tem motivo (o arquivo é recusado sem isso);
+ *   - campo marcado "manter" (valor anterior plausível, sem fonte confirmada) não é gravado: fica o
+ *     valor que já está no banco. O "value" dele é o valor anterior conhecido, usado só na revisão, e
+ *     as observações da cultura precisam dizer "valor anterior, sem fonte confirmada". O mesmo vale
+ *     para objetivos em "manterObjetivos" dentro de goalsJson.
  *
  * Uso no container da API (compilado em dist/scripts). O tsc não copia o .json para dist: passe o
  * arquivo com --file (o padrão é o caminho ao lado deste script, que vale ao rodar com tsx).
@@ -64,16 +68,48 @@ export type CulturePayload = {
   goalsJson: GoalRanges;
 };
 
-type SourcedValue = { value: unknown; sources?: unknown; detail?: unknown; reason?: unknown };
+/** Cultura lida do arquivo: o payload (com os valores anteriores nos campos mantidos) e o que é mantido. */
+export type CatalogEntry = CulturePayload & {
+  /** Campos numéricos que o import não grava (fica o valor do banco). */
+  kept: NumericField[];
+  /** Objetivos de goalsJson que o import não grava (fica a faixa do banco, se houver). */
+  keptGoals: string[];
+};
+
+export const KEPT_NOTE = "valor anterior, sem fonte confirmada";
+
+type SourcedValue = { value: unknown; sources?: unknown; detail?: unknown; reason?: unknown; manter?: unknown };
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 const nonEmptyText = (value: unknown): value is string => typeof value === "string" && value.trim().length > 0;
 const GOAL_KEY = /^[a-z0-9_-]+$/;
 
-/** Confere um campo: com valor, exige fonte(s) existente(s) e detalhe; vazio, exige motivo. */
+function parseGoalRanges(slug: string, raw: Record<string, unknown>): GoalRanges {
+  const goals: GoalRanges = {};
+  for (const [key, range] of Object.entries(raw)) {
+    if (!GOAL_KEY.test(key)) throw new Error(`${slug}: objetivo com chave fora do padrão (${key}).`);
+    if (!isRecord(range) || typeof range.min !== "number" || typeof range.max !== "number" || range.min < 0 || range.max < range.min) {
+      throw new Error(`${slug}: faixa inválida no objetivo ${key}.`);
+    }
+    goals[key] = { min: range.min, max: range.max };
+  }
+  return goals;
+}
+
+/**
+ * Confere um campo: com valor, exige fonte(s) existente(s) e detalhe; vazio, exige motivo; mantido
+ * (manter: true), exige o valor anterior e o motivo, sem fonte.
+ */
 function checkSourced(slug: string, field: string, raw: unknown, sourceIds: Set<string>): SourcedValue {
   if (!isRecord(raw) || !("value" in raw)) throw new Error(`${slug}: campo ${field} ausente ou sem "value".`);
   const entry = raw as SourcedValue;
+  if (entry.manter !== undefined) {
+    if (entry.manter !== true || field === "goalsJson") throw new Error(`${slug}: campo ${field} com "manter" inválido.`);
+    if (entry.value === null) throw new Error(`${slug}: campo ${field} mantido sem o valor anterior.`);
+    if (entry.sources !== undefined) throw new Error(`${slug}: campo ${field} mantido não leva fonte (é valor sem fonte confirmada).`);
+    if (!nonEmptyText(entry.reason)) throw new Error(`${slug}: campo ${field} mantido sem motivo.`);
+    return entry;
+  }
   const empty = entry.value === null || (isRecord(entry.value) && Object.keys(entry.value).length === 0);
   if (empty) {
     if (!nonEmptyText(entry.reason)) throw new Error(`${slug}: campo ${field} vazio sem motivo.`);
@@ -88,7 +124,7 @@ function checkSourced(slug: string, field: string, raw: unknown, sourceIds: Set<
 }
 
 /** Lê e valida o arquivo de dados; devolve o que será gravado por cultura. */
-export function parseCatalogFile(content: string): CulturePayload[] {
+export function parseCatalogFile(content: string): CatalogEntry[] {
   const catalog = JSON.parse(content) as unknown;
   if (!isRecord(catalog) || catalog.format !== CATALOG_FORMAT) throw new Error("Arquivo do catálogo em formato inesperado.");
   if (!isRecord(catalog.fontes)) throw new Error("Arquivo do catálogo sem fontes.");
@@ -115,37 +151,46 @@ export function parseCatalogFile(content: string): CulturePayload[] {
     for (const key of Object.keys(campos)) if (!known.has(key)) throw new Error(`${slug}: campo desconhecido ${key}.`);
 
     const numbers = {} as Record<NumericField, number | null>;
+    const kept: NumericField[] = [];
     for (const field of NUMERIC_FIELDS) {
       const entry = checkSourced(slug, field, campos[field], sourceIds);
       if (!(entry.value === null || (typeof entry.value === "number" && Number.isFinite(entry.value)))) throw new Error(`${slug}: ${field} não é número.`);
       numbers[field] = entry.value as number | null;
+      if (entry.manter === true) kept.push(field);
     }
-    const goalsEntry = checkSourced(slug, "goalsJson", campos.goalsJson, sourceIds);
+    if (kept.includes("defaultKgHaMin") !== kept.includes("defaultKgHaMax")) throw new Error(`${slug}: kg/ha mínimo e máximo mantidos juntos ou nenhum.`);
+    const goalsEntry = checkSourced(slug, "goalsJson", campos.goalsJson, sourceIds) as SourcedValue & { manterObjetivos?: unknown; manterMotivo?: unknown };
     if (!isRecord(goalsEntry.value)) throw new Error(`${slug}: goalsJson precisa ser um objeto.`);
-    const goalsJson: GoalRanges = {};
-    for (const [key, range] of Object.entries(goalsEntry.value)) {
-      if (!GOAL_KEY.test(key)) throw new Error(`${slug}: objetivo com chave fora do padrão (${key}).`);
-      if (!isRecord(range) || typeof range.min !== "number" || typeof range.max !== "number" || range.min < 0 || range.max < range.min) {
-        throw new Error(`${slug}: faixa inválida no objetivo ${key}.`);
+    const goalsJson = parseGoalRanges(slug, goalsEntry.value);
+    let keptGoals: string[] = [];
+    if (goalsEntry.manterObjetivos !== undefined) {
+      if (!isRecord(goalsEntry.manterObjetivos) || !Object.keys(goalsEntry.manterObjetivos).length) throw new Error(`${slug}: manterObjetivos vazio ou inválido.`);
+      if (!nonEmptyText(goalsEntry.manterMotivo)) throw new Error(`${slug}: manterObjetivos sem motivo.`);
+      const previousGoals = parseGoalRanges(slug, goalsEntry.manterObjetivos);
+      keptGoals = Object.keys(previousGoals);
+      for (const key of keptGoals) {
+        if (key in goalsJson) throw new Error(`${slug}: objetivo ${key} com fonte e mantido ao mesmo tempo.`);
+        goalsJson[key] = previousGoals[key];
       }
-      goalsJson[key] = { min: range.min, max: range.max };
     }
 
     if ((numbers.defaultKgHaMin === null) !== (numbers.defaultKgHaMax === null)) throw new Error(`${slug}: kg/ha mínimo e máximo devem vir juntos.`);
     if (raw.category === "Forrageiras" && numbers.populationTargetDefault !== null) throw new Error(`${slug}: forrageira não leva população (plantas/ha).`);
+    const notes = typeof raw.notes === "string" && raw.notes.trim() ? raw.notes.trim() : null;
+    if ((kept.length || keptGoals.length) && !notes?.includes(KEPT_NOTE)) throw new Error(`${slug}: campo mantido sem a observação "${KEPT_NOTE}".`);
 
     const payload: CulturePayload = {
       slug,
       label: raw.label.trim(),
       category: raw.category as string,
       ...numbers,
-      notes: typeof raw.notes === "string" && raw.notes.trim() ? raw.notes.trim() : null,
+      notes,
       goalsJson,
     };
     // Mesma validação da tela de Configurações (shared): faixa, limites de 0 a 100 etc.
     const validated = cultureCatalogSchema.safeParse({ ...payload, isActive: true, tags: [] });
     if (!validated.success) throw new Error(`${slug}: ${validated.error.issues[0]?.message ?? "dados inválidos"}.`);
-    return payload;
+    return { ...payload, kept, keptGoals };
   });
 }
 
@@ -161,15 +206,22 @@ export type ReviewResult = {
   conferidas: { slug: string; kgHa: number; faixa: string; dentro: boolean; objetivos: Record<string, boolean> }[];
   semConta: { slug: string; faltando: string[] }[];
   alertas: { slug: string; mensagem: string }[];
+  /** Campos com valor anterior sem fonte confirmada (a revisão usa o valor anterior conhecido). */
+  mantidosSemFonte: Record<string, string[]>;
 };
+
+const keptOf = (item: CulturePayload | CatalogEntry) => ("kept" in item ? item.kept : []);
+const keptGoalsOf = (item: CulturePayload | CatalogEntry) => ("keptGoals" in item ? item.keptGoals : []);
 
 const round2 = (value: number) => Math.round(value * 100) / 100;
 
 /** Roda a fórmula da calculadora com os padrões propostos e confere plausibilidade e unidades. */
 export function reviewCatalog(payloads: CulturePayload[]): ReviewResult {
-  const result: ReviewResult = { conferidas: [], semConta: [], alertas: [] };
+  const result: ReviewResult = { conferidas: [], semConta: [], alertas: [], mantidosSemFonte: {} };
   for (const item of payloads) {
     const alert = (mensagem: string) => result.alertas.push({ slug: item.slug, mensagem });
+    const keptFields = [...keptOf(item), ...keptGoalsOf(item).map((key) => `goalsJson.${key}`)];
+    if (keptFields.length) result.mantidosSemFonte[item.slug] = keptFields;
     for (const field of ["germinationDefault", "purityDefault"] as const) {
       const value = item[field];
       if (value !== null && (value <= 0 || value > 100)) alert(`${field} fora de 0–100%.`);
@@ -206,6 +258,7 @@ export function reviewCatalog(payloads: CulturePayload[]): ReviewResult {
       objetivos,
     });
     if (general && !inside(general)) alert(`conta da calculadora (${kgHa} kg/ha) fora da faixa ${general.min}–${general.max}.`);
+    for (const key of keptGoalsOf(item)) if (!objetivos[key]) alert(`conta da calculadora (${kgHa} kg/ha) fora da faixa mantida do objetivo ${key}.`);
   }
   return result;
 }
@@ -235,6 +288,10 @@ export type ImportPlan = {
   toCreate: CulturePayload[];
   toUpdate: { row: CatalogRow; payload: CulturePayload; changed: WrittenField[] }[];
   unchanged: string[];
+  /** Por cultura existente: valor que fica no banco em cada campo mantido (null = vazio no banco). */
+  kept: Record<string, Record<string, number | { min: number; max: number } | null>>;
+  /** Campos mantidos cujo valor no banco difere do valor anterior conhecido do arquivo. */
+  keptDiffersFromFile: string[];
 };
 
 const canonical = (value: unknown): unknown => {
@@ -247,15 +304,46 @@ const sameValue = (a: unknown, b: unknown) => JSON.stringify(canonical(a ?? null
 export const fieldValues = (source: FieldValues | CatalogRow): FieldValues =>
   Object.fromEntries(WRITTEN_FIELDS.map((field) => [field, field === "goalsJson" ? canonical(source.goalsJson ?? {}) : source[field]])) as FieldValues;
 
-export function planImport(rows: CatalogRow[], payloads: CulturePayload[]): ImportPlan {
+const isGoalRange = (value: unknown): value is { min: number; max: number } =>
+  isRecord(value) && typeof value.min === "number" && typeof value.max === "number";
+
+/**
+ * O que de fato vai para o banco: campo mantido fica com o valor atual da linha (cultura nova: vazio);
+ * objetivo mantido fica com a faixa atual da linha, se houver.
+ */
+export function resolvePayload(entry: CulturePayload | CatalogEntry, row: CatalogRow | undefined): CulturePayload {
+  const { kept: _kept, keptGoals: _keptGoals, ...base } = entry as CatalogEntry;
+  const payload: CulturePayload = { ...base, goalsJson: { ...entry.goalsJson } };
+  for (const field of keptOf(entry)) payload[field] = row ? row[field] : null;
+  const rowGoals = row && isRecord(row.goalsJson) ? row.goalsJson : {};
+  for (const key of keptGoalsOf(entry)) {
+    const current = rowGoals[key];
+    if (isGoalRange(current)) payload.goalsJson[key] = { min: current.min, max: current.max };
+    else delete payload.goalsJson[key];
+  }
+  return payload;
+}
+
+export function planImport(rows: CatalogRow[], entries: (CulturePayload | CatalogEntry)[]): ImportPlan {
   const bySlug = new Map(rows.map((row) => [row.slug, row]));
-  const plan: ImportPlan = { toCreate: [], toUpdate: [], unchanged: [] };
-  for (const payload of payloads) {
-    const row = bySlug.get(payload.slug);
+  const plan: ImportPlan = { toCreate: [], toUpdate: [], unchanged: [], kept: {}, keptDiffersFromFile: [] };
+  for (const entry of entries) {
+    const row = bySlug.get(entry.slug);
+    const payload = resolvePayload(entry, row);
     if (!row) {
       plan.toCreate.push(payload);
       continue;
     }
+    const keptHere: Record<string, number | { min: number; max: number } | null> = {};
+    for (const field of keptOf(entry)) {
+      keptHere[field] = row[field];
+      if (!sameValue(row[field], entry[field])) plan.keptDiffersFromFile.push(`${row.slug}.${field}`);
+    }
+    for (const key of keptGoalsOf(entry)) {
+      keptHere[`goalsJson.${key}`] = payload.goalsJson[key] ?? null;
+      if (!sameValue(payload.goalsJson[key], entry.goalsJson[key])) plan.keptDiffersFromFile.push(`${row.slug}.goalsJson.${key}`);
+    }
+    if (Object.keys(keptHere).length) plan.kept[row.slug] = keptHere;
     const changed = WRITTEN_FIELDS.filter((field) => !sameValue(row[field], payload[field]));
     if (changed.length) plan.toUpdate.push({ row, payload, changed });
     else plan.unchanged.push(payload.slug);
@@ -276,6 +364,8 @@ export function summarizePlan(plan: ImportPlan) {
     novas: plan.toCreate.map((item) => item.slug),
     camposPorCultura: Object.fromEntries(plan.toUpdate.map((item) => [item.row.slug, item.changed])),
     mudancasDeCategoria: plan.toUpdate.filter((item) => item.changed.includes("category")).map((item) => item.row.slug),
+    mantidosSemFonte: plan.kept,
+    mantidosDiferentesDoArquivo: plan.keptDiffersFromFile,
   };
 }
 
@@ -321,7 +411,7 @@ const writeBackupFile = (backupDir: string, backup: BackupFile) => {
 
 export async function applyImport(
   runInTransaction: TransactionRunner,
-  payloads: CulturePayload[],
+  payloads: (CulturePayload | CatalogEntry)[],
   options: { expected: number; backupDir: string; now?: Date },
 ) {
   return runInTransaction(async (tx) => {

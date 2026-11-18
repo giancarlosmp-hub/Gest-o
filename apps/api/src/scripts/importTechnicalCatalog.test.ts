@@ -113,6 +113,37 @@ assert.deepEqual(review.conferidas[0].objetivos, { grao: false }, "objetivo grã
 assert.deepEqual(review.semConta.map((item) => item.slug), ["sem-pms", "forrageira"]);
 assert.deepEqual(review.alertas.map((item) => item.slug), ["fora", "forrageira"], "fora da faixa e PMS alto para forrageira");
 
+// Valor anterior mantido (sem fonte confirmada): validação e revisão.
+const KEPT_NOTES = { notes: "Faixa: valor anterior, sem fonte confirmada." };
+const kept = (value: unknown) => ({ value, manter: true, reason: "valor anterior, sem fonte confirmada" });
+{
+  const [entry] = parseCatalogFile(catalogText([
+    culture("mantida", KEPT_NOTES, {
+      defaultKgHaMin: kept(10),
+      defaultKgHaMax: kept(20),
+      goalsJson: { ...sourced({ silagem: { min: 14, max: 18 } }), manterObjetivos: { grao: { min: 12, max: 18 } }, manterMotivo: "valor anterior" },
+    }),
+  ]));
+  assert.deepEqual(entry.kept, ["defaultKgHaMin", "defaultKgHaMax"]);
+  assert.deepEqual(entry.keptGoals, ["grao"]);
+  assert.deepEqual(entry.goalsJson, { silagem: { min: 14, max: 18 }, grao: { min: 12, max: 18 } }, "revisão usa o valor anterior");
+  const keptReview = reviewCatalog([entry]);
+  assert.deepEqual(keptReview.mantidosSemFonte, { mantida: ["defaultKgHaMin", "defaultKgHaMax", "goalsJson.grao"] });
+  assert.deepEqual(keptReview.alertas, []);
+  // Objetivo mantido que não contém a conta (15,31 kg/ha) gera alerta.
+  const outside = parseCatalogFile(catalogText([
+    culture("objetivo-fora", KEPT_NOTES, { goalsJson: { ...sourced({}), reason: "x", manterObjetivos: { grao: { min: 20, max: 30 } }, manterMotivo: "valor anterior" } }),
+  ]));
+  assert.deepEqual(reviewCatalog(outside).alertas.map((item) => item.slug), ["objetivo-fora"]);
+}
+rejects([culture("cultura-a", {}, { pmsDefault: kept(60) })], /sem a observação/, "mantido sem a observação nas notas");
+rejects([culture("cultura-a", KEPT_NOTES, { pmsDefault: { ...kept(60), sources: ["FONTE-A"] } })], /não leva fonte/, "mantido com fonte");
+rejects([culture("cultura-a", KEPT_NOTES, { pmsDefault: kept(null) })], /sem o valor anterior/, "mantido sem valor anterior");
+rejects([culture("cultura-a", KEPT_NOTES, { pmsDefault: { value: 60, manter: true } })], /sem motivo/, "mantido sem motivo");
+rejects([culture("cultura-a", KEPT_NOTES, { defaultKgHaMin: kept(10) })], /mantidos juntos/, "só um lado da faixa mantido");
+rejects([culture("cultura-a", KEPT_NOTES, { goalsJson: { ...sourced({ grao: { min: 1, max: 2 } }), manterObjetivos: { grao: { min: 1, max: 2 } }, manterMotivo: "x" } })], /ao mesmo tempo/, "objetivo com fonte e mantido");
+rejects([culture("cultura-a", KEPT_NOTES, { goalsJson: { ...sourced({}), reason: "x", manterObjetivos: { grao: { min: 1, max: 2 } } } })], /sem motivo/, "objetivo mantido sem motivo");
+
 // ---------------------------------------------------------------------------------------------
 // Banco falso.
 type Store = Map<string, CatalogRow>;
@@ -194,6 +225,8 @@ assert.deepEqual(summarizePlan(plan), {
   novas: ["nova"],
   camposPorCultura: { muda: ["category", "pmsDefault", "goalsJson"] },
   mudancasDeCategoria: ["muda"],
+  mantidosSemFonte: {},
+  mantidosDiferentesDoArquivo: [],
 });
 assert.ok(!JSON.stringify(summarizePlan(plan)).includes("Observação"), "resumo sem textos");
 
@@ -270,6 +303,36 @@ assert.equal(summarizePlan(planImport([...store.values()], payloads)).expect, 0)
 }
 assert.throws(() => parseBackupFile(JSON.stringify({ format: BACKUP_FORMAT, updated: [{ slug: "x", before: {}, after: {} }], created: [] })), /incompleto/);
 assert.throws(() => parseBackupFile(JSON.stringify({ format: "outro", updated: [], created: [] })), /formato inesperado/);
+
+// Campo mantido: o import não grava; fica o valor do banco (mesmo diferente do arquivo).
+{
+  const keptPayloads = parseCatalogFile(catalogText([
+    culture("mantem", KEPT_NOTES, {
+      defaultKgHaMin: kept(10),
+      defaultKgHaMax: kept(20),
+      pmsDefault: empty(),
+      goalsJson: { ...sourced({ silagem: { min: 14, max: 18 } }), manterObjetivos: { grao: { min: 10, max: 15 }, pastejo: { min: 5, max: 9 } }, manterMotivo: "valor anterior" },
+    }),
+    culture("nova-mantida", KEPT_NOTES, { defaultKgHaMin: kept(10), defaultKgHaMax: kept(20) }),
+  ]));
+  const keptStore: Store = new Map([["mantem", rowFrom("mantem", { defaultKgHaMin: 11, defaultKgHaMax: 22, goalsJson: { grao: { min: 9, max: 14 }, silagem: { min: 1, max: 2 } } })]]);
+  const keptPlan = planImport([...keptStore.values()], keptPayloads);
+  assert.deepEqual(keptPlan.toUpdate.map((item) => [item.row.slug, item.changed]), [["mantem", ["pmsDefault", "notes", "goalsJson"]]], "faixa mantida não aparece como mudança");
+  const keptSummary = summarizePlan(keptPlan);
+  assert.deepEqual(keptSummary.mantidosSemFonte, { mantem: { defaultKgHaMin: 11, defaultKgHaMax: 22, "goalsJson.grao": { min: 9, max: 14 }, "goalsJson.pastejo": null } });
+  assert.deepEqual(keptSummary.mantidosDiferentesDoArquivo, ["mantem.defaultKgHaMin", "mantem.defaultKgHaMax", "mantem.goalsJson.grao", "mantem.goalsJson.pastejo"]);
+  const dir = mkdtempSync(join(tmpdir(), "technical-catalog-test-"));
+  await applyImport(inTransaction(keptStore), keptPayloads, { expected: 2, backupDir: dir });
+  const after = keptStore.get("mantem")!;
+  assert.equal(after.defaultKgHaMin, 11, "valor do banco mantido");
+  assert.equal(after.defaultKgHaMax, 22);
+  assert.equal(after.pmsDefault, null);
+  assert.deepEqual(after.goalsJson, { silagem: { min: 14, max: 18 }, grao: { min: 9, max: 14 } }, "objetivo mantido fica com a faixa do banco; sem faixa no banco, não é criado");
+  const created = keptStore.get("nova-mantida")!;
+  assert.equal(created.defaultKgHaMin, null, "cultura nova não recebe valor sem fonte");
+  assert.equal(created.defaultKgHaMax, null);
+  assert.equal(summarizePlan(planImport([...keptStore.values()], keptPayloads)).expect, 0, "segunda rodada sem mudanças");
+}
 
 // ---------------------------------------------------------------------------------------------
 // CLI.
