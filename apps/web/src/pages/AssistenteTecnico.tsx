@@ -6,7 +6,7 @@ import {
   fetchTechnicalCultures,
 } from "../lib/technicalCultures";
 import { getApiErrorMessage } from "../lib/apiError";
-import { calculateSeeding, calculateVc, parseDecimal } from "../lib/technicalAssistant";
+import { calculateSeeding, calculateVc, cultureSeedingDefaults, parseDecimal } from "../lib/technicalAssistant";
 
 const cardClass =
   "rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6";
@@ -122,47 +122,31 @@ export default function AssistenteTecnico() {
     [cultures, form.culturaId]
   );
 
-  // define cultura default quando carregar
+  // Ao escolher uma cultura (inclusive a primeira, ao carregar), todos os padrões dela substituem os
+  // valores da tela; a perda a campo é do usuário e fica como está.
+  const applyCultureDefaults = (culture: TechnicalCulture) => {
+    setForm((prev) => ({
+      ...prev,
+      culturaId: culture.id,
+      ...cultureSeedingDefaults(culture),
+    }));
+  };
+
   useEffect(() => {
     if (!cultures.length) return;
-
     if (!form.culturaId || !cultures.some((c) => c.id === form.culturaId)) {
-      const first = cultures[0];
-      setForm((prev) => ({ ...prev, culturaId: first.id }));
+      applyCultureDefaults(cultures[0]);
     }
   }, [cultures, form.culturaId]);
 
-  // autopreenche defaults da cultura na semeadura (só se campo estiver vazio)
-  useEffect(() => {
-    if (!selectedCulture) return;
+  const handleCultureChange = (cultureId: string) => {
+    const culture = cultures.find((c) => c.id === cultureId);
+    if (culture) applyCultureDefaults(culture);
+  };
 
-    setForm((prev) => ({
-      ...prev,
-      populacaoHa:
-        prev.populacaoHa ||
-        (selectedCulture.populationTargetDefault != null
-          ? String(selectedCulture.populationTargetDefault)
-          : ""),
-      espacamentoCm:
-        prev.espacamentoCm ||
-        (selectedCulture.rowSpacingCmDefault != null
-          ? String(selectedCulture.rowSpacingCmDefault)
-          : ""),
-      pms:
-        prev.pms ||
-        (selectedCulture.pmsDefault != null ? String(selectedCulture.pmsDefault) : ""),
-      germinacao:
-        prev.germinacao ||
-        (selectedCulture.germinationDefault != null
-          ? String(selectedCulture.germinationDefault)
-          : ""),
-      pureza:
-        prev.pureza ||
-        (selectedCulture.purityDefault != null
-          ? String(selectedCulture.purityDefault)
-          : ""),
-    }));
-  }, [selectedCulture]);
+  const restoreCultureDefaults = () => {
+    if (selectedCulture) applyCultureDefaults(selectedCulture);
+  };
 
   const results = useMemo(
     () =>
@@ -367,18 +351,26 @@ export default function AssistenteTecnico() {
 
       <div className="grid gap-4 xl:grid-cols-2">
         <article className={cardClass}>
-          <h2 className="text-base font-semibold text-slate-800">
-            Calculadora de Semeadura
-          </h2>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <h2 className="text-base font-semibold text-slate-800">
+              Calculadora de Semeadura
+            </h2>
+            <button
+              type="button"
+              onClick={restoreCultureDefaults}
+              disabled={!selectedCulture}
+              className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Restaurar padrões
+            </button>
+          </div>
 
           <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
             <label className="block text-sm text-slate-700">
               Cultura
               <select
                 value={form.culturaId}
-                onChange={(e) =>
-                  setForm((prev) => ({ ...prev, culturaId: e.target.value }))
-                }
+                onChange={(e) => handleCultureChange(e.target.value)}
                 className={inputClass}
               >
                 {cultures.map((culture) => (

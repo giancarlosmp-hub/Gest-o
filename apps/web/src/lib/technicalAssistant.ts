@@ -8,6 +8,27 @@ export function parseDecimal(value: string | null | undefined): number | null {
   return Number.isFinite(number) ? number : null;
 }
 
+type CultureSeedingDefaultsSource = {
+  populationTargetDefault: number | null;
+  rowSpacingCmDefault: number | null;
+  pmsDefault: number | null;
+  germinationDefault: number | null;
+  purityDefault: number | null;
+};
+
+const toFieldText = (value: number | null) => (value != null ? String(value) : "");
+
+/** Padrões da cultura para os campos da Calculadora de Semeadura (campo vazio quando a cultura não tem). */
+export function cultureSeedingDefaults(culture: CultureSeedingDefaultsSource) {
+  return {
+    populacaoHa: toFieldText(culture.populationTargetDefault),
+    espacamentoCm: toFieldText(culture.rowSpacingCmDefault),
+    pms: toFieldText(culture.pmsDefault),
+    germinacao: toFieldText(culture.germinationDefault),
+    pureza: toFieldText(culture.purityDefault),
+  };
+}
+
 export type SeedingInput = {
   populationHa: number;
   rowSpacingCm: number;

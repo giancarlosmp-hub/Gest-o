@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { calculateSeeding, calculateVc, parseDecimal } from "../src/lib/technicalAssistant";
+import { calculateSeeding, calculateVc, cultureSeedingDefaults, parseDecimal } from "../src/lib/technicalAssistant";
 
 // Contas do Assistente Técnico (src/lib/technicalAssistant.ts). Só culturas e lotes fictícios.
 const close = (actual: number, expected: number, message: string, tolerance = 0.005) =>
@@ -10,6 +10,16 @@ assert.equal(parseDecimal("12,5"), 12.5);
 assert.equal(parseDecimal(" 98 "), 98);
 assert.equal(parseDecimal(""), null);
 assert.equal(parseDecimal("abc"), null);
+
+// ---- Padrões da cultura: trocar de cultura substitui todos os campos, inclusive os já preenchidos ----
+const cultureA = { populationTargetDefault: 100000, rowSpacingCmDefault: 40, pmsDefault: 20, germinationDefault: 85, purityDefault: 97 };
+const cultureB = { populationTargetDefault: 300000, rowSpacingCmDefault: null, pmsDefault: 150, germinationDefault: null, purityDefault: 99 };
+assert.deepEqual(cultureSeedingDefaults(cultureA), { populacaoHa: "100000", espacamentoCm: "40", pms: "20", germinacao: "85", pureza: "97" });
+assert.deepEqual(
+  { ...cultureSeedingDefaults(cultureA), ...cultureSeedingDefaults(cultureB) },
+  { populacaoHa: "300000", espacamentoCm: "", pms: "150", germinacao: "", pureza: "99" },
+  "campo sem padrão na cultura nova fica vazio, não com o valor da anterior"
+);
 
 // ---- Semeadura ----
 // Lote fictício: 200.000 plantas/ha, 50 cm, PMS 25 g, germinação 80%, pureza 100%, sem perda.
