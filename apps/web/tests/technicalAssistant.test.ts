@@ -1,5 +1,14 @@
 import assert from "node:assert/strict";
-import { calculateSeeding, calculateVc, cultureSeedingDefaults, parseDecimal } from "../src/lib/technicalAssistant";
+import {
+  calculateSeeding,
+  calculateVc,
+  checkKgHaRange,
+  cultureGoalOptions,
+  cultureSeedingDefaults,
+  kgHaRangeMessage,
+  parseDecimal,
+  resolveKgHaRange,
+} from "../src/lib/technicalAssistant";
 
 // Contas do Assistente Técnico (src/lib/technicalAssistant.ts). Só culturas e lotes fictícios.
 const close = (actual: number, expected: number, message: string, tolerance = 0.005) =>
@@ -78,5 +87,47 @@ assert.equal(calculateVc({ ...vcBase, purity: null }).ready, false, "sem pureza 
 assert.deepEqual(calculateVc({ ...vcBase, purity: 120 }).errors, ["Pureza deve estar entre 0 e 100%."]);
 assert.deepEqual(calculateVc({ ...vcBase, physicalDose: -1 }).errors, ["As doses devem ser valores iguais ou maiores que zero."]);
 assert.equal(calculateVc({ ...vcBase, purity: 0 }).physicalDoseNeeded, null, "VC 0 não converte dose");
+
+// ---- Aviso de faixa ----
+const range = { min: 8, max: 18 };
+assert.deepEqual(checkKgHaRange(6.05, range), { status: "below", range });
+assert.deepEqual(checkKgHaRange(8, range), { status: "within", range }, "limite mínimo conta como dentro");
+assert.deepEqual(checkKgHaRange(18, range), { status: "within", range }, "limite máximo conta como dentro");
+assert.deepEqual(checkKgHaRange(7.996, range), { status: "within", range }, "compara o valor mostrado (8,00)");
+assert.deepEqual(checkKgHaRange(18.01, range), { status: "above", range });
+assert.equal(checkKgHaRange(null, range), null, "sem resultado não avisa");
+assert.equal(checkKgHaRange(0, range), null, "kg/ha 0 (campos faltando) não avisa");
+assert.deepEqual(checkKgHaRange(6, null), { status: "no_range" });
+assert.deepEqual(checkKgHaRange(null, null), { status: "no_range" }, "sem faixa avisa mesmo sem resultado");
+
+assert.equal(
+  kgHaRangeMessage({ status: "below", range }),
+  "Abaixo da faixa de referência (8–18 kg/ha). Confira PMS, população e perda a campo."
+);
+assert.equal(
+  kgHaRangeMessage({ status: "above", range: { min: 2.5, max: 4 } }),
+  "Acima da faixa de referência (2,5–4 kg/ha). Confira PMS, população e perda a campo."
+);
+assert.equal(kgHaRangeMessage({ status: "no_range" }), "Sem faixa de referência cadastrada para esta cultura.");
+assert.ok(!kgHaRangeMessage({ status: "no_range" }).includes("Configurações"), "texto do vendedor não manda ajustar Configurações");
+
+// ---- Objetivos (goalsJson) ----
+const fakeCulture = {
+  defaultKgHaMin: 8,
+  defaultKgHaMax: 18,
+  goalsJson: { grao: { min: 8, max: 12 }, silagem: { min: 12, max: 18 }, adubacao_verde: { min: 20, max: 30 }, quebrado: { min: 5, max: 2 } },
+};
+assert.deepEqual(
+  cultureGoalOptions(fakeCulture.goalsJson).map((option) => `${option.key}:${option.label}`),
+  ["grao:Grão", "silagem:Silagem", "adubacao_verde:Adubacao verde"],
+  "faixa inválida (máx < mín) fica de fora; chave desconhecida vira texto"
+);
+assert.deepEqual(cultureGoalOptions({}), []);
+assert.deepEqual(cultureGoalOptions(null), []);
+assert.deepEqual(resolveKgHaRange(fakeCulture, ""), { min: 8, max: 18 }, "sem objetivo usa a faixa geral");
+assert.deepEqual(resolveKgHaRange(fakeCulture, "grao"), { min: 8, max: 12 }, "objetivo troca a faixa");
+assert.deepEqual(resolveKgHaRange(fakeCulture, "inexistente"), { min: 8, max: 18 });
+assert.equal(resolveKgHaRange({ defaultKgHaMin: null, defaultKgHaMax: 10, goalsJson: {} }, ""), null, "faixa incompleta = sem faixa");
+assert.deepEqual(checkKgHaRange(10, resolveKgHaRange(fakeCulture, "silagem")), { status: "below", range: { min: 12, max: 18 } });
 
 console.log("technicalAssistant.test.ts: ok");

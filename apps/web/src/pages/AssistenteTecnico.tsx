@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import {
   CULTURE_FALLBACKS,
@@ -6,7 +7,18 @@ import {
   fetchTechnicalCultures,
 } from "../lib/technicalCultures";
 import { getApiErrorMessage } from "../lib/apiError";
-import { calculateSeeding, calculateVc, cultureSeedingDefaults, parseDecimal } from "../lib/technicalAssistant";
+import { useAuth } from "../context/AuthContext";
+import {
+  calculateSeeding,
+  calculateVc,
+  checkKgHaRange,
+  cultureGoalOptions,
+  cultureSeedingDefaults,
+  formatKgHaRange,
+  kgHaRangeMessage,
+  parseDecimal,
+  resolveKgHaRange,
+} from "../lib/technicalAssistant";
 
 const cardClass =
   "rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6";
@@ -75,7 +87,11 @@ function formatValue(value: number, digits = 2) {
   });
 }
 
+const TECHNICAL_CATALOG_SETTINGS_PATH = "/configurações?section=catalogo-tecnico";
+
 export default function AssistenteTecnico() {
+  const { user } = useAuth();
+  const canConfigureCatalog = user?.role === "diretor" || user?.role === "gerente";
   const [form, setForm] = useState<SemeaduraForm>(initialForm);
 
   const [cultures, setCultures] = useState<TechnicalCulture[]>([]);
@@ -128,6 +144,7 @@ export default function AssistenteTecnico() {
     setForm((prev) => ({
       ...prev,
       culturaId: culture.id,
+      objetivo: "",
       ...cultureSeedingDefaults(culture),
     }));
   };
@@ -160,6 +177,23 @@ export default function AssistenteTecnico() {
       }),
     [form]
   );
+
+  const goalOptions = useMemo(
+    () => cultureGoalOptions(selectedCulture?.goalsJson),
+    [selectedCulture]
+  );
+
+  const referenceRange = useMemo(
+    () => (selectedCulture ? resolveKgHaRange(selectedCulture, form.objetivo) : null),
+    [selectedCulture, form.objetivo]
+  );
+
+  const rangeCheck = useMemo(
+    () => (selectedCulture ? checkKgHaRange(results.ready ? results.kgHa : null, referenceRange) : null),
+    [selectedCulture, results, referenceRange]
+  );
+
+  const selectedGoalLabel = goalOptions.find((option) => option.key === form.objetivo)?.label ?? "";
 
   // ======== VC (Valor Cultural) ========
 
@@ -381,16 +415,30 @@ export default function AssistenteTecnico() {
               </select>
             </label>
 
-            <label className="block text-sm text-slate-700">
-              Objetivo (opcional)
-              <input
-                value={form.objetivo}
-                onChange={(e) =>
-                  setForm((prev) => ({ ...prev, objetivo: e.target.value }))
-                }
-                className={inputClass}
-              />
-            </label>
+            {goalOptions.length ? (
+              <label className="block text-sm text-slate-700">
+                Objetivo
+                <select
+                  value={form.objetivo}
+                  onChange={(e) =>
+                    setForm((prev) => ({ ...prev, objetivo: e.target.value }))
+                  }
+                  className={inputClass}
+                >
+                  <option value="">
+                    Geral
+                    {selectedCulture?.defaultKgHaMin != null && selectedCulture?.defaultKgHaMax != null
+                      ? ` (${formatKgHaRange({ min: selectedCulture.defaultKgHaMin, max: selectedCulture.defaultKgHaMax })})`
+                      : ""}
+                  </option>
+                  {goalOptions.map((option) => (
+                    <option key={option.key} value={option.key}>
+                      {option.label} ({formatKgHaRange(option.range)})
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
 
             <label className="block text-sm text-slate-700">
               População desejada (plantas/ha)
@@ -494,6 +542,29 @@ export default function AssistenteTecnico() {
               </p>
             </div>
           </div>
+
+          {rangeCheck ? (
+            <p
+              role={rangeCheck.status === "below" || rangeCheck.status === "above" ? "alert" : undefined}
+              className={`mt-4 rounded-lg border px-3 py-2 text-sm ${
+                rangeCheck.status === "within"
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                  : rangeCheck.status === "no_range"
+                    ? "border-slate-200 bg-slate-50 text-slate-700"
+                    : "border-amber-300 bg-amber-50 text-amber-900"
+              }`}
+            >
+              {kgHaRangeMessage(rangeCheck)}
+              {rangeCheck.status === "no_range" && canConfigureCatalog ? (
+                <>
+                  {" "}
+                  <Link to={TECHNICAL_CATALOG_SETTINGS_PATH} className="font-medium underline">
+                    Cadastrar em Configurações → Catálogo Técnico
+                  </Link>
+                </>
+              ) : null}
+            </p>
+          ) : null}
         </article>
 
         <article className={cardClass}>
@@ -505,15 +576,26 @@ export default function AssistenteTecnico() {
             {selectedCulture?.label || "Selecione uma cultura"}
           </p>
 
-          {selectedCulture?.defaultKgHaMin != null &&
-          selectedCulture?.defaultKgHaMax != null ? (
-            <p className="mt-3 text-2xl font-bold text-slate-900">
-              {formatValue(selectedCulture.defaultKgHaMin, 0)}–
-              {formatValue(selectedCulture.defaultKgHaMax, 0)} kg/ha
-            </p>
+          {referenceRange ? (
+            <>
+              <p className="mt-3 text-2xl font-bold text-slate-900">
+                {formatKgHaRange(referenceRange)}
+              </p>
+              {selectedGoalLabel ? (
+                <p className="text-xs text-slate-500">Objetivo: {selectedGoalLabel}</p>
+              ) : null}
+            </>
           ) : (
-            <p className="mt-3 text-sm font-medium text-amber-700">
-              Não configurado — ajuste em Configurações.
+            <p className="mt-3 text-sm font-medium text-slate-700">
+              Sem faixa de referência cadastrada.
+              {canConfigureCatalog ? (
+                <>
+                  {" "}
+                  <Link to={TECHNICAL_CATALOG_SETTINGS_PATH} className="text-emerald-700 underline">
+                    Cadastrar em Configurações
+                  </Link>
+                </>
+              ) : null}
             </p>
           )}
 

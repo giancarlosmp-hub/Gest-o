@@ -130,3 +130,88 @@ export function calculateVc(input: VcInput): VcResult {
     physicalDoseNeeded: spvBase != null && vc > 0 ? spvBase / (vc / 100) : null,
   };
 }
+
+// ---- Faixa de referência (kg/ha) ----
+
+export type KgHaRange = { min: number; max: number };
+
+export type GoalOption = { key: string; label: string; range: KgHaRange };
+
+// As chaves do goalsJson chegam normalizadas, sem acento (normalizeGoalKey na API).
+const GOAL_LABELS: Record<string, string> = {
+  grao: "Grão",
+  silagem: "Silagem",
+  cobertura: "Cobertura",
+  pastejo: "Pastejo",
+};
+
+export function goalLabel(key: string) {
+  const known = GOAL_LABELS[key];
+  if (known) return known;
+  const text = key.replace(/[_-]+/g, " ").trim();
+  return text ? text.charAt(0).toUpperCase() + text.slice(1) : key;
+}
+
+const isValidRange = (range: unknown): range is KgHaRange => {
+  if (!range || typeof range !== "object") return false;
+  const { min, max } = range as { min?: unknown; max?: unknown };
+  return typeof min === "number" && typeof max === "number" && Number.isFinite(min) && Number.isFinite(max) && min >= 0 && max >= min;
+};
+
+/** Objetivos com faixa válida no goalsJson da cultura, na ordem cadastrada. */
+export function cultureGoalOptions(goalsJson: Record<string, unknown> | null | undefined): GoalOption[] {
+  return Object.entries(goalsJson ?? {})
+    .filter((entry): entry is [string, KgHaRange] => isValidRange(entry[1]))
+    .map(([key, range]) => ({ key, label: goalLabel(key), range: { min: range.min, max: range.max } }));
+}
+
+export function cultureDefaultRange(culture: { defaultKgHaMin: number | null; defaultKgHaMax: number | null }): KgHaRange | null {
+  const range = { min: culture.defaultKgHaMin, max: culture.defaultKgHaMax };
+  return isValidRange(range) ? range : null;
+}
+
+/** Faixa usada no aviso: a do objetivo escolhido, se houver; senão a faixa geral da cultura. */
+export function resolveKgHaRange(
+  culture: { defaultKgHaMin: number | null; defaultKgHaMax: number | null; goalsJson?: Record<string, unknown> | null },
+  goalKey: string
+): KgHaRange | null {
+  const goal = goalKey ? cultureGoalOptions(culture.goalsJson).find((option) => option.key === goalKey) : undefined;
+  return goal ? goal.range : cultureDefaultRange(culture);
+}
+
+const formatRangeNumber = (value: number) =>
+  value.toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 1 });
+
+export function formatKgHaRange(range: KgHaRange) {
+  return `${formatRangeNumber(range.min)}–${formatRangeNumber(range.max)} kg/ha`;
+}
+
+export type KgHaRangeCheck =
+  | { status: "no_range" }
+  | { status: "below" | "within" | "above"; range: KgHaRange };
+
+/**
+ * Compara o kg/ha calculado com a faixa. Compara o valor arredondado a 2 casas, o mesmo que a tela
+ * mostra. Sem resultado calculado (kgHa null) não há o que comparar.
+ */
+export function checkKgHaRange(kgHa: number | null, range: KgHaRange | null): KgHaRangeCheck | null {
+  if (!range) return { status: "no_range" };
+  if (kgHa == null || !Number.isFinite(kgHa) || kgHa <= 0) return null;
+  const shown = Math.round(kgHa * 100) / 100;
+  if (shown < range.min) return { status: "below", range };
+  if (shown > range.max) return { status: "above", range };
+  return { status: "within", range };
+}
+
+export function kgHaRangeMessage(check: KgHaRangeCheck) {
+  switch (check.status) {
+    case "no_range":
+      return "Sem faixa de referência cadastrada para esta cultura.";
+    case "below":
+      return `Abaixo da faixa de referência (${formatKgHaRange(check.range)}). Confira PMS, população e perda a campo.`;
+    case "above":
+      return `Acima da faixa de referência (${formatKgHaRange(check.range)}). Confira PMS, população e perda a campo.`;
+    case "within":
+      return `Dentro da faixa de referência (${formatKgHaRange(check.range)}).`;
+  }
+}
