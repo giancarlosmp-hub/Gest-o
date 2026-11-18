@@ -6,6 +6,7 @@ import {
   fetchTechnicalCultures,
 } from "../lib/technicalCultures";
 import { getApiErrorMessage } from "../lib/apiError";
+import { calculateSeeding, calculateVc, parseDecimal } from "../lib/technicalAssistant";
 
 const cardClass =
   "rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6";
@@ -60,15 +61,11 @@ const initialVcForm: VcForm = {
 const VC_STORAGE_KEY = "technical_assistant_vc_last";
 
 function parseNumber(value: string) {
-  const normalized = (value ?? "").replace(",", ".").trim();
-  const number = Number(normalized);
-  return Number.isFinite(number) ? number : 0;
+  return parseDecimal(value) ?? 0;
 }
 
 function parseOptionalNumber(value: string) {
-  if (!value?.trim()) return null;
-  const num = parseNumber(value);
-  return Number.isFinite(num) ? num : null;
+  return parseDecimal(value);
 }
 
 function formatValue(value: number, digits = 2) {
@@ -167,53 +164,18 @@ export default function AssistenteTecnico() {
     }));
   }, [selectedCulture]);
 
-  const results = useMemo(() => {
-    const populacaoHa = parseNumber(form.populacaoHa);
-    const espacamentoCm = parseNumber(form.espacamentoCm);
-    const pms = parseNumber(form.pms);
-    const germinacao = parseNumber(form.germinacao);
-    const pureza = parseNumber(form.pureza);
-    const correcaoCampo = parseNumber(form.correcaoCampo);
-
-    const plantasM2 = populacaoHa / 10000;
-    const fatorGerminacao = germinacao / 100;
-    const fatorPureza = pureza / 100;
-    const fatorCampo = 1 + correcaoCampo / 100;
-    const fatorQualidade = fatorGerminacao * fatorPureza;
-
-    if (
-      fatorQualidade <= 0 ||
-      fatorCampo <= 0 ||
-      espacamentoCm <= 0 ||
-      pms <= 0 ||
-      populacaoHa <= 0
-    ) {
-      return {
-        plantasM2,
-        sementesM2: 0,
-        sementesMetro: 0,
-        kgHa: 0,
-        kgHaFinal: 0,
-      };
-    }
-
-    const sementesNecessariasHa = populacaoHa / fatorQualidade;
-    const sementesCorrigidasHa = sementesNecessariasHa * fatorCampo;
-    const sementesM2 = sementesCorrigidasHa / 10000;
-    const sementesMetro = sementesM2 * (espacamentoCm / 100);
-
-    // PMS é peso de 1000 sementes em gramas.
-    // kg/ha = sementes corrigidas (ha) * PMS (g/1000 sementes) / 1.000.000
-    const kgHa = (sementesCorrigidasHa * pms) / 1000000;
-
-    return {
-      plantasM2,
-      sementesM2,
-      sementesMetro,
-      kgHa,
-      kgHaFinal: kgHa,
-    };
-  }, [form]);
+  const results = useMemo(
+    () =>
+      calculateSeeding({
+        populationHa: parseNumber(form.populacaoHa),
+        rowSpacingCm: parseNumber(form.espacamentoCm),
+        pms: parseNumber(form.pms),
+        germination: parseNumber(form.germinacao),
+        purity: parseNumber(form.pureza),
+        fieldCorrectionPercent: parseNumber(form.correcaoCampo),
+      }),
+    [form]
+  );
 
   // ======== VC (Valor Cultural) ========
 
@@ -271,66 +233,23 @@ export default function AssistenteTecnico() {
   };
 
   const vcComputed = useMemo(() => {
-    const pureza = parseOptionalNumber(vcForm.pureza);
-    const germinacao = parseOptionalNumber(vcForm.germinacao);
-    const sementesDuras = parseOptionalNumber(vcForm.sementesDuras) ?? 0;
-
-    const doseFisica = parseOptionalNumber(vcForm.doseFisica);
-    const doseSpv = parseOptionalNumber(vcForm.doseSpv);
-
-    const errors: string[] = [];
-
-    if (pureza != null && (pureza < 0 || pureza > 100))
-      errors.push("Pureza deve estar entre 0 e 100%.");
-
-    if (germinacao != null && (germinacao < 0 || germinacao > 100))
-      errors.push("Germinação deve estar entre 0 e 100%.");
-
-    if (vcForm.considerarSementesDuras && (sementesDuras < 0 || sementesDuras > 100))
-      errors.push("Sementes duras deve estar entre 0 e 100%.");
-
-    if ((doseFisica != null && doseFisica < 0) || (doseSpv != null && doseSpv < 0))
-      errors.push("As doses devem ser valores iguais ou maiores que zero.");
-
-    if (pureza == null || germinacao == null) {
-      return {
-        errors,
-        ready: false,
-        vc: 0,
-        fatorCorrecao: 0,
-        germinacaoEfetiva: 0,
-        doseSpvCalculada: null as number | null,
-        doseFisicaNecessaria: null as number | null,
-      };
-    }
-
-    const germinacaoEfetiva = vcForm.considerarSementesDuras
-      ? Math.min(100, germinacao + sementesDuras)
-      : germinacao;
-
-    const vc = (pureza * germinacaoEfetiva) / 100;
-    const fatorCorrecao = vc > 0 ? 100 / vc : 0;
-
-    // regra: se os dois preenchidos, usa o último editado como referência
-    const ambosPreenchidos = doseFisica != null && doseSpv != null;
-    const usarSpvComoFonte = ambosPreenchidos && vcForm.lastEditedDose === "spv";
-    const usarFisicaComoFonte = ambosPreenchidos && vcForm.lastEditedDose !== "spv";
-
-    const doseFisicaBase = usarSpvComoFonte ? null : doseFisica;
-    const doseSpvBase = usarFisicaComoFonte ? null : doseSpv;
-
-    const doseSpvCalculada = doseFisicaBase != null ? doseFisicaBase * (vc / 100) : null;
-    const doseFisicaNecessaria =
-      doseSpvBase != null && vc > 0 ? doseSpvBase / (vc / 100) : null;
-
+    const computed = calculateVc({
+      purity: parseOptionalNumber(vcForm.pureza),
+      germination: parseOptionalNumber(vcForm.germinacao),
+      hardSeeds: parseOptionalNumber(vcForm.sementesDuras),
+      considerHardSeeds: vcForm.considerarSementesDuras,
+      physicalDose: parseOptionalNumber(vcForm.doseFisica),
+      spvDose: parseOptionalNumber(vcForm.doseSpv),
+      lastEditedDose: vcForm.lastEditedDose,
+    });
     return {
-      errors,
-      ready: true,
-      vc,
-      fatorCorrecao,
-      germinacaoEfetiva,
-      doseSpvCalculada,
-      doseFisicaNecessaria,
+      errors: computed.errors,
+      ready: computed.ready,
+      vc: computed.vc,
+      fatorCorrecao: computed.correctionFactor,
+      germinacaoEfetiva: computed.effectiveGermination,
+      doseSpvCalculada: computed.spvDose,
+      doseFisicaNecessaria: computed.physicalDoseNeeded,
     };
   }, [vcForm]);
 
@@ -552,19 +471,19 @@ export default function AssistenteTecnico() {
             <div>
               <p className="text-xs uppercase text-slate-500">Plantas por m²</p>
               <p className="text-lg font-semibold">
-                {formatValue(results.plantasM2)}
+                {formatValue(results.plantsM2)}
               </p>
             </div>
             <div>
               <p className="text-xs uppercase text-slate-500">Sementes por m²</p>
               <p className="text-lg font-semibold">
-                {formatValue(results.sementesM2)}
+                {formatValue(results.seedsM2)}
               </p>
             </div>
             <div>
               <p className="text-xs uppercase text-slate-500">Sementes por metro</p>
               <p className="text-lg font-semibold">
-                {formatValue(results.sementesMetro)}
+                {formatValue(results.seedsPerMeter)}
               </p>
             </div>
             <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 sm:col-span-2 lg:col-span-1">
@@ -572,7 +491,7 @@ export default function AssistenteTecnico() {
                 kg/ha recomendado
               </p>
               <p className="mt-1 text-2xl font-bold leading-tight text-emerald-700 sm:text-3xl">
-                {formatValue(results.kgHaFinal)}
+                {formatValue(results.kgHa)}
               </p>
               <p className="text-sm font-semibold text-emerald-700">kg/ha</p>
             </div>
