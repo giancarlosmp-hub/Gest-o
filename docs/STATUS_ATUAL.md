@@ -1,3 +1,13 @@
+# Calculadora de Semeadura pede o PMS do lote — código pronto, aguardando merge — 19/11/2026
+
+- Cultura sem PMS, população, germinação ou pureza padrão: o campo fica destacado e pede o valor ("Informe o PMS do
+  lote (peso de 1.000 sementes, na etiqueta ou no laudo)", "Informe a população desejada (plantas/ha)", "Informe a
+  germinação / a pureza do lote (no laudo ou na etiqueta)"). A conta e o aviso de faixa saem assim que o valor é
+  digitado.
+- Sem espaçamento, o kg/ha sai mesmo assim; "sementes por metro" mostra "—" com a dica para informar o espaçamento.
+- Forrageiras continuam fora (modelo por categoria em outro PR). Só web, sem banco e sem migration. Detalhes em
+  `TD-TECHNICAL-CALC-PMS` ([TECH_DEBT.md](TECH_DEBT.md)).
+
 # Dono do cliente na sincronização UltraFV3 segue o campo Vendedor do ERP — código pronto, aguardando merge — 15/11/2026
 
 - Desde 13/10/2026 a sincronização de parceiros roda vendedor por vendedor, e o dono do cliente era o vendedor do

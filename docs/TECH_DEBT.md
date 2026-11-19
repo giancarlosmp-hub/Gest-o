@@ -1907,6 +1907,18 @@ Semeadura não mostra kg/ha. Ajuste de tela: quando a cultura não tem PMS padr�
 lote (peso de 1.000 sementes, na etiqueta ou no laudo)" no campo PMS, em vez de não calcular, e calcula assim que o
 valor é digitado. Com o arquivo atual, só trigo e triticale têm todos os padrões para a conta.
 
+**Resolvido no código em 19/11/2026, aguardando merge.** Só web (`apps/web/src/lib/technicalAssistant.ts`,
+`seedingFieldPrompts`). Cultura sem o padrão e campo vazio ou zerado: o campo fica destacado e pede o valor (PMS do
+lote, população desejada, germinação e pureza do lote). Assim que um valor é digitado, a conta e o aviso de faixa
+aparecem. O kg/ha não depende mais do espaçamento: sem ele, a conta sai e "sementes por metro" mostra "—" com a dica
+para informar o espaçamento. Germinação e pureza continuam obrigatórias. Enquanto falta valor, o kg/ha mostra "—".
+Restam:
+
+- **Forrageiras** (categoria `Forrageiras`) continuam fora: a tela não pede nada para elas e não calcula, porque a
+  fonte dá kg de SPV/ha. O modelo de conta por categoria fica para outro PR.
+- O pedido aparece só quando a cultura não tem o padrão. Campo apagado de cultura com padrão continua sem calcular e
+  sem pedido ("Restaurar padrões" devolve o valor).
+
 ### TD-VPS-TAILSCALE-DEPENDENCY — ERP e DNS dos containers dependem do Tailscale da VPS
 
 **Prioridade alta.** A integração com o ERP (`ULTRAFV3_BASE_URL`) passa pelo Tailscale da VPS, e o DNS dos
