@@ -19,6 +19,8 @@ import {
   kgHaRangeMessage,
   parseDecimal,
   resolveKgHaRange,
+  SEEDS_PER_METER_HINT,
+  seedingFieldPrompts,
   seedingSummaryText,
 } from "../lib/technicalAssistant";
 
@@ -31,8 +33,15 @@ const helpClass = "mt-1 block text-xs text-slate-500";
 // alguns aparelhos) e a conta lê com parseDecimal.
 const decimalInputProps = { type: "text", inputMode: "decimal", autoComplete: "off" } as const;
 
-const inputClass =
-  "mt-1 w-full max-w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-800 shadow-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200";
+const inputBaseClass =
+  "mt-1 w-full max-w-full rounded-lg border px-3 py-2.5 text-sm text-slate-800 shadow-sm outline-none transition focus:ring-2";
+
+const inputClass = `${inputBaseClass} border-slate-300 focus:border-emerald-500 focus:ring-emerald-200`;
+
+// Campo que a calculadora pede (a cultura não tem o padrão): destaque até um valor ser digitado.
+const promptInputClass = `${inputBaseClass} border-amber-400 bg-amber-50 focus:border-amber-500 focus:ring-amber-200`;
+
+const promptHelpClass = "mt-1 block text-xs font-medium text-amber-800";
 
 type SemeaduraForm = {
   culturaId: string;
@@ -184,6 +193,11 @@ export default function AssistenteTecnico() {
         fieldLossPercent: parseNumber(form.perdaCampo),
       }),
     [form]
+  );
+
+  const fieldPrompts = useMemo(
+    () => seedingFieldPrompts(selectedCulture, form),
+    [selectedCulture, form]
   );
 
   const goalOptions = useMemo(
@@ -499,9 +513,13 @@ export default function AssistenteTecnico() {
                 onChange={(e) =>
                   setForm((prev) => ({ ...prev, populacaoHa: e.target.value }))
                 }
-                className={inputClass}
+                className={fieldPrompts.populacaoHa ? promptInputClass : inputClass}
               />
-              <span className={helpClass}>Plantas estabelecidas por hectare.</span>
+              {fieldPrompts.populacaoHa ? (
+                <span className={promptHelpClass}>{fieldPrompts.populacaoHa}</span>
+              ) : (
+                <span className={helpClass}>Plantas estabelecidas por hectare.</span>
+              )}
             </label>
 
             <label className="block text-sm text-slate-700">
@@ -525,9 +543,13 @@ export default function AssistenteTecnico() {
                 onChange={(e) =>
                   setForm((prev) => ({ ...prev, pms: e.target.value }))
                 }
-                className={inputClass}
+                className={fieldPrompts.pms ? promptInputClass : inputClass}
               />
-              <span className={helpClass}>PMS = peso de 1.000 sementes, em gramas (do boletim do lote).</span>
+              {fieldPrompts.pms ? (
+                <span className={promptHelpClass}>{fieldPrompts.pms}</span>
+              ) : (
+                <span className={helpClass}>PMS = peso de 1.000 sementes, em gramas (do boletim do lote).</span>
+              )}
             </label>
 
             <label className="block text-sm text-slate-700">
@@ -538,9 +560,13 @@ export default function AssistenteTecnico() {
                 onChange={(e) =>
                   setForm((prev) => ({ ...prev, germinacao: e.target.value }))
                 }
-                className={inputClass}
+                className={fieldPrompts.germinacao ? promptInputClass : inputClass}
               />
-              <span className={helpClass}>Do boletim de análise do lote.</span>
+              {fieldPrompts.germinacao ? (
+                <span className={promptHelpClass}>{fieldPrompts.germinacao}</span>
+              ) : (
+                <span className={helpClass}>Do boletim de análise do lote.</span>
+              )}
             </label>
 
             <label className="block text-sm text-slate-700">
@@ -551,9 +577,13 @@ export default function AssistenteTecnico() {
                 onChange={(e) =>
                   setForm((prev) => ({ ...prev, pureza: e.target.value }))
                 }
-                className={inputClass}
+                className={fieldPrompts.pureza ? promptInputClass : inputClass}
               />
-              <span className={helpClass}>Do boletim de análise do lote.</span>
+              {fieldPrompts.pureza ? (
+                <span className={promptHelpClass}>{fieldPrompts.pureza}</span>
+              ) : (
+                <span className={helpClass}>Do boletim de análise do lote.</span>
+              )}
             </label>
 
             <label className="block text-sm text-slate-700">
@@ -586,21 +616,24 @@ export default function AssistenteTecnico() {
             <div>
               <p className="text-xs uppercase text-slate-500">Sementes por m²</p>
               <p className="text-lg font-semibold">
-                {formatValue(results.seedsM2)}
+                {results.ready ? formatValue(results.seedsM2) : "—"}
               </p>
             </div>
             <div>
               <p className="text-xs uppercase text-slate-500">Sementes por metro</p>
               <p className="text-lg font-semibold">
-                {formatValue(results.seedsPerMeter)}
+                {results.seedsPerMeter != null ? formatValue(results.seedsPerMeter) : "—"}
               </p>
+              {results.ready && results.seedsPerMeter == null ? (
+                <p className="text-xs text-slate-500">{SEEDS_PER_METER_HINT}</p>
+              ) : null}
             </div>
             <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 sm:col-span-2 lg:col-span-1">
               <p className="text-xs uppercase text-emerald-700">
                 kg/ha recomendado
               </p>
               <p className="mt-1 text-2xl font-bold leading-tight text-emerald-700 sm:text-3xl">
-                {formatValue(results.kgHa)}
+                {results.ready ? formatValue(results.kgHa) : "—"}
               </p>
               <p className="text-sm font-semibold text-emerald-700">kg/ha</p>
             </div>
