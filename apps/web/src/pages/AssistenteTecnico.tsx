@@ -8,6 +8,7 @@ import {
 } from "../lib/technicalCultures";
 import { getApiErrorMessage } from "../lib/apiError";
 import { useAuth } from "../context/AuthContext";
+import SeedingQuickAnswer from "../components/technical/SeedingQuickAnswer";
 import {
   calculateSeeding,
   kgHaMissingHint,
@@ -450,6 +451,8 @@ export default function AssistenteTecnico() {
           {fallbackMessage}
         </p>
       ) : null}
+
+      <SeedingQuickAnswer cultures={cultures} offline={Boolean(fallbackMessage)} />
 
       <div className="grid gap-4 xl:grid-cols-2">
         <article className={cardClass}>
