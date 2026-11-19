@@ -36,9 +36,9 @@ export type CultureFormInput = {
 };
 
 export const CULTURE_FALLBACKS: TechnicalCulture[] = [
-  { id: "fallback-sorgo", slug: "sorgo", label: "Sorgo", category: "Grãos", isActive: true, defaultKgHaMin: 8, defaultKgHaMax: 18, notes: "Fallback local ativo. Ajuste em Configurações.", pmsDefault: 28, germinationDefault: 85, purityDefault: 98, populationTargetDefault: 180000, rowSpacingCmDefault: 45, goalsJson: {}, tags: [] },
-  { id: "fallback-milho", slug: "milho", label: "Milho", category: "Grãos", isActive: true, defaultKgHaMin: 14, defaultKgHaMax: 24, notes: "Fallback local ativo. Ajuste em Configurações.", pmsDefault: 32, germinationDefault: 90, purityDefault: 98, populationTargetDefault: 65000, rowSpacingCmDefault: 50, goalsJson: {}, tags: [] },
-  { id: "fallback-milheto", slug: "milheto", label: "Milheto", category: "Cobertura", isActive: true, defaultKgHaMin: 10, defaultKgHaMax: 20, notes: "Fallback local ativo. Ajuste em Configurações.", pmsDefault: 8, germinationDefault: 80, purityDefault: 95, populationTargetDefault: 250000, rowSpacingCmDefault: 34, goalsJson: {}, tags: [] }
+  { id: "fallback-sorgo", slug: "sorgo", label: "Sorgo", category: "Grãos", isActive: true, defaultKgHaMin: 8, defaultKgHaMax: 18, notes: "Lista reduzida, usada sem conexão com o servidor. Confira os valores quando a conexão voltar.", pmsDefault: 28, germinationDefault: 85, purityDefault: 98, populationTargetDefault: 180000, rowSpacingCmDefault: 45, goalsJson: {}, tags: [] },
+  { id: "fallback-milho", slug: "milho", label: "Milho", category: "Grãos", isActive: true, defaultKgHaMin: 14, defaultKgHaMax: 24, notes: "Lista reduzida, usada sem conexão com o servidor. Confira os valores quando a conexão voltar.", pmsDefault: 32, germinationDefault: 90, purityDefault: 98, populationTargetDefault: 65000, rowSpacingCmDefault: 50, goalsJson: {}, tags: [] },
+  { id: "fallback-milheto", slug: "milheto", label: "Milheto", category: "Cobertura", isActive: true, defaultKgHaMin: 10, defaultKgHaMax: 20, notes: "Lista reduzida, usada sem conexão com o servidor. Confira os valores quando a conexão voltar.", pmsDefault: 8, germinationDefault: 80, purityDefault: 95, populationTargetDefault: 250000, rowSpacingCmDefault: 34, goalsJson: {}, tags: [] }
 ];
 
 type TechnicalCultureApiItem = {

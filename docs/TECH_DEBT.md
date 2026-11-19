@@ -1910,3 +1910,20 @@ VPS nem o DNS dos containers.
 
 Relacionado: incidente de 31/08/2026 (máquina do ERP fora do Tailscale) em `docs/DEPLOY_GUIDE.md`, seção "PR827
 final — histórico legado e incidente UltraFV3/Tailscale".
+
+### TD-TECHNICAL-CATALOG — Assistente Técnico e Catálogo Técnico
+
+**Prioridade média.** As correções rápidas da tela (padrões ao trocar de cultura, aviso de faixa, perda a campo,
+textos) já entraram. Fica pendente:
+
+- **`GET /technical-cultures` sem login** (`apps/api/src/app.ts`): fica antes do `authMiddleware` e devolve slug,
+  nome e categoria das culturas ativas. Nenhuma tela usa. Quem chama: `scripts/smoke/api-endpoints-smoke.mjs`
+  (CI, sem token, só aviso se falhar) e `apps/api/scripts/smoke.sh` (fora de scripts e workflows, falha se não vier
+  200). Proteger com login exige ajustar os dois smokes antes.
+- **Dados do catálogo:** padrões repetidos entre culturas, culturas sem faixa kg/ha e valores do seed e da lista
+  usada sem conexão (`CULTURE_FALLBACKS`) que a própria calculadora contradiz (ex.: PMS do milho muito abaixo do
+  usual). Preenchimento com fonte por número fica em PR próprio.
+- **Modelo por categoria:** forrageiras são recomendadas por pontos de VC ou kg de SPV por hectare, não por
+  plantas/ha; cobertura depende de solteira, mistura ou lanço. Hoje todas usam a mesma conta. Categoria é texto
+  livre e as faixas por objetivo (`goalsJson`) não têm edição na tela.
+- **Sem registro de quem alterou** o catálogo nem de onde veio cada número, e a tabela não tem `tenantId`.

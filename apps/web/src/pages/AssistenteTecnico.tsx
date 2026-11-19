@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import {
   CULTURE_FALLBACKS,
@@ -6,9 +7,29 @@ import {
   fetchTechnicalCultures,
 } from "../lib/technicalCultures";
 import { getApiErrorMessage } from "../lib/apiError";
+import { useAuth } from "../context/AuthContext";
+import {
+  calculateSeeding,
+  calculateVc,
+  checkKgHaRange,
+  cultureGoalOptions,
+  cultureSeedingDefaults,
+  fieldLossWarningMessage,
+  formatKgHaRange,
+  kgHaRangeMessage,
+  parseDecimal,
+  resolveKgHaRange,
+  seedingSummaryText,
+} from "../lib/technicalAssistant";
 
 const cardClass =
   "rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6";
+
+const helpClass = "mt-1 block text-xs text-slate-500";
+
+// Campos numéricos como texto com teclado decimal: aceita vírgula no celular (type="number" recusa em
+// alguns aparelhos) e a conta lê com parseDecimal.
+const decimalInputProps = { type: "text", inputMode: "decimal", autoComplete: "off" } as const;
 
 const inputClass =
   "mt-1 w-full max-w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-800 shadow-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200";
@@ -21,7 +42,7 @@ type SemeaduraForm = {
   pms: string;
   germinacao: string;
   pureza: string;
-  correcaoCampo: string;
+  perdaCampo: string;
 };
 
 const initialForm: SemeaduraForm = {
@@ -32,7 +53,7 @@ const initialForm: SemeaduraForm = {
   pms: "",
   germinacao: "",
   pureza: "",
-  correcaoCampo: "0",
+  perdaCampo: "0",
 };
 
 type VcForm = {
@@ -60,15 +81,11 @@ const initialVcForm: VcForm = {
 const VC_STORAGE_KEY = "technical_assistant_vc_last";
 
 function parseNumber(value: string) {
-  const normalized = (value ?? "").replace(",", ".").trim();
-  const number = Number(normalized);
-  return Number.isFinite(number) ? number : 0;
+  return parseDecimal(value) ?? 0;
 }
 
 function parseOptionalNumber(value: string) {
-  if (!value?.trim()) return null;
-  const num = parseNumber(value);
-  return Number.isFinite(num) ? num : null;
+  return parseDecimal(value);
 }
 
 function formatValue(value: number, digits = 2) {
@@ -78,7 +95,11 @@ function formatValue(value: number, digits = 2) {
   });
 }
 
+const TECHNICAL_CATALOG_SETTINGS_PATH = "/configurações?section=catalogo-tecnico";
+
 export default function AssistenteTecnico() {
+  const { user } = useAuth();
+  const canConfigureCatalog = user?.role === "diretor" || user?.role === "gerente";
   const [form, setForm] = useState<SemeaduraForm>(initialForm);
 
   const [cultures, setCultures] = useState<TechnicalCulture[]>([]);
@@ -106,9 +127,9 @@ export default function AssistenteTecnico() {
 
         setCultures(CULTURE_FALLBACKS);
         setFallbackMessage(
-          "Não foi possível carregar o catálogo da API. Exibindo catálogo local temporário."
+          "Não foi possível carregar as culturas agora. Mostrando uma lista reduzida; recarregue a página para tentar de novo."
         );
-        toast.warning("Catálogo temporário ativo. Verifique conexão com a API.");
+        toast.warning("Sem conexão com o servidor: lista reduzida de culturas.");
       } finally {
         if (mounted) setLoading(false);
       }
@@ -125,95 +146,101 @@ export default function AssistenteTecnico() {
     [cultures, form.culturaId]
   );
 
-  // define cultura default quando carregar
+  // Ao escolher uma cultura (inclusive a primeira, ao carregar), todos os padrões dela substituem os
+  // valores da tela; a perda a campo é do usuário e fica como está.
+  const applyCultureDefaults = (culture: TechnicalCulture) => {
+    setForm((prev) => ({
+      ...prev,
+      culturaId: culture.id,
+      objetivo: "",
+      ...cultureSeedingDefaults(culture),
+    }));
+  };
+
   useEffect(() => {
     if (!cultures.length) return;
-
     if (!form.culturaId || !cultures.some((c) => c.id === form.culturaId)) {
-      const first = cultures[0];
-      setForm((prev) => ({ ...prev, culturaId: first.id }));
+      applyCultureDefaults(cultures[0]);
     }
   }, [cultures, form.culturaId]);
 
-  // autopreenche defaults da cultura na semeadura (só se campo estiver vazio)
+  const handleCultureChange = (cultureId: string) => {
+    const culture = cultures.find((c) => c.id === cultureId);
+    if (culture) applyCultureDefaults(culture);
+  };
+
+  const restoreCultureDefaults = () => {
+    if (selectedCulture) applyCultureDefaults(selectedCulture);
+  };
+
+  const results = useMemo(
+    () =>
+      calculateSeeding({
+        populationHa: parseNumber(form.populacaoHa),
+        rowSpacingCm: parseNumber(form.espacamentoCm),
+        pms: parseNumber(form.pms),
+        germination: parseNumber(form.germinacao),
+        purity: parseNumber(form.pureza),
+        fieldLossPercent: parseNumber(form.perdaCampo),
+      }),
+    [form]
+  );
+
+  const goalOptions = useMemo(
+    () => cultureGoalOptions(selectedCulture?.goalsJson),
+    [selectedCulture]
+  );
+
+  const referenceRange = useMemo(
+    () => (selectedCulture ? resolveKgHaRange(selectedCulture, form.objetivo) : null),
+    [selectedCulture, form.objetivo]
+  );
+
+  const rangeCheck = useMemo(
+    () => (selectedCulture ? checkKgHaRange(results.ready ? results.kgHa : null, referenceRange) : null),
+    [selectedCulture, results, referenceRange]
+  );
+
+  const selectedGoalLabel = goalOptions.find((option) => option.key === form.objetivo)?.label ?? "";
+
+  const fieldLossMessage = fieldLossWarningMessage(results.fieldLossWarning);
+
+  const seedingSummary = useMemo(
+    () =>
+      selectedCulture
+        ? seedingSummaryText({
+            cultureLabel: selectedCulture.label,
+            goalLabel: selectedGoalLabel,
+            input: {
+              populationHa: parseNumber(form.populacaoHa),
+              rowSpacingCm: parseNumber(form.espacamentoCm),
+              pms: parseNumber(form.pms),
+              germination: parseNumber(form.germinacao),
+              purity: parseNumber(form.pureza),
+              fieldLossPercent: parseNumber(form.perdaCampo),
+            },
+            result: results,
+            range: referenceRange,
+          })
+        : "",
+    [selectedCulture, selectedGoalLabel, form, results, referenceRange]
+  );
+
+  const [seedingMessage, setSeedingMessage] = useState("");
+
   useEffect(() => {
-    if (!selectedCulture) return;
+    setSeedingMessage("");
+  }, [seedingSummary]);
 
-    setForm((prev) => ({
-      ...prev,
-      populacaoHa:
-        prev.populacaoHa ||
-        (selectedCulture.populationTargetDefault != null
-          ? String(selectedCulture.populationTargetDefault)
-          : ""),
-      espacamentoCm:
-        prev.espacamentoCm ||
-        (selectedCulture.rowSpacingCmDefault != null
-          ? String(selectedCulture.rowSpacingCmDefault)
-          : ""),
-      pms:
-        prev.pms ||
-        (selectedCulture.pmsDefault != null ? String(selectedCulture.pmsDefault) : ""),
-      germinacao:
-        prev.germinacao ||
-        (selectedCulture.germinationDefault != null
-          ? String(selectedCulture.germinationDefault)
-          : ""),
-      pureza:
-        prev.pureza ||
-        (selectedCulture.purityDefault != null
-          ? String(selectedCulture.purityDefault)
-          : ""),
-    }));
-  }, [selectedCulture]);
-
-  const results = useMemo(() => {
-    const populacaoHa = parseNumber(form.populacaoHa);
-    const espacamentoCm = parseNumber(form.espacamentoCm);
-    const pms = parseNumber(form.pms);
-    const germinacao = parseNumber(form.germinacao);
-    const pureza = parseNumber(form.pureza);
-    const correcaoCampo = parseNumber(form.correcaoCampo);
-
-    const plantasM2 = populacaoHa / 10000;
-    const fatorGerminacao = germinacao / 100;
-    const fatorPureza = pureza / 100;
-    const fatorCampo = 1 + correcaoCampo / 100;
-    const fatorQualidade = fatorGerminacao * fatorPureza;
-
-    if (
-      fatorQualidade <= 0 ||
-      fatorCampo <= 0 ||
-      espacamentoCm <= 0 ||
-      pms <= 0 ||
-      populacaoHa <= 0
-    ) {
-      return {
-        plantasM2,
-        sementesM2: 0,
-        sementesMetro: 0,
-        kgHa: 0,
-        kgHaFinal: 0,
-      };
+  const handleCopySeeding = async () => {
+    if (!seedingSummary) return;
+    try {
+      await navigator.clipboard.writeText(seedingSummary);
+      setSeedingMessage("Resultado copiado para envio no WhatsApp.");
+    } catch {
+      setSeedingMessage("Não foi possível copiar automaticamente neste dispositivo.");
     }
-
-    const sementesNecessariasHa = populacaoHa / fatorQualidade;
-    const sementesCorrigidasHa = sementesNecessariasHa * fatorCampo;
-    const sementesM2 = sementesCorrigidasHa / 10000;
-    const sementesMetro = sementesM2 * (espacamentoCm / 100);
-
-    // PMS é peso de 1000 sementes em gramas.
-    // kg/ha = sementes corrigidas (ha) * PMS (g/1000 sementes) / 1.000.000
-    const kgHa = (sementesCorrigidasHa * pms) / 1000000;
-
-    return {
-      plantasM2,
-      sementesM2,
-      sementesMetro,
-      kgHa,
-      kgHaFinal: kgHa,
-    };
-  }, [form]);
+  };
 
   // ======== VC (Valor Cultural) ========
 
@@ -271,66 +298,23 @@ export default function AssistenteTecnico() {
   };
 
   const vcComputed = useMemo(() => {
-    const pureza = parseOptionalNumber(vcForm.pureza);
-    const germinacao = parseOptionalNumber(vcForm.germinacao);
-    const sementesDuras = parseOptionalNumber(vcForm.sementesDuras) ?? 0;
-
-    const doseFisica = parseOptionalNumber(vcForm.doseFisica);
-    const doseSpv = parseOptionalNumber(vcForm.doseSpv);
-
-    const errors: string[] = [];
-
-    if (pureza != null && (pureza < 0 || pureza > 100))
-      errors.push("Pureza deve estar entre 0 e 100%.");
-
-    if (germinacao != null && (germinacao < 0 || germinacao > 100))
-      errors.push("Germinação deve estar entre 0 e 100%.");
-
-    if (vcForm.considerarSementesDuras && (sementesDuras < 0 || sementesDuras > 100))
-      errors.push("Sementes duras deve estar entre 0 e 100%.");
-
-    if ((doseFisica != null && doseFisica < 0) || (doseSpv != null && doseSpv < 0))
-      errors.push("As doses devem ser valores iguais ou maiores que zero.");
-
-    if (pureza == null || germinacao == null) {
-      return {
-        errors,
-        ready: false,
-        vc: 0,
-        fatorCorrecao: 0,
-        germinacaoEfetiva: 0,
-        doseSpvCalculada: null as number | null,
-        doseFisicaNecessaria: null as number | null,
-      };
-    }
-
-    const germinacaoEfetiva = vcForm.considerarSementesDuras
-      ? Math.min(100, germinacao + sementesDuras)
-      : germinacao;
-
-    const vc = (pureza * germinacaoEfetiva) / 100;
-    const fatorCorrecao = vc > 0 ? 100 / vc : 0;
-
-    // regra: se os dois preenchidos, usa o último editado como referência
-    const ambosPreenchidos = doseFisica != null && doseSpv != null;
-    const usarSpvComoFonte = ambosPreenchidos && vcForm.lastEditedDose === "spv";
-    const usarFisicaComoFonte = ambosPreenchidos && vcForm.lastEditedDose !== "spv";
-
-    const doseFisicaBase = usarSpvComoFonte ? null : doseFisica;
-    const doseSpvBase = usarFisicaComoFonte ? null : doseSpv;
-
-    const doseSpvCalculada = doseFisicaBase != null ? doseFisicaBase * (vc / 100) : null;
-    const doseFisicaNecessaria =
-      doseSpvBase != null && vc > 0 ? doseSpvBase / (vc / 100) : null;
-
+    const computed = calculateVc({
+      purity: parseOptionalNumber(vcForm.pureza),
+      germination: parseOptionalNumber(vcForm.germinacao),
+      hardSeeds: parseOptionalNumber(vcForm.sementesDuras),
+      considerHardSeeds: vcForm.considerarSementesDuras,
+      physicalDose: parseOptionalNumber(vcForm.doseFisica),
+      spvDose: parseOptionalNumber(vcForm.doseSpv),
+      lastEditedDose: vcForm.lastEditedDose,
+    });
     return {
-      errors,
-      ready: true,
-      vc,
-      fatorCorrecao,
-      germinacaoEfetiva,
-      doseSpvCalculada,
-      doseFisicaNecessaria,
+      errors: computed.errors,
+      ready: computed.ready,
+      vc: computed.vc,
+      fatorCorrecao: computed.correctionFactor,
+      germinacaoEfetiva: computed.effectiveGermination,
+      doseSpvCalculada: computed.spvDose,
+      doseFisicaNecessaria: computed.physicalDoseNeeded,
     };
   }, [vcForm]);
 
@@ -440,6 +424,10 @@ export default function AssistenteTecnico() {
         </p>
       </header>
 
+      <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+        Os resultados são estimativas de apoio e não substituem a recomendação de um engenheiro agrônomo.
+      </p>
+
       {fallbackMessage ? (
         <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
           {fallbackMessage}
@@ -448,18 +436,26 @@ export default function AssistenteTecnico() {
 
       <div className="grid gap-4 xl:grid-cols-2">
         <article className={cardClass}>
-          <h2 className="text-base font-semibold text-slate-800">
-            Calculadora de Semeadura
-          </h2>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <h2 className="text-base font-semibold text-slate-800">
+              Calculadora de Semeadura
+            </h2>
+            <button
+              type="button"
+              onClick={restoreCultureDefaults}
+              disabled={!selectedCulture}
+              className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Restaurar padrões
+            </button>
+          </div>
 
           <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
             <label className="block text-sm text-slate-700">
               Cultura
               <select
                 value={form.culturaId}
-                onChange={(e) =>
-                  setForm((prev) => ({ ...prev, culturaId: e.target.value }))
-                }
+                onChange={(e) => handleCultureChange(e.target.value)}
                 className={inputClass}
               >
                 {cultures.map((culture) => (
@@ -470,101 +466,133 @@ export default function AssistenteTecnico() {
               </select>
             </label>
 
-            <label className="block text-sm text-slate-700">
-              Objetivo (opcional)
-              <input
-                value={form.objetivo}
-                onChange={(e) =>
-                  setForm((prev) => ({ ...prev, objetivo: e.target.value }))
-                }
-                className={inputClass}
-              />
-            </label>
+            {goalOptions.length ? (
+              <label className="block text-sm text-slate-700">
+                Objetivo
+                <select
+                  value={form.objetivo}
+                  onChange={(e) =>
+                    setForm((prev) => ({ ...prev, objetivo: e.target.value }))
+                  }
+                  className={inputClass}
+                >
+                  <option value="">
+                    Geral
+                    {selectedCulture?.defaultKgHaMin != null && selectedCulture?.defaultKgHaMax != null
+                      ? ` (${formatKgHaRange({ min: selectedCulture.defaultKgHaMin, max: selectedCulture.defaultKgHaMax })})`
+                      : ""}
+                  </option>
+                  {goalOptions.map((option) => (
+                    <option key={option.key} value={option.key}>
+                      {option.label} ({formatKgHaRange(option.range)})
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
 
             <label className="block text-sm text-slate-700">
               População desejada (plantas/ha)
               <input
+                {...decimalInputProps}
                 value={form.populacaoHa}
                 onChange={(e) =>
                   setForm((prev) => ({ ...prev, populacaoHa: e.target.value }))
                 }
                 className={inputClass}
               />
+              <span className={helpClass}>Plantas estabelecidas por hectare.</span>
             </label>
 
             <label className="block text-sm text-slate-700">
-              Espaçamento (cm)
+              Espaçamento entre linhas (cm)
               <input
+                {...decimalInputProps}
                 value={form.espacamentoCm}
                 onChange={(e) =>
                   setForm((prev) => ({ ...prev, espacamentoCm: e.target.value }))
                 }
                 className={inputClass}
               />
+              <span className={helpClass}>Usado só para sementes por metro.</span>
             </label>
 
             <label className="block text-sm text-slate-700">
               PMS (g)
               <input
+                {...decimalInputProps}
                 value={form.pms}
                 onChange={(e) =>
                   setForm((prev) => ({ ...prev, pms: e.target.value }))
                 }
                 className={inputClass}
               />
+              <span className={helpClass}>PMS = peso de 1.000 sementes, em gramas (do boletim do lote).</span>
             </label>
 
             <label className="block text-sm text-slate-700">
               Germinação (%)
               <input
+                {...decimalInputProps}
                 value={form.germinacao}
                 onChange={(e) =>
                   setForm((prev) => ({ ...prev, germinacao: e.target.value }))
                 }
                 className={inputClass}
               />
+              <span className={helpClass}>Do boletim de análise do lote.</span>
             </label>
 
             <label className="block text-sm text-slate-700">
               Pureza (%)
               <input
+                {...decimalInputProps}
                 value={form.pureza}
                 onChange={(e) =>
                   setForm((prev) => ({ ...prev, pureza: e.target.value }))
                 }
                 className={inputClass}
               />
+              <span className={helpClass}>Do boletim de análise do lote.</span>
             </label>
 
             <label className="block text-sm text-slate-700">
-              Correção de campo (%)
+              Perda a campo (%)
               <input
-                value={form.correcaoCampo}
+                {...decimalInputProps}
+                value={form.perdaCampo}
                 onChange={(e) =>
-                  setForm((prev) => ({ ...prev, correcaoCampo: e.target.value }))
+                  setForm((prev) => ({ ...prev, perdaCampo: e.target.value }))
                 }
                 className={inputClass}
               />
+              <span className={helpClass}>Sementes que não viram planta (falha de emergência, pragas, pássaros). Ex.: 20% → semeia 25% a mais. Máximo 50%.</span>
             </label>
           </div>
+
+          {fieldLossMessage ? (
+            <p className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              {fieldLossMessage}
+            </p>
+          ) : null}
 
           <div className="mt-5 grid grid-cols-1 gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-2 lg:grid-cols-4">
             <div>
               <p className="text-xs uppercase text-slate-500">Plantas por m²</p>
               <p className="text-lg font-semibold">
-                {formatValue(results.plantasM2)}
+                {formatValue(results.plantsM2)}
               </p>
             </div>
             <div>
               <p className="text-xs uppercase text-slate-500">Sementes por m²</p>
               <p className="text-lg font-semibold">
-                {formatValue(results.sementesM2)}
+                {formatValue(results.seedsM2)}
               </p>
             </div>
             <div>
               <p className="text-xs uppercase text-slate-500">Sementes por metro</p>
               <p className="text-lg font-semibold">
-                {formatValue(results.sementesMetro)}
+                {formatValue(results.seedsPerMeter)}
               </p>
             </div>
             <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 sm:col-span-2 lg:col-span-1">
@@ -572,17 +600,54 @@ export default function AssistenteTecnico() {
                 kg/ha recomendado
               </p>
               <p className="mt-1 text-2xl font-bold leading-tight text-emerald-700 sm:text-3xl">
-                {formatValue(results.kgHaFinal)}
+                {formatValue(results.kgHa)}
               </p>
               <p className="text-sm font-semibold text-emerald-700">kg/ha</p>
             </div>
-            <div className="rounded-lg border border-slate-200 bg-white p-3 sm:col-span-2 lg:col-span-1">
-              <p className="text-xs uppercase text-slate-500">Dose base</p>
-              <p className="text-lg font-semibold text-slate-900">
-                {formatValue(results.kgHa)} kg/ha
-              </p>
-            </div>
+            {results.ready && results.fieldLossApplied > 0 ? (
+              <div className="rounded-lg border border-slate-200 bg-white p-3 sm:col-span-2 lg:col-span-1">
+                <p className="text-xs uppercase text-slate-500">Sem perda a campo</p>
+                <p className="text-lg font-semibold text-slate-900">
+                  {formatValue(results.kgHaBase)} kg/ha
+                </p>
+              </div>
+            ) : null}
           </div>
+
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handleCopySeeding}
+              disabled={!seedingSummary}
+              className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Copiar resultado
+            </button>
+            {seedingMessage ? <span className="text-sm text-slate-600">{seedingMessage}</span> : null}
+          </div>
+
+          {rangeCheck ? (
+            <p
+              role={rangeCheck.status === "below" || rangeCheck.status === "above" ? "alert" : undefined}
+              className={`mt-4 rounded-lg border px-3 py-2 text-sm ${
+                rangeCheck.status === "within"
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                  : rangeCheck.status === "no_range"
+                    ? "border-slate-200 bg-slate-50 text-slate-700"
+                    : "border-amber-300 bg-amber-50 text-amber-900"
+              }`}
+            >
+              {kgHaRangeMessage(rangeCheck)}
+              {rangeCheck.status === "no_range" && canConfigureCatalog ? (
+                <>
+                  {" "}
+                  <Link to={TECHNICAL_CATALOG_SETTINGS_PATH} className="font-medium underline">
+                    Cadastrar em Configurações → Catálogo Técnico
+                  </Link>
+                </>
+              ) : null}
+            </p>
+          ) : null}
         </article>
 
         <article className={cardClass}>
@@ -594,15 +659,26 @@ export default function AssistenteTecnico() {
             {selectedCulture?.label || "Selecione uma cultura"}
           </p>
 
-          {selectedCulture?.defaultKgHaMin != null &&
-          selectedCulture?.defaultKgHaMax != null ? (
-            <p className="mt-3 text-2xl font-bold text-slate-900">
-              {formatValue(selectedCulture.defaultKgHaMin, 0)}–
-              {formatValue(selectedCulture.defaultKgHaMax, 0)} kg/ha
-            </p>
+          {referenceRange ? (
+            <>
+              <p className="mt-3 text-2xl font-bold text-slate-900">
+                {formatKgHaRange(referenceRange)}
+              </p>
+              {selectedGoalLabel ? (
+                <p className="text-xs text-slate-500">Objetivo: {selectedGoalLabel}</p>
+              ) : null}
+            </>
           ) : (
-            <p className="mt-3 text-sm font-medium text-amber-700">
-              Não configurado — ajuste em Configurações.
+            <p className="mt-3 text-sm font-medium text-slate-700">
+              Sem faixa de referência cadastrada.
+              {canConfigureCatalog ? (
+                <>
+                  {" "}
+                  <Link to={TECHNICAL_CATALOG_SETTINGS_PATH} className="text-emerald-700 underline">
+                    Cadastrar em Configurações
+                  </Link>
+                </>
+              ) : null}
             </p>
           )}
 
@@ -666,9 +742,7 @@ export default function AssistenteTecnico() {
           <label className="block text-sm text-slate-700">
             Pureza (%)
             <input
-              type="number"
-              min="0"
-              max="100"
+              {...decimalInputProps}
               value={vcForm.pureza}
               onChange={(event) =>
                 setVcForm((prev) => ({ ...prev, pureza: event.target.value }))
@@ -680,9 +754,7 @@ export default function AssistenteTecnico() {
           <label className="block text-sm text-slate-700">
             Germinação (%)
             <input
-              type="number"
-              min="0"
-              max="100"
+              {...decimalInputProps}
               value={vcForm.germinacao}
               onChange={(event) =>
                 setVcForm((prev) => ({ ...prev, germinacao: event.target.value }))
@@ -708,9 +780,7 @@ export default function AssistenteTecnico() {
           <label className="block text-sm text-slate-700">
             Sementes duras (%)
             <input
-              type="number"
-              min="0"
-              max="100"
+              {...decimalInputProps}
               disabled={!vcForm.considerarSementesDuras}
               value={vcForm.sementesDuras}
               onChange={(event) =>
@@ -723,8 +793,7 @@ export default function AssistenteTecnico() {
           <label className="block text-sm text-slate-700">
             Dose física (kg/ha)
             <input
-              type="number"
-              min="0"
+              {...decimalInputProps}
               value={vcForm.doseFisica}
               onChange={(event) =>
                 setVcForm((prev) => ({
@@ -740,8 +809,7 @@ export default function AssistenteTecnico() {
           <label className="block text-sm text-slate-700">
             Dose efetiva (SPV) desejada (kg/ha)
             <input
-              type="number"
-              min="0"
+              {...decimalInputProps}
               value={vcForm.doseSpv}
               onChange={(event) =>
                 setVcForm((prev) => ({
@@ -763,7 +831,7 @@ export default function AssistenteTecnico() {
             <strong>Fator de correção</strong> = 100 / VC (quanto multiplicar para corrigir dose pela qualidade do lote).
           </p>
           <p className="mt-2 text-xs text-slate-500">
-            * VC é correção de qualidade do lote; não substitui recomendação agronômica.
+            * VC corrige a dose pela qualidade do lote (pureza e germinação).
           </p>
         </div>
 
