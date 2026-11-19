@@ -9,6 +9,7 @@ import {
   cultureGoalOptions,
   cultureSeedingDefaults,
   fieldLossWarningMessage,
+  kgHaMissingHint,
   kgHaRangeMessage,
   parseDecimal,
   resolveKgHaRange,
@@ -92,13 +93,50 @@ close(noSpacing.seedsM2, 25, "sementes/m² sem espaçamento");
 assert.equal(noSpacing.seedsPerMeter, null, "sem espaçamento não há sementes por metro");
 assert.equal(SEEDS_PER_METER_HINT, "Informe o espaçamento para ver sementes por metro.");
 
-// Campos obrigatórios zerados → sem resultado (germinação e pureza: a conta só sai com os dois).
-for (const field of ["populationHa", "pms", "germination", "purity"] as const) {
+// População ou germinação zeradas → sem resultado nenhum.
+for (const field of ["populationHa", "germination"] as const) {
   const result = calculateSeeding({ ...base, [field]: 0 });
-  assert.equal(result.ready, false, `${field} = 0 não calcula`);
+  assert.equal(result.ready, false, `${field} = 0 não calcula kg/ha`);
+  assert.equal(result.seedsReady, false, `${field} = 0 não calcula sementes`);
   assert.equal(result.kgHa, 0, `${field} = 0 dá kg/ha 0`);
   assert.equal(result.seedsPerMeter, null, `${field} = 0 não mostra sementes por metro`);
+  assert.equal(kgHaMissingHint(base, result), null, `${field} = 0: os pedidos dos campos já aparecem`);
 }
+
+// Pureza ou PMS vazios → sementes por m² e por metro saem (não dependem deles); kg/ha não.
+for (const field of ["pms", "purity"] as const) {
+  const result = calculateSeeding({ ...base, [field]: 0 });
+  assert.equal(result.seedsReady, true, `${field} = 0 ainda calcula sementes`);
+  close(result.seedsM2, 25, `${field} = 0: sementes/m² iguais às do lote completo`);
+  close(result.seedsPerMeter ?? -1, 12.5, `${field} = 0: sementes por metro iguais às do lote completo`);
+  assert.equal(result.ready, false, `${field} = 0 não calcula kg/ha`);
+  assert.equal(result.kgHa, 0, `${field} = 0 dá kg/ha 0`);
+}
+assert.equal(kgHaMissingHint({ pms: 25, purity: 0 }, calculateSeeding({ ...base, purity: 0 })), "Informe a pureza do lote para ver o kg/ha.");
+assert.equal(kgHaMissingHint({ pms: 0, purity: 100 }, calculateSeeding({ ...base, pms: 0 })), "Informe o PMS do lote para ver o kg/ha.");
+assert.equal(
+  kgHaMissingHint({ pms: 0, purity: 0 }, calculateSeeding({ ...base, pms: 0, purity: 0 })),
+  "Informe a pureza e o PMS do lote para ver o kg/ha."
+);
+assert.equal(kgHaMissingHint(base, seeding), null, "com o kg/ha calculado não há pedido");
+
+// ---- Sementes por metro sem a pureza (Embrapa: só a germinação corrige a população) ----
+// Lote fictício de sorgo: 155.000 plantas/ha, germinação 75%, pureza 98%, 45 cm.
+// 155.000 ÷ 0,75 = 206.667 sementes/ha → 20,667/m² × 0,45 = 9,30 sementes/m (com a pureza dava 9,49).
+const sorgo = { populationHa: 155000, rowSpacingCm: 45, pms: 30, germination: 75, purity: 98, fieldLossPercent: 0 };
+const sorgoResult = calculateSeeding(sorgo);
+close(sorgoResult.seedsM2, 20.6667, "sorgo: sementes/m² sem a pureza");
+close(sorgoResult.seedsPerMeter ?? -1, 9.3, "sorgo: 9,30 sementes por metro");
+// Com 10% de perda: 9,30 ÷ 0,9 = 10,33 (com a pureza dava 10,54).
+const sorgoLoss = calculateSeeding({ ...sorgo, fieldLossPercent: 10 });
+close(sorgoLoss.seedsPerMeter ?? -1, 10.3333, "sorgo com 10% de perda: 10,33 sementes por metro");
+// kg/ha continua com germinação × pureza: 155.000 ÷ (0,75 × 0,98) ÷ 0,9 × 30 ÷ 1.000.000 = 7,03.
+close(sorgoLoss.kgHa, (155000 / (0.75 * 0.98) / 0.9) * 30 / 1000000, "sorgo: kg/ha igual ao da conta com pureza");
+close(sorgoLoss.kgHa, 7.0295, "sorgo: 7,03 kg/ha");
+close(sorgoLoss.kgHaBase, 6.3265, "sorgo: kg/ha sem perda");
+// Lote fictício de nabo forrageiro: 500.000, germinação 65%, pureza 95%, 40 cm → 500.000 ÷ 0,65 × 0,4 ÷ 10.000 = 30,77.
+const nabo = calculateSeeding({ populationHa: 500000, rowSpacingCm: 40, pms: 12, germination: 65, purity: 95, fieldLossPercent: 0 });
+close(nabo.seedsPerMeter ?? -1, 30.7692, "nabo: 30,8 sementes por metro (com a pureza dava 32,4)");
 
 // ---- Campos que a tela pede ----
 const fullCulture = { category: "Grãos", populationTargetDefault: 200000, pmsDefault: 25, germinationDefault: 80, purityDefault: 100 };
@@ -260,6 +298,17 @@ assert.equal(
     "Estimativa de apoio; não substitui a recomendação de um engenheiro agrônomo.",
   ].join("\n"),
   "sem espaçamento, o texto não fala de espaçamento nem de sementes por metro"
+);
+
+// Texto copiado com pureza abaixo de 100%: sementes por metro sem a pureza, kg/ha com ela.
+assert.equal(
+  seedingSummaryText({ cultureLabel: "Cultura Teste", input: { ...sorgo, fieldLossPercent: 10 }, result: sorgoLoss, range: null }),
+  [
+    "Cultura Teste: 7,03 kg/ha",
+    "População 155.000 plantas/ha, espaçamento 45 cm, PMS 30 g, germinação 75%, pureza 98%, perda a campo 10%.",
+    "10,3 sementes por metro.",
+    "Estimativa de apoio; não substitui a recomendação de um engenheiro agrônomo.",
+  ].join("\n")
 );
 
 console.log("technicalAssistant.test.ts: ok");
