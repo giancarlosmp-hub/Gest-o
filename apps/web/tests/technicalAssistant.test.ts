@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import {
   MAX_FIELD_LOSS_PERCENT,
+  SEEDING_FIELD_PROMPTS,
+  SEEDS_PER_METER_HINT,
   calculateSeeding,
   calculateVc,
   checkKgHaRange,
@@ -10,6 +12,7 @@ import {
   kgHaRangeMessage,
   parseDecimal,
   resolveKgHaRange,
+  seedingFieldPrompts,
   seedingSummaryText,
 } from "../src/lib/technicalAssistant";
 
@@ -46,7 +49,7 @@ const seeding = calculateSeeding(base);
 assert.equal(seeding.ready, true);
 close(seeding.plantsM2, 20, "plantas/m²");
 close(seeding.seedsM2, 25, "sementes/m²");
-close(seeding.seedsPerMeter, 12.5, "sementes por metro (25/m² × 0,5 m)");
+close(seeding.seedsPerMeter ?? -1, 12.5, "sementes por metro (25/m² × 0,5 m)");
 close(seeding.kgHa, 6.25, "kg/ha");
 close(seeding.kgHaBase, 6.25, "kg/ha base sem correção");
 
@@ -79,14 +82,72 @@ assert.equal(fieldLossWarningMessage(null), null);
 // Espaçamento muda só sementes por metro, não o kg/ha.
 const wider = calculateSeeding({ ...base, rowSpacingCm: 100 });
 close(wider.kgHa, 6.25, "kg/ha não depende do espaçamento");
-close(wider.seedsPerMeter, 25, "sementes por metro dobram com o dobro do espaçamento");
+close(wider.seedsPerMeter ?? -1, 25, "sementes por metro dobram com o dobro do espaçamento");
 
-// Campos obrigatórios zerados → sem resultado.
-for (const field of ["populationHa", "rowSpacingCm", "pms", "germination", "purity"] as const) {
+// Sem espaçamento: o kg/ha sai igual, só sementes por metro fica sem valor.
+const noSpacing = calculateSeeding({ ...base, rowSpacingCm: 0 });
+assert.equal(noSpacing.ready, true, "espaçamento vazio não trava a conta");
+close(noSpacing.kgHa, 6.25, "kg/ha sem espaçamento");
+close(noSpacing.seedsM2, 25, "sementes/m² sem espaçamento");
+assert.equal(noSpacing.seedsPerMeter, null, "sem espaçamento não há sementes por metro");
+assert.equal(SEEDS_PER_METER_HINT, "Informe o espaçamento para ver sementes por metro.");
+
+// Campos obrigatórios zerados → sem resultado (germinação e pureza: a conta só sai com os dois).
+for (const field of ["populationHa", "pms", "germination", "purity"] as const) {
   const result = calculateSeeding({ ...base, [field]: 0 });
   assert.equal(result.ready, false, `${field} = 0 não calcula`);
   assert.equal(result.kgHa, 0, `${field} = 0 dá kg/ha 0`);
+  assert.equal(result.seedsPerMeter, null, `${field} = 0 não mostra sementes por metro`);
 }
+
+// ---- Campos que a tela pede ----
+const fullCulture = { category: "Grãos", populationTargetDefault: 200000, pmsDefault: 25, germinationDefault: 80, purityDefault: 100 };
+const emptyForm = { populacaoHa: "", pms: "", germinacao: "", pureza: "" };
+const filledForm = { populacaoHa: "200.000", pms: "25", germinacao: "80", pureza: "100" };
+assert.deepEqual(seedingFieldPrompts(fullCulture, filledForm), {}, "cultura com todos os padrões não pede nada");
+assert.deepEqual(seedingFieldPrompts(fullCulture, emptyForm), {}, "campo apagado de cultura com padrão não vira pedido");
+assert.deepEqual(seedingFieldPrompts(null, emptyForm), {}, "sem cultura não pede nada");
+
+const noPms = { ...fullCulture, pmsDefault: null };
+assert.deepEqual(seedingFieldPrompts(noPms, { ...filledForm, pms: "" }), {
+  pms: "Informe o PMS do lote (peso de 1.000 sementes, na etiqueta ou no laudo).",
+});
+assert.deepEqual(seedingFieldPrompts(noPms, { ...filledForm, pms: "0" }), { pms: SEEDING_FIELD_PROMPTS.pms }, "PMS zerado continua pedido");
+assert.deepEqual(seedingFieldPrompts(noPms, { ...filledForm, pms: "abc" }), { pms: SEEDING_FIELD_PROMPTS.pms }, "texto inválido continua pedido");
+assert.deepEqual(seedingFieldPrompts(noPms, { ...filledForm, pms: "152,5" }), {}, "PMS digitado com vírgula some o pedido");
+
+const noPopulation = { ...fullCulture, populationTargetDefault: null };
+assert.deepEqual(seedingFieldPrompts(noPopulation, { ...filledForm, populacaoHa: "" }), {
+  populacaoHa: "Informe a população desejada (plantas/ha).",
+});
+assert.deepEqual(seedingFieldPrompts(noPopulation, { ...filledForm, populacaoHa: "300.000" }), {});
+
+const noLotQuality = { ...fullCulture, germinationDefault: null, purityDefault: null };
+assert.deepEqual(seedingFieldPrompts(noLotQuality, { ...filledForm, germinacao: "", pureza: "" }), {
+  germinacao: "Informe a germinação do lote (no laudo ou na etiqueta).",
+  pureza: "Informe a pureza do lote (no laudo ou na etiqueta).",
+});
+assert.deepEqual(
+  seedingFieldPrompts(noLotQuality, { ...filledForm, germinacao: "85", pureza: "" }),
+  { pureza: SEEDING_FIELD_PROMPTS.pureza },
+  "com só a germinação, a pureza continua pedida"
+);
+
+const nothing = { category: "Cobertura", populationTargetDefault: null, pmsDefault: null, germinationDefault: null, purityDefault: null };
+assert.deepEqual(Object.keys(seedingFieldPrompts(nothing, emptyForm)), ["populacaoHa", "pms", "germinacao", "pureza"]);
+
+const forage = { category: "Forrageiras", populationTargetDefault: null, pmsDefault: null, germinationDefault: null, purityDefault: null };
+assert.deepEqual(seedingFieldPrompts(forage, emptyForm), {}, "forrageira fica de fora (semeadura por SPV)");
+assert.deepEqual(seedingFieldPrompts({ ...forage, category: " Forrageiras " }, emptyForm), {},"categoria com espaço sobrando também");
+
+// Cultura fictícia sem PMS padrão: ao digitar o PMS do lote, a conta sai e o aviso de faixa aparece.
+const typedPms = calculateSeeding({ ...base, pms: parseDecimal("32,0") ?? 0 });
+assert.equal(typedPms.ready, true);
+close(typedPms.kgHa, 8, "200.000 ÷ 0,8 × 32 g ÷ 1.000.000");
+assert.deepEqual(checkKgHaRange(typedPms.kgHa, { min: 8, max: 18 }), { status: "within", range: { min: 8, max: 18 } });
+const beforeTyping = calculateSeeding({ ...base, pms: parseDecimal("") ?? 0 });
+assert.equal(beforeTyping.ready, false, "antes de digitar o PMS, não calcula");
+assert.equal(checkKgHaRange(beforeTyping.ready ? beforeTyping.kgHa : null, { min: 8, max: 18 }), null, "antes de digitar, sem aviso de faixa");
 
 // ---- Valor Cultural ----
 const vcBase = { purity: 80, germination: 50, hardSeeds: null, considerHardSeeds: false, physicalDose: null, spvDose: null, lastEditedDose: null } as const;
@@ -190,6 +251,15 @@ assert.equal(
 assert.ok(
   !seedingSummaryText({ cultureLabel: "Cultura Teste", input: base, result: seeding, range: null }).includes("Faixa"),
   "sem faixa, o texto não inventa uma"
+);
+assert.equal(
+  seedingSummaryText({ cultureLabel: "Cultura Teste", input: { ...base, rowSpacingCm: 0 }, result: noSpacing, range: null }),
+  [
+    "Cultura Teste: 6,25 kg/ha",
+    "População 200.000 plantas/ha, PMS 25 g, germinação 80%, pureza 100%, perda a campo 0%.",
+    "Estimativa de apoio; não substitui a recomendação de um engenheiro agrônomo.",
+  ].join("\n"),
+  "sem espaçamento, o texto não fala de espaçamento nem de sementes por metro"
 );
 
 console.log("technicalAssistant.test.ts: ok");
