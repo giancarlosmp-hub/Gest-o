@@ -103,8 +103,12 @@ export type SeedingInput = {
 export const MAX_FIELD_LOSS_PERCENT = 50;
 
 export type SeedingResult = {
+  /** kg/ha calculado: exige população, germinação, pureza e PMS. */
   ready: boolean;
+  /** Sementes por m² e por metro calculadas: exigem só população e germinação (pureza e PMS não entram). */
+  seedsReady: boolean;
   plantsM2: number;
+  /** Sementes que a semeadora distribui por m²: população ÷ germinação ÷ (1 − perda), sem a pureza. */
   seedsM2: number;
   /** null sem espaçamento: o kg/ha sai mesmo assim, só sementes por metro fica sem valor. */
   seedsPerMeter: number | null;
@@ -121,34 +125,52 @@ export type SeedingResult = {
 export function calculateSeeding(input: SeedingInput): SeedingResult {
   const { populationHa, rowSpacingCm, pms, germination, purity, fieldLossPercent } = input;
   const plantsM2 = populationHa / 10000;
-  const qualityFactor = (germination / 100) * (purity / 100);
 
   const fieldLossWarning =
     fieldLossPercent > MAX_FIELD_LOSS_PERCENT ? "above_max" : fieldLossPercent < 0 ? "negative" : null;
   const fieldLossApplied = Math.min(MAX_FIELD_LOSS_PERCENT, Math.max(0, Number.isFinite(fieldLossPercent) ? fieldLossPercent : 0));
   const survivalFactor = 1 - fieldLossApplied / 100;
 
-  // O espaçamento não entra no kg/ha: sem ele, a conta sai e só sementes por metro fica sem valor.
-  if (qualityFactor <= 0 || pms <= 0 || populationHa <= 0) {
-    return { ready: false, plantsM2, seedsM2: 0, seedsPerMeter: null, kgHaBase: 0, kgHa: 0, fieldLossApplied, fieldLossWarning };
+  if (germination <= 0 || populationHa <= 0) {
+    return { ready: false, seedsReady: false, plantsM2, seedsM2: 0, seedsPerMeter: null, kgHaBase: 0, kgHa: 0, fieldLossApplied, fieldLossWarning };
   }
 
-  const seedsHaBase = populationHa / qualityFactor;
+  // Sementes que a semeadora distribui: só a germinação corrige a população. A semeadora de disco conta
+  // sementes, não peso, e a impureza não ocupa furo do disco (Embrapa Arroz e Feijão, Comunicado
+  // Técnico 54: L = 100 × S × E ÷ V; Embrapa Milho e Sorgo, Sistema de Produção 2, Plantio).
+  const seedsHaBase = populationHa / (germination / 100);
   const seedsHa = seedsHaBase / survivalFactor;
   const seedsM2 = seedsHa / 10000;
+  // O espaçamento não entra no kg/ha: sem ele, a conta sai e só sementes por metro fica sem valor.
   const seedsPerMeter = rowSpacingCm > 0 ? seedsM2 * (rowSpacingCm / 100) : null;
 
-  // PMS é o peso de 1.000 sementes em gramas: kg/ha = sementes/ha × PMS ÷ 1.000.000.
+  if (purity <= 0 || pms <= 0) {
+    return { ready: false, seedsReady: true, plantsM2, seedsM2, seedsPerMeter, kgHaBase: 0, kgHa: 0, fieldLossApplied, fieldLossWarning };
+  }
+
+  // O peso do lote inclui a impureza: kg/ha = sementes/ha ÷ pureza × PMS ÷ 1.000.000 (PMS em gramas).
+  const purityFactor = purity / 100;
   return {
     ready: true,
+    seedsReady: true,
     plantsM2,
     seedsM2,
     seedsPerMeter,
-    kgHaBase: (seedsHaBase * pms) / 1000000,
-    kgHa: (seedsHa * pms) / 1000000,
+    kgHaBase: (seedsHaBase / purityFactor) * pms / 1000000,
+    kgHa: (seedsHa / purityFactor) * pms / 1000000,
     fieldLossApplied,
     fieldLossWarning,
   };
+}
+
+/**
+ * Pedido do kg/ha quando as sementes por metro já saem mas falta pureza ou PMS. null quando o kg/ha sai
+ * ou quando nem as sementes saem (aí os pedidos dos campos já aparecem).
+ */
+export function kgHaMissingHint(input: Pick<SeedingInput, "pms" | "purity">, result: SeedingResult): string | null {
+  if (result.ready || !result.seedsReady) return null;
+  const missing = [input.purity > 0 ? null : "a pureza", input.pms > 0 ? null : "o PMS"].filter(Boolean);
+  return `Informe ${missing.join(" e ")} do lote para ver o kg/ha.`;
 }
 
 export function fieldLossWarningMessage(warning: SeedingResult["fieldLossWarning"]) {

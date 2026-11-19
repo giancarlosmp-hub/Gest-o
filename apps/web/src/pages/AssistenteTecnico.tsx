@@ -10,6 +10,7 @@ import { getApiErrorMessage } from "../lib/apiError";
 import { useAuth } from "../context/AuthContext";
 import {
   calculateSeeding,
+  kgHaMissingHint,
   calculateVc,
   checkKgHaRange,
   cultureGoalOptions,
@@ -194,6 +195,8 @@ export default function AssistenteTecnico() {
       }),
     [form]
   );
+
+  const kgHaHint = kgHaMissingHint({ pms: parseNumber(form.pms), purity: parseNumber(form.pureza) }, results);
 
   const fieldPrompts = useMemo(
     () => seedingFieldPrompts(selectedCulture, form),
@@ -616,7 +619,7 @@ export default function AssistenteTecnico() {
             <div>
               <p className="text-xs uppercase text-slate-500">Sementes por m²</p>
               <p className="text-lg font-semibold">
-                {results.ready ? formatValue(results.seedsM2) : "—"}
+                {results.seedsReady ? formatValue(results.seedsM2) : "—"}
               </p>
             </div>
             <div>
@@ -624,7 +627,7 @@ export default function AssistenteTecnico() {
               <p className="text-lg font-semibold">
                 {results.seedsPerMeter != null ? formatValue(results.seedsPerMeter) : "—"}
               </p>
-              {results.ready && results.seedsPerMeter == null ? (
+              {results.seedsReady && results.seedsPerMeter == null ? (
                 <p className="text-xs text-slate-500">{SEEDS_PER_METER_HINT}</p>
               ) : null}
             </div>
@@ -636,6 +639,7 @@ export default function AssistenteTecnico() {
                 {results.ready ? formatValue(results.kgHa) : "—"}
               </p>
               <p className="text-sm font-semibold text-emerald-700">kg/ha</p>
+              {kgHaHint ? <p className="mt-1 text-xs text-emerald-800">{kgHaHint}</p> : null}
             </div>
             {results.ready && results.fieldLossApplied > 0 ? (
               <div className="rounded-lg border border-slate-200 bg-white p-3 sm:col-span-2 lg:col-span-1">
