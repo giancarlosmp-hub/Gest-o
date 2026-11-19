@@ -1919,6 +1919,28 @@ Restam:
 - O pedido aparece só quando a cultura não tem o padrão. Campo apagado de cultura com padrão continua sem calcular e
   sem pedido ("Restaurar padrões" devolve o valor).
 
+### TD-TECHNICAL-SEEDS-PER-METER-PURITY — sementes por metro divididas pela pureza
+
+**Prioridade média.** A Calculadora de Semeadura dividia a população por germinação × pureza também nas sementes
+por m² e por metro. A semeadora de disco distribui sementes, não peso, e a impureza não ocupa furo do disco: para a
+regulagem, só a germinação corrige a população. As duas fontes da Embrapa usam só a germinação:
+
+- Embrapa Arroz e Feijão, Comunicado Técnico 54, "Densidade de Semeadura de Trigo": sementes por metro
+  L = 100 × S × E ÷ V (S = plantas/m², E = espaçamento em m, V = poder germinativo em %); exemplo
+  100 × 350 × 0,17 ÷ 97 = 61 sementes/m.
+  <https://www.infoteca.cnptia.embrapa.br/infoteca/bitstream/doc/211634/1/comt54.pdf>
+- Embrapa Milho e Sorgo, Sistema de Produção 2, Cultivo do Sorgo, Plantio (semeadura): o estande é corrigido pelo
+  poder germinativo e acrescido de 10% (150.000 ÷ 0,90 × 1,1 = 183.334 sementes/ha, 11 sementes/m a 0,60 m).
+  <https://ainfo.cnptia.embrapa.br/digital/bitstream/item/27484/1/Plantio-semeadura.pdf>
+
+**Resolvido no código em 19/11/2026, aguardando merge.** Só web (`calculateSeeding` em
+`apps/web/src/lib/technicalAssistant.ts`). Sementes por m² e por metro = população ÷ germinação ÷ (1 − perda),
+× espaçamento no caso do metro. O kg/ha continua com germinação × pureza e não muda. Sementes por m² e por metro
+saem só com população e germinação; sem pureza ou PMS, o kg/ha mostra "—" e pede o campo que falta.
+
+Impacto: sementes por m² e por metro caem em (1 − pureza). Com pureza 98%, −2% (lote fictício de sorgo,
+155.000 plantas/ha, germinação 75%, 45 cm: 9,49 → 9,30 sementes/m). Com 95%, −5%; com 85%, −15%.
+
 ### TD-VPS-TAILSCALE-DEPENDENCY — ERP e DNS dos containers dependem do Tailscale da VPS
 
 **Prioridade alta.** A integração com o ERP (`ULTRAFV3_BASE_URL`) passa pelo Tailscale da VPS, e o DNS dos
