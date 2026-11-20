@@ -197,7 +197,7 @@ export function parseCatalogFile(content: string): CatalogEntry[] {
 // ---------------------------------------------------------------------------------------------
 // Revisão automática (sem banco)
 
-/** Conta da Calculadora de Semeadura do Assistente Técnico, sem perda a campo. */
+/** Conta da Recomendação de semeadura do Assistente Técnico (kg/ha), sem perda a campo. */
 export function seedingKgHa(populationHa: number, pms: number, germination: number, purity: number) {
   return ((populationHa / ((germination / 100) * (purity / 100))) * pms) / 1000000;
 }
