@@ -52,7 +52,7 @@ export const SEEDING_FIELD_PROMPTS: Record<SeedingPromptField, string> = {
 export const SEEDS_PER_METER_HINT = "Informe o espaçamento para ver sementes por metro.";
 
 // Mesmo nome de categoria do Catálogo Técnico (ALLOWED_CATEGORIES do importTechnicalCatalog na API).
-const FORAGE_CATEGORY = "Forrageiras";
+export const FORAGE_CATEGORY = "Forrageiras";
 
 type SeedingPromptCulture = {
   category: string;

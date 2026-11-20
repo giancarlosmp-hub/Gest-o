@@ -1941,6 +1941,49 @@ saem só com população e germinação; sem pureza ou PMS, o kg/ha mostra "—"
 Impacto: sementes por m² e por metro caem em (1 − pureza). Com pureza 98%, −2% (lote fictício de sorgo,
 155.000 plantas/ha, germinação 75%, 45 cm: 9,49 → 9,30 sementes/m). Com 95%, −5%; com 85%, −15%.
 
+### TD-TECHNICAL-SEED-LOTS — dados do lote de semente na calculadora
+
+**Prioridade média, não iniciado.** Depende da resposta do fornecedor do UltraFV3.
+
+Fatos (19/11/2026):
+
+- Peneira, germinação, pureza e PMS existem só no PDF do termo de conformidade ou do boletim de análise. Várias
+  culturas não têm PMS nesse documento.
+- O ERP tem do lote o número, o vencimento, a categoria, o fabricante e o Renasem. A integração atual não lê lotes:
+  de `/products` só vem o saldo (`QTD_ESTOQUE`) por produto e classificação.
+- O vendedor não sabe o lote na venda: o lote é definido no faturamento e sai na NF.
+- Não há tabela pública de PMS ou sementes/kg por peneira (Embrapa, MAPA, ABRASEM). A Portaria MAPA 538/2022
+  (art. 187) revogou a IN 9/2005, e o rótulo do art. 120 não tem peneira.
+
+Hoje o modo "Resposta rápida" do Assistente Técnico calcula sementes por metro sem lote, com a germinação digitada
+ou o mínimo legal do MAPA.
+
+Plano:
+
+- Cadastro de lote no CRM a partir do upload do PDF do termo ou boletim: germinação, pureza e validade do teste
+  obrigatórias; PMS e peneira opcionais. Validade vencida tira o lote da calculadora.
+- Dois usos:
+  - (a) faixa de sementes por metro dos lotes em estoque, no modo rápido;
+  - (b) regulagem pós-faturamento pelo lote da NF, enviada ao cliente.
+- Decisões já tomadas:
+  - conferência obrigatória por gerente ou diretor antes de o lote aparecer na calculadora;
+  - PDF guardado no banco, com limite de 2 MB;
+  - IA externa só para PDF com texto, enviando apenas o trecho de resultados (PDF escaneado: digitação manual com o
+    PDF ao lado).
+- Precisa de migration (modelo de lote), com evidência de schema.
+
+Perguntas para o fornecedor do UltraFV3:
+
+- Existe um endpoint de lotes? Caminho, método, autenticação (o mesmo token de `/auth/login`?), paginação, filtros
+  (por produto, só com saldo, alterados desde uma data) e limites.
+- Quais campos ele traz: número, vencimento, categoria, fabricante, Renasem, safra, saldo por lote e filial ou
+  depósito? Como liga ao produto (`CODPRODUTO` + `CODPRODUTO_CLAS`)? O número do lote é único por produto ou no ERP?
+- A NF ou o faturamento traz o lote de cada item, e isso aparece em alguma rota, como `/orders`, `/orderStatus` ou
+  uma rota de notas?
+- O ERP guarda resultados do boletim (germinação, pureza, PMS, peneira, data do teste) ou o PDF anexado?
+- A classificação (`CODPRODUTO_CLAS` / `DSCPRODUTO_CLAS`) representa peneira em algum produto de semente?
+- Um exemplo de resposta com dados fictícios.
+
 ### TD-VPS-TAILSCALE-DEPENDENCY — ERP e DNS dos containers dependem do Tailscale da VPS
 
 **Prioridade alta.** A integração com o ERP (`ULTRAFV3_BASE_URL`) passa pelo Tailscale da VPS, e o DNS dos
