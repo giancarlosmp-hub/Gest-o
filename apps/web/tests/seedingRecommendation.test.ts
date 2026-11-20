@@ -1,4 +1,9 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import SeedingRecommendation from "../src/components/technical/SeedingRecommendation";
+import type { TechnicalCulture } from "../src/lib/technicalCultures";
 import {
   EMPTY_RECOMMENDATION_FORM,
   MAPA_GERMINATION_WARNING,
@@ -242,5 +247,88 @@ assert.equal(whatsappShareUrl("16,9 sementes & mais"), "https://wa.me/?text=16%2
 
 // Modo no aparelho: sem localStorage (servidor), começa no Simples.
 assert.equal(readStoredMode(), "simple");
+
+// ---- Cartão (render no servidor; sem localStorage, começa no modo Simples) ----
+const card = (overrides: Partial<TechnicalCulture> = {}): TechnicalCulture => ({
+  id: "cultura-a",
+  slug: "cultura-a",
+  isActive: true,
+  notes: "Observação fictícia da cultura.",
+  rowSpacingCmDefault: 50,
+  tags: [],
+  ...culture(),
+  goalsJson: { grao: { min: 50, max: 55 } },
+  ...overrides,
+});
+const render = (cultures: TechnicalCulture[], offlineList = false) =>
+  renderToStaticMarkup(createElement(SeedingRecommendation, { cultures, offline: offlineList, canConfigureCatalog: false }));
+
+const html = render([card()]);
+assert.match(html, /Recomendação de semeadura/);
+assert.match(html, /aria-pressed="true"[^>]*>Simples<\/button>/, "modo Simples por padrão");
+// Espaçamento padrão 50 cm: 37,5/m² × 0,5 = 18,75 → "18,8" e ≈ 188 a cada 10 m.
+assert.match(html, />18,8<\/p>/, "sementes por metro em destaque, 1 casa");
+assert.match(html, /≈ 188 a cada 10 m/);
+for (const option of ["45", "50", "70", "90", "outro"]) assert.match(html, new RegExp(`>${option}</button>`));
+assert.match(html, /aria-pressed="true"[^>]*>50<\/button>/, "começa no espaçamento padrão da cultura");
+assert.match(html, /Orientações da cultura/);
+assert.match(html, /40–60 kg\/ha/, "faixa nas orientações");
+assert.match(html, /300\.000 plantas\/ha/, "população recomendada");
+assert.match(html, /Observação fictícia da cultura\./);
+assert.match(html, /Objetivo/);
+assert.match(html, />catálogo</);
+assert.match(html, />mínimo legal do MAPA</);
+assert.match(html, /78,4%/, "VC do lote");
+assert.match(html, /kg\/ha: abra o modo Completo e informe o PMS do lote\./, "kg/ha — com o pedido");
+assert.match(html, />Copiar<\/button>/, "Copiar sem PMS");
+assert.match(html, />WhatsApp<\/button>/, "WhatsApp sem PMS");
+for (const hidden of ["Pureza (%)", "PMS (g)", "Perda a campo (%)", "Sementes duras (%)"]) {
+  assert.ok(!html.includes(hidden), `modo Simples esconde ${hidden}`);
+}
+assert.equal((html.match(/>Copiar<\/button>/g) ?? []).length, 1, "um só Copiar");
+
+// Forrageira: caminho por SPV, sem espaçamento nem população; sem SPV digitado, pede e não mostra Copiar.
+const forageHtml = render([card({ id: "forrageira", ...forage(), notes: "Dose fictícia de 3 kg SPV/ha." })]);
+assert.match(forageHtml, /Dose de SPV desejada \(kg\/ha\)/);
+assert.match(forageHtml, /Pontos de VC = SPV × 100/);
+assert.match(forageHtml, /Dose fictícia de 3 kg SPV\/ha\./, "texto de SPV das observações");
+assert.ok(forageHtml.includes(PROMPTS.spvDose), "pede a dose de SPV");
+assert.ok(!forageHtml.includes("População (plantas/ha)"));
+assert.ok(!forageHtml.includes(">outro</button>"));
+assert.ok(!forageHtml.includes(">Copiar</button>"));
+assert.ok(!forageHtml.includes("Já tenho a dose física"), "dose física só no Completo");
+
+// Sem conexão: aviso de fonte e germinação pedida.
+const offlineHtml = render([card()], true);
+assert.match(offlineHtml, /Lista reduzida, sem conexão/);
+assert.ok(offlineHtml.includes(PROMPTS.germination), "sem conexão, pede a germinação");
+assert.equal(render([]), "", "sem culturas, sem cartão");
+
+// Modo Completo lembrado no aparelho: campos do lote aparecem; sementes duras só em leguminosa e forrageira.
+const stored = new Map<string, string>([["technical_assistant_seeding_mode", "complete"]]);
+(globalThis as { localStorage?: unknown }).localStorage = {
+  getItem: (key: string) => stored.get(key) ?? null,
+  setItem: (key: string, value: string) => void stored.set(key, value),
+};
+assert.equal(readStoredMode(), "complete");
+const completeHtml = render([card()]);
+assert.match(completeHtml, /aria-pressed="true"[^>]*>Completo<\/button>/);
+for (const field of ["Pureza (%)", "PMS (g)", "Perda a campo (%)"]) assert.ok(completeHtml.includes(field), `Completo mostra ${field}`);
+assert.ok(!completeHtml.includes("Sementes duras (%)"), "grãos sem sementes duras");
+assert.ok(render([card({ category: "Leguminosas" })]).includes("Sementes duras (%)"), "leguminosa com sementes duras");
+const forageCompleteHtml = render([card({ id: "forrageira", ...forage() })]);
+assert.ok(forageCompleteHtml.includes("Já tenho a dose física"), "dose física no Completo da forrageira");
+assert.ok(forageCompleteHtml.includes("Sementes duras (%)"));
+assert.ok(!forageCompleteHtml.includes("PMS (g)"), "forrageira sem PMS");
+delete (globalThis as { localStorage?: unknown }).localStorage;
+
+// ---- Celular e computador ----
+const source = readFileSync(new URL("../src/components/technical/SeedingRecommendation.tsx", import.meta.url), "utf8");
+assert.doesNotMatch(source, /w-\[\d+px\]|min-w-\[\d+px\]/, "sem largura fixa em px");
+assert.match(source, /min-h-11/, "botões com pelo menos 44 px de altura");
+assert.match(source, /grid grid-cols-1 gap-6 lg:grid-cols-\[minmax\(0,1fr\)_minmax\(0,380px\)\]/, "uma coluna no celular, resultado ao lado no computador");
+assert.match(source, /lg:sticky lg:top-4 lg:self-start/, "resultado fixo ao rolar no computador");
+assert.match(source, /inputMode: "decimal"/, "teclado numérico no celular");
+assert.match(source, /aria-expanded=\{guidanceOpen\}/, "orientações recolhíveis no celular");
 
 console.log("seedingRecommendation.test.ts: ok");
