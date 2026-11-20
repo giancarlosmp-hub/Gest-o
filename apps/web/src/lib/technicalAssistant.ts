@@ -1,5 +1,5 @@
-// Contas do Assistente Técnico (Calculadora de Semeadura e Valor Cultural), sem React, para a tela e os
-// testes usarem a mesma regra.
+// Contas do Assistente Técnico (semeadura e Valor Cultural), sem React. A Recomendação de semeadura
+// (seedingRecommendation.ts) e os testes usam a mesma regra.
 
 /**
  * Lê número digitado no padrão brasileiro: vírgula decimal ("12,5"), ponto de milhar ("180.000",
@@ -17,78 +17,8 @@ export function parseDecimal(value: string | null | undefined): number | null {
   return Number.isFinite(number) ? number : null;
 }
 
-type CultureSeedingDefaultsSource = {
-  populationTargetDefault: number | null;
-  rowSpacingCmDefault: number | null;
-  pmsDefault: number | null;
-  germinationDefault: number | null;
-  purityDefault: number | null;
-};
-
-const toFieldText = (value: number | null) => (value != null ? String(value) : "");
-
-/** Padrões da cultura para os campos da Calculadora de Semeadura (campo vazio quando a cultura não tem). */
-export function cultureSeedingDefaults(culture: CultureSeedingDefaultsSource) {
-  return {
-    populacaoHa: toFieldText(culture.populationTargetDefault),
-    espacamentoCm: toFieldText(culture.rowSpacingCmDefault),
-    pms: toFieldText(culture.pmsDefault),
-    germinacao: toFieldText(culture.germinationDefault),
-    pureza: toFieldText(culture.purityDefault),
-  };
-}
-
-// ---- Campos que a Calculadora de Semeadura pede ----
-
-export type SeedingPromptField = "populacaoHa" | "pms" | "germinacao" | "pureza";
-
-export const SEEDING_FIELD_PROMPTS: Record<SeedingPromptField, string> = {
-  populacaoHa: "Informe a população desejada (plantas/ha).",
-  pms: "Informe o PMS do lote (peso de 1.000 sementes, na etiqueta ou no laudo).",
-  germinacao: "Informe a germinação do lote (no laudo ou na etiqueta).",
-  pureza: "Informe a pureza do lote (no laudo ou na etiqueta).",
-};
-
-export const SEEDS_PER_METER_HINT = "Informe o espaçamento para ver sementes por metro.";
-
 // Mesmo nome de categoria do Catálogo Técnico (ALLOWED_CATEGORIES do importTechnicalCatalog na API).
 export const FORAGE_CATEGORY = "Forrageiras";
-
-type SeedingPromptCulture = {
-  category: string;
-  populationTargetDefault: number | null;
-  pmsDefault: number | null;
-  germinationDefault: number | null;
-  purityDefault: number | null;
-};
-
-type SeedingPromptForm = Record<SeedingPromptField, string>;
-
-const PROMPT_DEFAULT_KEY: Record<SeedingPromptField, keyof Omit<SeedingPromptCulture, "category">> = {
-  populacaoHa: "populationTargetDefault",
-  pms: "pmsDefault",
-  germinacao: "germinationDefault",
-  pureza: "purityDefault",
-};
-
-/**
- * Campos que a tela pede ao usuário: a cultura não tem o padrão e o campo está vazio ou zerado. Assim que
- * um valor maior que zero é digitado, o pedido some. Forrageiras ficam de fora (semeadura por SPV ou
- * pontos de VC, não por plantas/ha).
- */
-export function seedingFieldPrompts(
-  culture: SeedingPromptCulture | null,
-  form: SeedingPromptForm
-): Partial<Record<SeedingPromptField, string>> {
-  if (!culture || culture.category.trim() === FORAGE_CATEGORY) return {};
-  const prompts: Partial<Record<SeedingPromptField, string>> = {};
-  for (const field of Object.keys(SEEDING_FIELD_PROMPTS) as SeedingPromptField[]) {
-    if (culture[PROMPT_DEFAULT_KEY[field]] != null) continue;
-    const typed = parseDecimal(form[field]);
-    if (typed == null || typed <= 0) prompts[field] = SEEDING_FIELD_PROMPTS[field];
-  }
-  return prompts;
-}
 
 export type SeedingInput = {
   populationHa: number;
@@ -318,29 +248,4 @@ export function kgHaRangeMessage(check: KgHaRangeCheck) {
     case "within":
       return `Dentro da faixa de referência (${formatKgHaRange(check.range)}).`;
   }
-}
-
-const formatNumber = (value: number, digits: number) =>
-  value.toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: digits });
-
-/** Texto do "Copiar resultado" da Calculadora de Semeadura (para colar no WhatsApp). */
-export function seedingSummaryText(params: {
-  cultureLabel: string;
-  goalLabel?: string;
-  input: SeedingInput;
-  result: SeedingResult;
-  range: KgHaRange | null;
-}) {
-  const { cultureLabel, goalLabel: goal, input, result, range } = params;
-  if (!result.ready) return "";
-  const title = goal ? `${cultureLabel} (${goal})` : cultureLabel;
-  const spacing = result.seedsPerMeter != null ? `espaçamento ${formatNumber(input.rowSpacingCm, 1)} cm, ` : "";
-  const lines = [
-    `${title}: ${formatNumber(result.kgHa, 2)} kg/ha`,
-    `População ${formatNumber(input.populationHa, 0)} plantas/ha, ${spacing}PMS ${formatNumber(input.pms, 2)} g, germinação ${formatNumber(input.germination, 1)}%, pureza ${formatNumber(input.purity, 1)}%, perda a campo ${formatNumber(result.fieldLossApplied, 1)}%.`,
-  ];
-  if (result.seedsPerMeter != null) lines.push(`${formatNumber(result.seedsPerMeter, 1)} sementes por metro.`);
-  if (range) lines.push(`Faixa de referência: ${formatKgHaRange(range)}.`);
-  lines.push("Estimativa de apoio; não substitui a recomendação de um engenheiro agrônomo.");
-  return lines.join("\n");
 }
