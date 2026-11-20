@@ -1,3 +1,12 @@
+# Assistente Técnico só com a Recomendação de semeadura — código pronto, aguardando merge — 20/11/2026
+
+- A página do Assistente Técnico passa a ter só o cartão "Recomendação de semeadura" (em produção desde o #1050).
+  Saem os cartões "Calculadora de Semeadura", "Indicação rápida kg/ha" e "Valor Cultural (VC)", com o "Restaurar
+  padrões" e a chave `technical_assistant_vc_last` do navegador (valor antigo fica esquecido no aparelho, sem efeito).
+- As contas (`calculateSeeding`, `calculateVc`, faixa e objetivos) continuam em `apps/web/src/lib/technicalAssistant.ts`;
+  saem só as funções que não tinham mais uso. Só web, sem banco e sem migration. Detalhes em `TD-TECHNICAL-CATALOG`
+  ([TECH_DEBT.md](TECH_DEBT.md)).
+
 # Calculadora de Semeadura pede o PMS do lote — código pronto, aguardando merge — 19/11/2026
 
 - Cultura sem PMS, população, germinação ou pureza padrão: o campo fica destacado e pede o valor ("Informe o PMS do

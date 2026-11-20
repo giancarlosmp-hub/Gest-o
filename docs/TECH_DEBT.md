@@ -1917,7 +1917,8 @@ Restam:
 - **Forrageiras** (categoria `Forrageiras`) continuam fora: a tela não pede nada para elas e não calcula, porque a
   fonte dá kg de SPV/ha. O modelo de conta por categoria fica para outro PR.
 - O pedido aparece só quando a cultura não tem o padrão. Campo apagado de cultura com padrão continua sem calcular e
-  sem pedido ("Restaurar padrões" devolve o valor).
+  sem pedido. Em 20/11/2026 a Calculadora de Semeadura saiu da página (com `seedingFieldPrompts` e "Restaurar
+  padrões"); os pedidos de campo ficam na Recomendação de semeadura.
 
 ### TD-TECHNICAL-SEEDS-PER-METER-PURITY — sementes por metro divididas pela pureza
 
@@ -2000,7 +2001,10 @@ final — histórico legado e incidente UltraFV3/Tailscale".
 ### TD-TECHNICAL-CATALOG — Assistente Técnico e Catálogo Técnico
 
 **Prioridade média.** As correções rápidas da tela (padrões ao trocar de cultura, aviso de faixa, perda a campo,
-textos) já entraram. Fica pendente:
+textos) já entraram. Desde 20/11/2026 (código pronto, aguardando merge) a página tem só o cartão "Recomendação de
+semeadura" (`components/technical/SeedingRecommendation.tsx`); os cartões "Calculadora de Semeadura", "Indicação
+rápida kg/ha" e "Valor Cultural (VC)" saíram, com a chave `technical_assistant_vc_last` do navegador. As contas
+continuam em `apps/web/src/lib/technicalAssistant.ts`. Fica pendente:
 
 - **`GET /technical-cultures` sem login** (`apps/api/src/app.ts`): fica antes do `authMiddleware` e devolve slug,
   nome e categoria das culturas ativas. Nenhuma tela usa. Quem chama: `scripts/smoke/api-endpoints-smoke.mjs`
@@ -2009,7 +2013,7 @@ textos) já entraram. Fica pendente:
 - **Dados do catálogo:** padrões repetidos entre culturas, culturas sem faixa kg/ha e valores do seed e da lista
   usada sem conexão (`CULTURE_FALLBACKS`) que a própria calculadora contradiz (ex.: PMS do milho muito abaixo do
   usual). Preenchimento com fonte por número fica em PR próprio.
-- **Modelo por categoria:** forrageiras são recomendadas por pontos de VC ou kg de SPV por hectare, não por
-  plantas/ha; cobertura depende de solteira, mistura ou lanço. Hoje todas usam a mesma conta. Categoria é texto
-  livre e as faixas por objetivo (`goalsJson`) não têm edição na tela.
+- **Modelo por categoria:** forrageiras já seguem pela dose de SPV (kg/ha) na Recomendação de semeadura; cobertura
+  depende de solteira, mistura ou lanço e ainda usa a conta por plantas/ha. Categoria é texto livre e as faixas por
+  objetivo (`goalsJson`) não têm edição na tela.
 - **Sem registro de quem alterou** o catálogo nem de onde veio cada número, e a tabela não tem `tenantId`.
