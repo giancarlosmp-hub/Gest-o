@@ -1,4 +1,15 @@
-# Recomendação de semeadura: termo de conformidade e "germinação ou viabilidade" — código pronto, aguardando merge — 20/11/2026
+# Catálogo Técnico por espécie/grupo (2ª rodada de dados) — código pronto, aguardando merge — 20/11/2026
+
+- `technicalCatalog.json`: 47 culturas, 22 novas (crotalárias ochroleuca e breviflora, ervilha forrageira, capim
+  coracana, alfafa, trevos branco e vermelho, cornichão, festuca, chicória, Brachiaria humidicola, Paspalum notatum,
+  Cynodon dactylon, feijão guandu, crambe, mucuna preta, feijão de porco, amendoim forrageiro, labe-labe, canola,
+  girassol, cevada). Rótulos por espécie: "Braquiária híbrida", "Panicum híbrido", "Panicum maximum"; estilosantes
+  passa a Forrageiras; objetivos de sorgo (silagem, pastejo) e trigo (grão, pastejo, silagem).
+- `sorgo-brs-661` vai para a lista `desativar` (só `isActive=false`). Fonte do tipo `"comercial"` aceita link null.
+- Rodar na VPS depois do deploy: simulação → apply com backup e `--expect` → conferência. Detalhes em
+  `TD-TECHNICAL-CATALOG` ([TECH_DEBT.md](TECH_DEBT.md)).
+
+# Recomendação de semeadura: termo de conformidade e "germinação ou viabilidade" — em produção (#1052) — 20/11/2026
 
 - No campo de germinação, dica para usar a pureza e a germinação ou viabilidade do termo de conformidade (acompanha a
   nota fiscal). O placeholder "Mínimo MAPA: N%" continua.
