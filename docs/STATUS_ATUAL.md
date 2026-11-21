@@ -1,4 +1,17 @@
-# Assistente Técnico só com a Recomendação de semeadura — código pronto, aguardando merge — 20/11/2026
+# Recomendação de semeadura: termo de conformidade e "germinação ou viabilidade" — código pronto, aguardando merge — 20/11/2026
+
+- No campo de germinação, dica para usar a pureza e a germinação ou viabilidade do termo de conformidade (acompanha a
+  nota fiscal). O placeholder "Mínimo MAPA: N%" continua.
+- Forrageiras (categoria Forrageiras): rótulo "Germinação ou viabilidade (%)", linha do resultado, pedidos, VC
+  ("VC = pureza × germinação ou viabilidade") e texto do Copiar/WhatsApp com o mesmo termo. Nota com a fonte: o
+  padrão do MAPA é de germinação (IN 30/2008, Anexo III) e o Anexo I, IV, item 3 (redação da IN 30/2010) permite
+  comercializar braquiárias e Panicum maximum pela viabilidade (tetrazólio).
+- Forrageira no modo Completo: seletor "Análise do termo: Germinação | Viabilidade (tetrazólio)". Com Viabilidade, o
+  campo Sementes duras some e as duras não entram no VC (o tetrazólio já conta a semente dura viável); com
+  Germinação, fica como antes.
+- Fora isso a conta não muda. Só web, sem banco e sem migration.
+
+# Assistente Técnico só com a Recomendação de semeadura — mergeado (#1051) — 20/11/2026
 
 - A página do Assistente Técnico passa a ter só o cartão "Recomendação de semeadura" (em produção desde o #1050).
   Saem os cartões "Calculadora de Semeadura", "Indicação rápida kg/ha" e "Valor Cultural (VC)", com o "Restaurar

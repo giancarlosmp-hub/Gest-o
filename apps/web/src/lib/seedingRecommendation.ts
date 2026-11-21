@@ -37,6 +37,32 @@ export const ORIGIN_LABEL: Record<ValueOrigin, string> = {
   offline_list: "lista reduzida, sem conexão",
 };
 
+// Forrageiras: o padrão do MAPA é de germinação (IN 30/2008, Anexo III), mas braquiárias e Panicum maximum podem
+// ser comercializadas pela viabilidade do tetrazólio (Anexo I, IV, item 3, redação da IN 30/2010). O campo aceita
+// um ou outro e a conta não muda.
+export const GERMINATION_TERM = "germinação";
+export const FORAGE_GERMINATION_TERM = "germinação ou viabilidade";
+
+export const germinationTerm = (forage: boolean) => (forage ? FORAGE_GERMINATION_TERM : GERMINATION_TERM);
+
+export const germinationFieldLabel = (forage: boolean) => (forage ? "Germinação ou viabilidade (%)" : "Germinação (%)");
+
+export const CONFORMITY_TERM_HINT =
+  "Com o termo de conformidade (acompanha a nota fiscal), use a pureza e a germinação ou viabilidade dele.";
+
+export const FORAGE_VIABILITY_NOTE =
+  "Para braquiárias e Panicum maximum, a IN 30/2008 (Anexo I, IV, item 3, redação da IN 30/2010) permite comercializar com viabilidade (tetrazólio); nas demais forrageiras, use a germinação do termo de conformidade.";
+
+export const FORAGE_VC_FORMULA = "VC = pureza × germinação ou viabilidade.";
+
+/** Forrageira: análise do termo de conformidade. O tetrazólio já conta a semente dura viável. */
+export type ForageAnalysis = "germination" | "viability";
+
+export const FORAGE_ANALYSIS_LABEL: Record<ForageAnalysis, string> = {
+  germination: "Germinação",
+  viability: "Viabilidade (tetrazólio)",
+};
+
 export const MAPA_GERMINATION_WARNING =
   "Estimativa segura com a germinação mínima legal; com o lote faturado, geralmente será um pouco menos.";
 
@@ -44,6 +70,8 @@ export const PROMPTS = {
   population: "Informe a população desejada (plantas/ha).",
   germination: "Informe a germinação do lote.",
   germinationRange: "A germinação deve ficar entre 0 e 100%.",
+  forageGermination: "Informe a germinação ou viabilidade do lote.",
+  forageGerminationRange: "A germinação ou viabilidade deve ficar entre 0 e 100%.",
   purity: "Informe a pureza do lote.",
   puritySimple: "Esta cultura não tem pureza padrão: abra o modo Completo e informe a pureza do lote.",
   purityRange: "A pureza deve ficar entre 0 e 100%.",
@@ -82,6 +110,8 @@ export type RecommendationForm = {
   physicalDose: string;
   /** Forrageira, modo Completo: "physical" = "Já tenho a dose física". */
   forageDoseInput: "spv" | "physical";
+  /** Forrageira, modo Completo: com "viability" as sementes duras não entram no VC. */
+  forageAnalysis: ForageAnalysis;
 };
 
 export const EMPTY_RECOMMENDATION_FORM: RecommendationForm = {
@@ -96,6 +126,7 @@ export const EMPTY_RECOMMENDATION_FORM: RecommendationForm = {
   spvDose: "",
   physicalDose: "",
   forageDoseInput: "spv",
+  forageAnalysis: "germination",
 };
 
 export type UsedValue = { value: number; origin: ValueOrigin } | null;
@@ -144,6 +175,10 @@ export const isForageCulture = (culture: { category: string }) => culture.catego
 export const acceptsHardSeeds = (culture: { category: string }) =>
   isForageCulture(culture) || culture.category.trim() === LEGUME_CATEGORY;
 
+/** Sementes duras no modo Completo: leguminosa e forrageira, exceto forrageira analisada por viabilidade. */
+export const hardSeedsApply = (culture: { category: string }, form: Pick<RecommendationForm, "forageAnalysis">) =>
+  acceptsHardSeeds(culture) && !(isForageCulture(culture) && form.forageAnalysis === "viability");
+
 const positive = (value: number | null | undefined): number | null =>
   value != null && Number.isFinite(value) && value > 0 ? value : null;
 
@@ -188,10 +223,10 @@ export function seedingRecommendation(
   let germination: UsedValue = null;
   const germinationTyped = typedPercent(form.germination);
   const germinationDefault = offline ? null : positive(culture.germinationDefault);
-  if (germinationTyped === "range") prompts.push(PROMPTS.germinationRange);
+  if (germinationTyped === "range") prompts.push(forage ? PROMPTS.forageGerminationRange : PROMPTS.germinationRange);
   else if (germinationTyped != null) germination = { value: germinationTyped, origin: "typed" };
   else if (germinationDefault != null && germinationDefault <= 100) germination = { value: germinationDefault, origin: "mapa_minimum" };
-  else prompts.push(PROMPTS.germination);
+  else prompts.push(forage ? PROMPTS.forageGermination : PROMPTS.germination);
 
   // Espaçamento (só no caminho de sementes por metro).
   const rowSpacingCm = forage ? null : positive(parseDecimal(form.spacingCm));
@@ -214,7 +249,7 @@ export function seedingRecommendation(
 
   let hardSeeds = 0;
   let hardSeedsRangeError = false;
-  if (complete && acceptsHardSeeds(culture)) {
+  if (complete && hardSeedsApply(culture, form)) {
     const typed = typedPercent(form.hardSeeds);
     if (typed === "range") hardSeedsRangeError = true;
     else if (typed != null) hardSeeds = typed;
@@ -236,7 +271,7 @@ export function seedingRecommendation(
     fieldLossPercent,
   });
 
-  // VC = pureza × germinação efetiva (germinação + sementes duras, até 100%).
+  // VC = pureza × germinação efetiva (germinação, ou viabilidade na forrageira, + sementes duras, até 100%).
   const vcResult =
     germination != null && purity != null && !hardSeedsRangeError
       ? calculateVc({
@@ -327,9 +362,10 @@ const withOrigin = (text: string, used: UsedValue) =>
 
 const vcLine = (rec: SeedingRecommendation) => {
   if (rec.vc == null || rec.correctionFactor == null || rec.effectiveGermination == null) return null;
+  const term = germinationTerm(rec.path === "forage");
   const germination = rec.hardSeeds > 0
-    ? `germinação efetiva ${formatNumber(rec.effectiveGermination, 1)}% (germinação ${formatNumber(rec.germination?.value ?? 0, 1)}% + sementes duras ${formatNumber(rec.hardSeeds, 1)}%)`
-    : withOrigin(`germinação ${formatNumber(rec.germination?.value ?? 0, 1)}%`, rec.germination);
+    ? `${term} efetiva ${formatNumber(rec.effectiveGermination, 1)}% (${term} ${formatNumber(rec.germination?.value ?? 0, 1)}% + sementes duras ${formatNumber(rec.hardSeeds, 1)}%)`
+    : withOrigin(`${term} ${formatNumber(rec.germination?.value ?? 0, 1)}%`, rec.germination);
   return `VC do lote ${formatNumber(rec.vc, 1)}% = ${withOrigin(`pureza ${formatNumber(rec.purity?.value ?? 0, 1)}%`, rec.purity)} × ${germination}; fator de correção ${formatNumber(rec.correctionFactor, 2)}.`;
 };
 

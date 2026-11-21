@@ -3,15 +3,22 @@ import { Link } from "react-router-dom";
 import type { TechnicalCulture } from "../../lib/technicalCultures";
 import { cultureGoalOptions, formatKgHaRange, kgHaRangeMessage } from "../../lib/technicalAssistant";
 import {
+  CONFORMITY_TERM_HINT,
   EMPTY_RECOMMENDATION_FORM,
+  FORAGE_ANALYSIS_LABEL,
+  FORAGE_VC_FORMULA,
+  FORAGE_VIABILITY_NOTE,
   ORIGIN_LABEL,
   SPACING_OPTIONS_CM,
+  type ForageAnalysis,
   type RecommendationForm,
   type RecommendationMode,
   type UsedValue,
-  acceptsHardSeeds,
   formatNumber,
   formatSeedsPerMeter,
+  germinationFieldLabel,
+  germinationTerm,
+  hardSeedsApply,
   isForageCulture,
   readStoredMode,
   seedingRecommendation,
@@ -57,7 +64,7 @@ function ResultRow({ label, children }: { label: string; children: ReactNode }) 
   );
 }
 
-function NumberField(props: { label: string; value: string; placeholder: string; onChange: (value: string) => void }) {
+function NumberField(props: { label: string; value: string; placeholder: string; hint?: string; onChange: (value: string) => void }) {
   return (
     <label className="block text-sm text-slate-700">
       {props.label}
@@ -68,6 +75,7 @@ function NumberField(props: { label: string; value: string; placeholder: string;
         value={props.value}
         onChange={(event) => props.onChange(event.target.value)}
       />
+      {props.hint ? <span className="mt-1 block text-xs text-slate-500">{props.hint}</span> : null}
     </label>
   );
 }
@@ -84,6 +92,12 @@ const formFor = (culture: TechnicalCulture | null, fieldLoss = EMPTY_RECOMMENDAT
   fieldLoss,
   spacingCm: spacingFromCulture(culture).spacingCm,
 });
+
+/** "Germinação" ou "Germinação ou viabilidade" (forrageira), com inicial maiúscula. */
+const germinationLabelText = (forage: boolean) => {
+  const term = germinationTerm(forage);
+  return term.charAt(0).toUpperCase() + term.slice(1);
+};
 
 const defaultPlaceholder = (value: number | null, prefix: string, unit: string, digits: number, fallback: string) =>
   value != null && value > 0 ? `${prefix}: ${formatNumber(value, digits)}${unit}` : fallback;
@@ -169,7 +183,7 @@ export default function SeedingRecommendation({ cultures, offline, canConfigureC
   if (!cultures.length || !culture || !rec) return null;
 
   const catalogDefault = (value: number | null) => (offline ? null : value);
-  const hardSeedsVisible = complete && acceptsHardSeeds(culture);
+  const hardSeedsVisible = complete && hardSeedsApply(culture, form);
   const physicalInput = forage && complete && form.forageDoseInput === "physical";
 
   const guidance = (
@@ -180,6 +194,8 @@ export default function SeedingRecommendation({ cultures, offline, canConfigureC
           <dd className="text-slate-800">
             Em kg de sementes puras viáveis (SPV) por hectare; veja as observações. Pontos de VC = SPV × 100.
           </dd>
+          <dd className="mt-1 text-slate-800">{FORAGE_VC_FORMULA}</dd>
+          <dd className="mt-1 text-slate-700">{FORAGE_VIABILITY_NOTE}</dd>
         </div>
       ) : (
         <>
@@ -385,9 +401,39 @@ export default function SeedingRecommendation({ cultures, offline, canConfigureC
 
           {/* 3. Lote */}
           <section className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {forage && complete ? (
+              <fieldset className="sm:col-span-2">
+                <legend className="text-sm text-slate-700">Análise do termo</legend>
+                <div className="mt-1 flex flex-wrap gap-2" role="group" aria-label="Análise do termo">
+                  {(Object.keys(FORAGE_ANALYSIS_LABEL) as ForageAnalysis[]).map((option) => (
+                    <button
+                      key={option}
+                      type="button"
+                      aria-pressed={form.forageAnalysis === option}
+                      onClick={() => setField("forageAnalysis", option)}
+                      className={chipClass(form.forageAnalysis === option)}
+                    >
+                      {FORAGE_ANALYSIS_LABEL[option]}
+                    </button>
+                  ))}
+                </div>
+                {form.forageAnalysis === "viability" ? (
+                  <p className="mt-1 text-xs text-slate-500">
+                    O tetrazólio já conta a semente dura viável: sementes duras não entram no VC.
+                  </p>
+                ) : null}
+              </fieldset>
+            ) : null}
             <NumberField
-              label="Germinação (%)"
-              placeholder={defaultPlaceholder(catalogDefault(culture.germinationDefault), "Mínimo MAPA", "%", 1, "Germinação do lote (%)")}
+              label={germinationFieldLabel(forage)}
+              placeholder={defaultPlaceholder(
+                catalogDefault(culture.germinationDefault),
+                "Mínimo MAPA",
+                "%",
+                1,
+                forage ? "Germinação ou viabilidade do lote (%)" : "Germinação do lote (%)"
+              )}
+              hint={CONFORMITY_TERM_HINT}
               value={form.germination}
               onChange={(value) => setField("germination", value)}
             />
@@ -486,7 +532,7 @@ export default function SeedingRecommendation({ cultures, offline, canConfigureC
               ) : null}
               {rec.germination ? (
                 <li className="flex flex-wrap items-center gap-1.5">
-                  Germinação {formatNumber(rec.germination.value, 1)}% <OriginBadge used={rec.germination} />
+                  {germinationLabelText(rec.path === "forage")} {formatNumber(rec.germination.value, 1)}% <OriginBadge used={rec.germination} />
                   {rec.hardSeeds > 0 ? <span>+ sementes duras {formatNumber(rec.hardSeeds, 1)}% (só no VC)</span> : null}
                 </li>
               ) : null}
