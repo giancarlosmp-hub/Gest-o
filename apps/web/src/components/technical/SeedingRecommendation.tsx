@@ -5,18 +5,20 @@ import { cultureGoalOptions, formatKgHaRange, kgHaRangeMessage } from "../../lib
 import {
   CONFORMITY_TERM_HINT,
   EMPTY_RECOMMENDATION_FORM,
+  FORAGE_ANALYSIS_LABEL,
   FORAGE_VC_FORMULA,
   FORAGE_VIABILITY_NOTE,
   ORIGIN_LABEL,
   SPACING_OPTIONS_CM,
+  type ForageAnalysis,
   type RecommendationForm,
   type RecommendationMode,
   type UsedValue,
-  acceptsHardSeeds,
   formatNumber,
   formatSeedsPerMeter,
   germinationFieldLabel,
   germinationTerm,
+  hardSeedsApply,
   isForageCulture,
   readStoredMode,
   seedingRecommendation,
@@ -181,7 +183,7 @@ export default function SeedingRecommendation({ cultures, offline, canConfigureC
   if (!cultures.length || !culture || !rec) return null;
 
   const catalogDefault = (value: number | null) => (offline ? null : value);
-  const hardSeedsVisible = complete && acceptsHardSeeds(culture);
+  const hardSeedsVisible = complete && hardSeedsApply(culture, form);
   const physicalInput = forage && complete && form.forageDoseInput === "physical";
 
   const guidance = (
@@ -399,6 +401,29 @@ export default function SeedingRecommendation({ cultures, offline, canConfigureC
 
           {/* 3. Lote */}
           <section className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {forage && complete ? (
+              <fieldset className="sm:col-span-2">
+                <legend className="text-sm text-slate-700">Análise do termo</legend>
+                <div className="mt-1 flex flex-wrap gap-2" role="group" aria-label="Análise do termo">
+                  {(Object.keys(FORAGE_ANALYSIS_LABEL) as ForageAnalysis[]).map((option) => (
+                    <button
+                      key={option}
+                      type="button"
+                      aria-pressed={form.forageAnalysis === option}
+                      onClick={() => setField("forageAnalysis", option)}
+                      className={chipClass(form.forageAnalysis === option)}
+                    >
+                      {FORAGE_ANALYSIS_LABEL[option]}
+                    </button>
+                  ))}
+                </div>
+                {form.forageAnalysis === "viability" ? (
+                  <p className="mt-1 text-xs text-slate-500">
+                    O tetrazólio já conta a semente dura viável: sementes duras não entram no VC.
+                  </p>
+                ) : null}
+              </fieldset>
+            ) : null}
             <NumberField
               label={germinationFieldLabel(forage)}
               placeholder={defaultPlaceholder(
