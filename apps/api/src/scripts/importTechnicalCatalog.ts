@@ -82,6 +82,9 @@ export type CatalogEntry = CulturePayload & {
 
 export const KEPT_NOTE = "valor anterior, sem fonte confirmada";
 
+/** Fonte sem documento publicado (recomendação comercial do fornecedor): única que aceita link null. */
+export const SOURCE_TYPE_COMMERCIAL = "comercial";
+
 type SourcedValue = { value: unknown; sources?: unknown; detail?: unknown; reason?: unknown; manter?: unknown };
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
@@ -133,8 +136,11 @@ export function parseCatalogFile(content: string): CatalogEntry[] {
   if (!isRecord(catalog) || catalog.format !== CATALOG_FORMAT) throw new Error("Arquivo do catálogo em formato inesperado.");
   if (!isRecord(catalog.fontes)) throw new Error("Arquivo do catálogo sem fontes.");
   for (const [id, source] of Object.entries(catalog.fontes)) {
-    if (!isRecord(source) || !nonEmptyText(source.orgao) || !nonEmptyText(source.titulo) || !nonEmptyText(source.link)) {
-      throw new Error(`Fonte ${id} sem órgão, título ou link.`);
+    // Recomendação comercial informada pelo fornecedor não tem link: só ela pode vir com link null.
+    if (isRecord(source) && source.tipo !== undefined && source.tipo !== SOURCE_TYPE_COMMERCIAL) throw new Error(`Fonte ${id} com tipo inválido.`);
+    const commercialWithoutLink = isRecord(source) && source.tipo === SOURCE_TYPE_COMMERCIAL && source.link === null;
+    if (!isRecord(source) || !nonEmptyText(source.orgao) || !nonEmptyText(source.titulo) || !(nonEmptyText(source.link) || commercialWithoutLink)) {
+      throw new Error(`Fonte ${id} sem órgão, título ou link (link null só em fonte do tipo "${SOURCE_TYPE_COMMERCIAL}").`);
     }
     if (!(source.ano === null || (typeof source.ano === "number" && Number.isInteger(source.ano)))) throw new Error(`Fonte ${id} com ano inválido.`);
   }
