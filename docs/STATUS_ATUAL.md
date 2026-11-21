@@ -6,7 +6,10 @@
   ("VC = pureza × germinação ou viabilidade") e texto do Copiar/WhatsApp com o mesmo termo. Nota com a fonte: o
   padrão do MAPA é de germinação (IN 30/2008, Anexo III) e o Anexo I, IV, item 3 (redação da IN 30/2010) permite
   comercializar braquiárias e Panicum maximum pela viabilidade (tetrazólio).
-- A conta não muda. Só web, sem banco e sem migration.
+- Forrageira no modo Completo: seletor "Análise do termo: Germinação | Viabilidade (tetrazólio)". Com Viabilidade, o
+  campo Sementes duras some e as duras não entram no VC (o tetrazólio já conta a semente dura viável); com
+  Germinação, fica como antes.
+- Fora isso a conta não muda. Só web, sem banco e sem migration.
 
 # Assistente Técnico só com a Recomendação de semeadura — mergeado (#1051) — 20/11/2026
 
