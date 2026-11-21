@@ -55,6 +55,14 @@ export const FORAGE_VIABILITY_NOTE =
 
 export const FORAGE_VC_FORMULA = "VC = pureza × germinação ou viabilidade.";
 
+/** Forrageira: análise do termo de conformidade. O tetrazólio já conta a semente dura viável. */
+export type ForageAnalysis = "germination" | "viability";
+
+export const FORAGE_ANALYSIS_LABEL: Record<ForageAnalysis, string> = {
+  germination: "Germinação",
+  viability: "Viabilidade (tetrazólio)",
+};
+
 export const MAPA_GERMINATION_WARNING =
   "Estimativa segura com a germinação mínima legal; com o lote faturado, geralmente será um pouco menos.";
 
@@ -102,6 +110,8 @@ export type RecommendationForm = {
   physicalDose: string;
   /** Forrageira, modo Completo: "physical" = "Já tenho a dose física". */
   forageDoseInput: "spv" | "physical";
+  /** Forrageira, modo Completo: com "viability" as sementes duras não entram no VC. */
+  forageAnalysis: ForageAnalysis;
 };
 
 export const EMPTY_RECOMMENDATION_FORM: RecommendationForm = {
@@ -116,6 +126,7 @@ export const EMPTY_RECOMMENDATION_FORM: RecommendationForm = {
   spvDose: "",
   physicalDose: "",
   forageDoseInput: "spv",
+  forageAnalysis: "germination",
 };
 
 export type UsedValue = { value: number; origin: ValueOrigin } | null;
@@ -163,6 +174,10 @@ export const isForageCulture = (culture: { category: string }) => culture.catego
 /** Sementes duras: leguminosas e forrageiras, só no VC. */
 export const acceptsHardSeeds = (culture: { category: string }) =>
   isForageCulture(culture) || culture.category.trim() === LEGUME_CATEGORY;
+
+/** Sementes duras no modo Completo: leguminosa e forrageira, exceto forrageira analisada por viabilidade. */
+export const hardSeedsApply = (culture: { category: string }, form: Pick<RecommendationForm, "forageAnalysis">) =>
+  acceptsHardSeeds(culture) && !(isForageCulture(culture) && form.forageAnalysis === "viability");
 
 const positive = (value: number | null | undefined): number | null =>
   value != null && Number.isFinite(value) && value > 0 ? value : null;
@@ -234,7 +249,7 @@ export function seedingRecommendation(
 
   let hardSeeds = 0;
   let hardSeedsRangeError = false;
-  if (complete && acceptsHardSeeds(culture)) {
+  if (complete && hardSeedsApply(culture, form)) {
     const typed = typedPercent(form.hardSeeds);
     if (typed === "range") hardSeedsRangeError = true;
     else if (typed != null) hardSeeds = typed;
