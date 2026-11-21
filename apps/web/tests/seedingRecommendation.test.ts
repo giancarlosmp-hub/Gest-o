@@ -15,6 +15,7 @@ import {
   SPACING_OPTIONS_CM,
   VC_NO_PURITY_SIMPLE,
   acceptsHardSeeds,
+  hardSeedsApply,
   formatSeedsPerMeter,
   readStoredMode,
   seedingRecommendation,
@@ -265,6 +266,33 @@ assert.deepEqual(
   seedingRecommendation(forage(), form({ spvDose: "3", germination: "120" }), simple).prompts,
   [PROMPTS.forageGerminationRange]
 );
+// Análise do termo na forrageira (modo Completo). Germinação: sementes duras entram no VC (80 × 0,8 = 64%).
+const byGermination = seedingRecommendation(
+  forage(),
+  form({ spvDose: "3", germination: "70", purity: "80", hardSeeds: "10", forageAnalysis: "germination" }),
+  complete
+);
+assert.equal(byGermination.hardSeeds, 10);
+close(byGermination.effectiveGermination, 80, "germinação + duras");
+close(byGermination.vc, 64, "VC com germinação e duras");
+// Viabilidade (tetrazólio): sementes duras digitadas não entram (80 × 0,7 = 56%).
+const byViability = seedingRecommendation(
+  forage(),
+  form({ spvDose: "3", germination: "70", purity: "80", hardSeeds: "10", forageAnalysis: "viability" }),
+  complete
+);
+assert.equal(byViability.hardSeeds, 0, "viabilidade ignora sementes duras");
+close(byViability.effectiveGermination, 70, "só a viabilidade");
+close(byViability.vc, 56, "VC com viabilidade");
+assert.deepEqual(byViability.prompts, []);
+assert.doesNotMatch(seedingRecommendationText("Forrageira Teste B", "", byViability), /sementes duras/);
+// Viabilidade só vale para forrageira: leguminosa continua com sementes duras.
+assert.equal(hardSeedsApply({ category: "Forrageiras" }, { forageAnalysis: "germination" }), true);
+assert.equal(hardSeedsApply({ category: "Forrageiras" }, { forageAnalysis: "viability" }), false);
+assert.equal(hardSeedsApply({ category: "Leguminosas" }, { forageAnalysis: "viability" }), true);
+assert.equal(hardSeedsApply({ category: "Grãos" }, { forageAnalysis: "germination" }), false);
+assert.equal(EMPTY_RECOMMENDATION_FORM.forageAnalysis, "germination", "começa em Germinação");
+
 const forageTyped = seedingRecommendation(forage(), form({ spvDose: "3", germination: "60" }), simple);
 assert.equal(forageTyped.vc, spv.vc, "viabilidade digitada dá o mesmo VC que a germinação");
 
@@ -322,6 +350,7 @@ assert.ok(!forageHtml.includes("População (plantas/ha)"));
 assert.ok(!forageHtml.includes(">outro</button>"));
 assert.ok(!forageHtml.includes(">Copiar</button>"));
 assert.ok(!forageHtml.includes("Já tenho a dose física"), "dose física só no Completo");
+assert.ok(!forageHtml.includes("Análise do termo"), "seletor da análise só no Completo");
 assert.match(forageHtml, /Germinação ou viabilidade \(%\)/, "rótulo da forrageira");
 assert.match(forageHtml, /placeholder="Mínimo MAPA: 60%"/, "placeholder do mínimo MAPA continua");
 assert.ok(forageHtml.includes(CONFORMITY_TERM_HINT), "dica do termo de conformidade na forrageira");
@@ -356,7 +385,12 @@ assert.ok(!completeHtml.includes("Sementes duras (%)"), "grãos sem sementes dur
 assert.ok(render([card({ category: "Leguminosas" })]).includes("Sementes duras (%)"), "leguminosa com sementes duras");
 const forageCompleteHtml = render([card({ id: "forrageira", ...forage() })]);
 assert.ok(forageCompleteHtml.includes("Já tenho a dose física"), "dose física no Completo da forrageira");
-assert.ok(forageCompleteHtml.includes("Sementes duras (%)"));
+assert.ok(forageCompleteHtml.includes("Sementes duras (%)"), "Germinação (padrão): campo de sementes duras");
+assert.match(forageCompleteHtml, /Análise do termo/);
+assert.match(forageCompleteHtml, /aria-pressed="true"[^>]*>Germinação<\/button>/, "começa em Germinação");
+assert.match(forageCompleteHtml, /aria-pressed="false"[^>]*>Viabilidade \(tetrazólio\)<\/button>/);
+assert.ok(!completeHtml.includes("Análise do termo"), "grãos sem seletor da análise");
+assert.ok(!render([card({ category: "Leguminosas" })]).includes("Análise do termo"), "leguminosa sem seletor da análise");
 assert.ok(!forageCompleteHtml.includes("PMS (g)"), "forrageira sem PMS");
 delete (globalThis as { localStorage?: unknown }).localStorage;
 
@@ -368,5 +402,6 @@ assert.match(source, /grid grid-cols-1 gap-6 lg:grid-cols-\[minmax\(0,1fr\)_minm
 assert.match(source, /lg:sticky lg:top-4 lg:self-start/, "resultado fixo ao rolar no computador");
 assert.match(source, /inputMode: "decimal"/, "teclado numérico no celular");
 assert.match(source, /aria-expanded=\{guidanceOpen\}/, "orientações recolhíveis no celular");
+assert.match(source, /hardSeedsVisible = complete && hardSeedsApply\(culture, form\)/, "com Viabilidade o campo de sementes duras some");
 
 console.log("seedingRecommendation.test.ts: ok");
