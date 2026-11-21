@@ -326,7 +326,11 @@ assert.throws(() => parseBackupFile(JSON.stringify({ format: BACKUP_FORMAT, upda
 {
   const withDeactivations = (culturas: unknown[], desativar: unknown) => JSON.stringify({ format: CATALOG_FORMAT, fontes: FONTES, culturas, desativar });
   assert.deepEqual(parseCatalogDeactivations(catalogText([culture("cultura-a")])), [], "sem lista, nada a desativar");
-  assert.deepEqual(parseCatalogDeactivations(readFileSync(DEFAULT_CATALOG_FILE, "utf8")), [], "arquivo do PR sem desativações");
+  const realDeactivations = parseCatalogDeactivations(readFileSync(DEFAULT_CATALOG_FILE, "utf8"));
+  assert.ok(
+    realDeactivations.every((item) => item.motivo && !realPayloads.some((payload) => payload.slug === item.slug)),
+    "arquivo do PR: cultura desativada tem motivo e fica fora de culturas"
+  );
   assert.deepEqual(
     parseCatalogDeactivations(withDeactivations([culture("cultura-a")], [{ slug: "antiga-x", motivo: " Motivo fictício. " }])),
     [{ slug: "antiga-x", motivo: "Motivo fictício." }]
