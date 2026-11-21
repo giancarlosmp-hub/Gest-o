@@ -5,7 +5,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import SeedingRecommendation from "../src/components/technical/SeedingRecommendation";
 import type { TechnicalCulture } from "../src/lib/technicalCultures";
 import {
+  CONFORMITY_TERM_HINT,
   EMPTY_RECOMMENDATION_FORM,
+  FORAGE_VC_FORMULA,
+  FORAGE_VIABILITY_NOTE,
   MAPA_GERMINATION_WARNING,
   ORIGIN_LABEL,
   PROMPTS,
@@ -233,7 +236,7 @@ assert.equal(
   [
     "Forrageira Teste B: 8,3 kg/ha do lote (dose física)",
     "Dose de SPV 3 kg/ha (300 pontos de VC).",
-    "VC do lote 36% = pureza 60% (mínimo legal do MAPA) × germinação 60% (mínimo legal do MAPA); fator de correção 2,78.",
+    "VC do lote 36% = pureza 60% (mínimo legal do MAPA) × germinação ou viabilidade 60% (mínimo legal do MAPA); fator de correção 2,78.",
     MAPA_GERMINATION_WARNING,
     "Estimativa de apoio; não substitui a recomendação de um engenheiro agrônomo.",
   ].join("\n")
@@ -242,6 +245,28 @@ assert.match(
   seedingRecommendationText("Cultura Teste C", "", legume),
   /germinação efetiva 90% \(germinação 80% \+ sementes duras 10%\)/
 );
+assert.doesNotMatch(seedingRecommendationText("Cultura Teste C", "", legume), /viabilidade/, "leguminosa só com germinação");
+// Forrageira com sementes duras: o texto usa "germinação ou viabilidade".
+assert.match(
+  seedingRecommendationText(
+    "Forrageira Teste B",
+    "",
+    seedingRecommendation(forage(), form({ spvDose: "3", germination: "70", purity: "80", hardSeeds: "10" }), complete)
+  ),
+  /× germinação ou viabilidade efetiva 80% \(germinação ou viabilidade 70% \+ sementes duras 10%\);/
+);
+
+// Forrageira: pedidos com "germinação ou viabilidade"; a conta é a mesma da germinação.
+assert.deepEqual(
+  seedingRecommendation(forage({ germinationDefault: null }), form({ spvDose: "3" }), simple).prompts,
+  [PROMPTS.forageGermination]
+);
+assert.deepEqual(
+  seedingRecommendation(forage(), form({ spvDose: "3", germination: "120" }), simple).prompts,
+  [PROMPTS.forageGerminationRange]
+);
+const forageTyped = seedingRecommendation(forage(), form({ spvDose: "3", germination: "60" }), simple);
+assert.equal(forageTyped.vc, spv.vc, "viabilidade digitada dá o mesmo VC que a germinação");
 
 assert.equal(whatsappShareUrl("16,9 sementes & mais"), "https://wa.me/?text=16%2C9%20sementes%20%26%20mais");
 
@@ -297,6 +322,19 @@ assert.ok(!forageHtml.includes("População (plantas/ha)"));
 assert.ok(!forageHtml.includes(">outro</button>"));
 assert.ok(!forageHtml.includes(">Copiar</button>"));
 assert.ok(!forageHtml.includes("Já tenho a dose física"), "dose física só no Completo");
+assert.match(forageHtml, /Germinação ou viabilidade \(%\)/, "rótulo da forrageira");
+assert.match(forageHtml, /placeholder="Mínimo MAPA: 60%"/, "placeholder do mínimo MAPA continua");
+assert.ok(forageHtml.includes(CONFORMITY_TERM_HINT), "dica do termo de conformidade na forrageira");
+assert.ok(forageHtml.includes(FORAGE_VC_FORMULA), "VC = pureza × germinação ou viabilidade");
+assert.ok(forageHtml.includes(FORAGE_VIABILITY_NOTE), "nota da IN 30/2008");
+assert.match(forageHtml, /Germinação ou viabilidade 60%/, "linha do resultado com o termo da forrageira");
+
+// Não forrageira: rótulo "Germinação (%)", mesma dica, sem viabilidade.
+assert.match(html, />Germinação \(%\)<input/, "rótulo da não forrageira");
+assert.match(html, /placeholder="Mínimo MAPA: 80%"/);
+assert.ok(html.includes(CONFORMITY_TERM_HINT), "dica do termo de conformidade");
+assert.ok(!html.includes(FORAGE_VIABILITY_NOTE));
+assert.ok(!html.includes("Germinação ou viabilidade"));
 
 // Sem conexão: aviso de fonte e germinação pedida.
 const offlineHtml = render([card()], true);
