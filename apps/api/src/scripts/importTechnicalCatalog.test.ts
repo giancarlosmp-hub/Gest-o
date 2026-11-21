@@ -11,6 +11,7 @@ import {
   WRITTEN_FIELDS,
   applyImport,
   parseBackupFile,
+  parseCatalogDeactivations,
   parseCatalogFile,
   parseCliArgs,
   planImport,
@@ -227,6 +228,10 @@ assert.deepEqual(summarizePlan(plan), {
   mudancasDeCategoria: ["muda"],
   mantidosSemFonte: {},
   mantidosDiferentesDoArquivo: [],
+  desativar: 0,
+  culturasParaDesativar: [],
+  jaInativas: [],
+  desativarAusentesNoBanco: [],
 });
 assert.ok(!JSON.stringify(summarizePlan(plan)).includes("Observação"), "resumo sem textos");
 
@@ -265,6 +270,7 @@ assert.equal(backup.updated[0].before.pmsDefault, 60);
 assert.equal(backup.updated[0].before.category, "Grãos");
 assert.deepEqual(backup.created.map((item) => item.slug), ["nova"]);
 assert.deepEqual(Object.keys(backup.updated[0].before).sort(), [...WRITTEN_FIELDS].sort());
+assert.deepEqual(backup.deactivated, [], "sem lista desativar, nada desativado");
 
 // Segunda rodada: nada a gravar.
 assert.equal(summarizePlan(planImport([...store.values()], payloads)).expect, 0);
@@ -280,10 +286,10 @@ assert.equal(summarizePlan(planImport([...store.values()], payloads)).expect, 0)
 // Restore: simulação não grava; apply devolve valores e desativa a nova.
 {
   const simulated = await restoreFromBackup(inTransaction(store), backup, false);
-  assert.deepEqual(simulated, { modo: "simulação da restauração (nada foi gravado)", culturasParaVoltar: 1, culturasParaDesativar: 1 });
+  assert.deepEqual(simulated, { modo: "simulação da restauração (nada foi gravado)", culturasParaVoltar: 1, culturasParaDesativar: 1, culturasParaReativar: 0 });
   assert.equal(store.get("muda")!.category, "Cobertura");
   const restored = await restoreFromBackup(inTransaction(store), backup, true);
-  assert.deepEqual(restored, { modo: "restore concluído", culturasRestauradas: 1, culturasDesativadas: 1 });
+  assert.deepEqual(restored, { modo: "restore concluído", culturasRestauradas: 1, culturasDesativadas: 1, culturasReativadas: 0 });
   assert.equal(store.get("muda")!.category, "Grãos");
   assert.equal(store.get("muda")!.pmsDefault, 60);
   assert.deepEqual(store.get("muda")!.goalsJson, { grao: { max: 15, min: 10 } });
@@ -302,6 +308,101 @@ assert.equal(summarizePlan(planImport([...store.values()], payloads)).expect, 0)
   assert.equal(JSON.stringify([...again]), snapshot);
 }
 assert.throws(() => parseBackupFile(JSON.stringify({ format: BACKUP_FORMAT, updated: [{ slug: "x", before: {}, after: {} }], created: [] })), /incompleto/);
+assert.deepEqual(parseBackupFile(JSON.stringify({ format: BACKUP_FORMAT, createdAt: "x", updated: [], created: [] })).deactivated, [], "backup antigo, sem a lista: nada a reativar");
+assert.throws(() => parseBackupFile(JSON.stringify({ format: BACKUP_FORMAT, updated: [], created: [], deactivated: [{}] })), /incompleto/);
+assert.throws(() => parseBackupFile(JSON.stringify({ format: BACKUP_FORMAT, updated: [], created: [], deactivated: "x" })), /formato inesperado/);
+
+// ---------------------------------------------------------------------------------------------
+// Desativação: lista "desativar" do arquivo (slug + motivo); só isActive=false, nunca apaga.
+{
+  const withDeactivations = (culturas: unknown[], desativar: unknown) => JSON.stringify({ format: CATALOG_FORMAT, fontes: FONTES, culturas, desativar });
+  assert.deepEqual(parseCatalogDeactivations(catalogText([culture("cultura-a")])), [], "sem lista, nada a desativar");
+  assert.deepEqual(parseCatalogDeactivations(readFileSync(DEFAULT_CATALOG_FILE, "utf8")), [], "arquivo do PR sem desativações");
+  assert.deepEqual(
+    parseCatalogDeactivations(withDeactivations([culture("cultura-a")], [{ slug: "antiga-x", motivo: " Motivo fictício. " }])),
+    [{ slug: "antiga-x", motivo: "Motivo fictício." }]
+  );
+  const rejectsDeactivation = (desativar: unknown, pattern: RegExp, message: string) =>
+    assert.throws(() => parseCatalogDeactivations(withDeactivations([culture("cultura-a")], desativar)), pattern, message);
+  rejectsDeactivation({ slug: "antiga-x" }, /inválida/, "lista que não é lista");
+  rejectsDeactivation([{ slug: "antiga-x" }], /sem motivo/, "desativação sem motivo");
+  rejectsDeactivation([{ slug: "Antiga X", motivo: "x" }], /slug válido/, "slug fora do padrão");
+  rejectsDeactivation([{ slug: "antiga-x", motivo: "x" }, { slug: "antiga-x", motivo: "y" }], /repetido/, "slug repetido na lista");
+  rejectsDeactivation([{ slug: "cultura-a", motivo: "x" }], /ao mesmo tempo/, "cultura em culturas e em desativar");
+  rejectsDeactivation([{ slug: "antiga-x", motivo: "x", isActive: false }], /campo desconhecido/, "campo além de slug e motivo");
+
+  const deactivations = [
+    { slug: "antiga-ativa", motivo: "Motivo fictício." },
+    { slug: "antiga-inativa", motivo: "Motivo fictício." },
+  ];
+  const deactivationStore = (): Store => new Map([
+    ["sem-mudanca", rowFrom("sem-mudanca")],
+    ["antiga-ativa", rowFrom("antiga-ativa", { label: "Antiga ativa" })],
+    ["antiga-inativa", rowFrom("antiga-inativa", { isActive: false })],
+    ["fora-do-arquivo", rowFrom("fora-do-arquivo")],
+  ]);
+  const deactivationPayloads = parseCatalogFile(catalogText([culture("sem-mudanca")]));
+
+  // Simulação: mostra quais desativa, quais já estão inativas e conta no --expect.
+  const deactivationPlan = planImport([...deactivationStore().values()], deactivationPayloads, deactivations);
+  const deactivationSummary = summarizePlan(deactivationPlan);
+  assert.equal(deactivationSummary.desativar, 1);
+  assert.equal(deactivationSummary.expect, 1, "expect = criar + atualizar + desativar");
+  assert.deepEqual(deactivationSummary.culturasParaDesativar, ["antiga-ativa"]);
+  assert.deepEqual(deactivationSummary.jaInativas, ["antiga-inativa"]);
+  assert.deepEqual(deactivationSummary.desativarAusentesNoBanco, []);
+  assert.ok(!JSON.stringify(deactivationSummary).includes("Motivo fictício"), "resumo sem textos");
+  const missingPlan = planImport([...deactivationStore().values()], deactivationPayloads, [{ slug: "nao-existe", motivo: "x" }]);
+  assert.deepEqual(summarizePlan(missingPlan).desativarAusentesNoBanco, ["nao-existe"], "simulação mostra slug ausente");
+
+  // Apply: --expect errado não grava; slug ausente não grava; certo grava só isActive=false, com backup.
+  {
+    const target = deactivationStore();
+    const before = JSON.stringify([...target]);
+    const dir = mkdtempSync(join(tmpdir(), "technical-catalog-test-"));
+    await assert.rejects(applyImport(inTransaction(target), deactivationPayloads, { expected: 0, backupDir: dir, deactivate: deactivations }), /Contagem divergente/);
+    await assert.rejects(
+      applyImport(inTransaction(target), deactivationPayloads, { expected: 1, backupDir: dir, deactivate: [...deactivations, { slug: "nao-existe", motivo: "x" }] }),
+      /não existem no banco/
+    );
+    assert.equal(JSON.stringify([...target]), before);
+    assert.deepEqual(readdirSync(dir), [], "sem backup quando recusa");
+  }
+  const target = deactivationStore();
+  const writes: string[] = [];
+  const dir = mkdtempSync(join(tmpdir(), "technical-catalog-test-"));
+  const applied = await applyImport(inTransaction(target, writes), deactivationPayloads, {
+    expected: 1,
+    backupDir: dir,
+    deactivate: deactivations,
+    now: new Date("2026-11-20T12:00:00.000Z"),
+  });
+  assert.equal(applied.gravadas, 1);
+  assert.deepEqual(writes, ["findMany:3", "update:antiga-ativa"], "só a cultura ativa da lista é gravada");
+  const deactivated = target.get("antiga-ativa")!;
+  assert.equal(deactivated.isActive, false, "desativada");
+  assert.deepEqual({ ...deactivated, isActive: true }, rowFrom("antiga-ativa", { label: "Antiga ativa" }), "nenhum outro campo muda");
+  assert.equal(target.get("antiga-inativa")!.isActive, false);
+  assert.equal(target.get("fora-do-arquivo")!.isActive, true, "cultura fora do arquivo intocada");
+  assert.equal(target.size, 4, "nunca apaga");
+  const deactivationBackup = parseBackupFile(readFileSync(applied.backupFile, "utf8"));
+  assert.deepEqual(deactivationBackup.deactivated, [{ slug: "antiga-ativa" }]);
+  assert.equal(summarizePlan(planImport([...target.values()], deactivationPayloads, deactivations)).expect, 0, "segunda rodada sem mudanças");
+
+  // Restore: reativa a desativada; recusa se alguém reativou antes.
+  const simulatedRestore = await restoreFromBackup(inTransaction(target), deactivationBackup, false);
+  assert.equal(simulatedRestore.culturasParaReativar, 1);
+  assert.equal(target.get("antiga-ativa")!.isActive, false, "simulação não grava");
+  {
+    const touched = new Map([...target].map(([key, value]) => [key, structuredClone(value)]));
+    touched.set("antiga-ativa", { ...touched.get("antiga-ativa")!, isActive: true });
+    await assert.rejects(restoreFromBackup(inTransaction(touched), deactivationBackup, true), /mudaram ou sumiram/);
+  }
+  const restoredDeactivation = await restoreFromBackup(inTransaction(target), deactivationBackup, true);
+  assert.equal(restoredDeactivation.culturasReativadas, 1);
+  assert.equal(target.get("antiga-ativa")!.isActive, true, "restore reativa");
+  assert.equal(target.get("antiga-inativa")!.isActive, false, "já inativa antes continua inativa");
+}
 assert.throws(() => parseBackupFile(JSON.stringify({ format: "outro", updated: [], created: [] })), /formato inesperado/);
 
 // Campo mantido: o import não grava; fica o valor do banco (mesmo diferente do arquivo).
@@ -395,6 +496,28 @@ writeFileSync(tempCatalog, catalogText([culture("sem-mudanca"), culture("nova")]
     return fakeClient(baseStore(), []);
   }), /formato inesperado/);
   assert.equal(created, false, "argumento ou arquivo inválido nunca abre conexão");
+}
+
+// CLI com lista "desativar": simulação READ ONLY mostra quais; --review lista sem abrir conexão.
+{
+  writeFileSync(
+    tempCatalog,
+    JSON.stringify({ format: CATALOG_FORMAT, fontes: FONTES, culturas: [culture("sem-mudanca")], desativar: [{ slug: "fora-do-arquivo", motivo: "Motivo fictício." }] })
+  );
+  const calls: string[] = [];
+  const lines: string[] = [];
+  const simulated = baseStore();
+  await runCli([`--file=${tempCatalog}`], () => fakeClient(simulated, calls), (line) => lines.push(line));
+  assert.deepEqual(calls, ["tx:RepeatableRead", "raw:SET TRANSACTION READ ONLY", "disconnect"]);
+  const output = JSON.parse(lines[0]);
+  assert.deepEqual(output.culturasParaDesativar, ["fora-do-arquivo"]);
+  assert.equal(output.expect, 1);
+  assert.equal(simulated.get("fora-do-arquivo")!.isActive, true, "simulação não grava");
+  const reviewLines: string[] = [];
+  await runCli([`--file=${tempCatalog}`, "--review"], () => {
+    throw new Error("--review não abre conexão");
+  }, (line) => reviewLines.push(line));
+  assert.deepEqual(JSON.parse(reviewLines[0]).desativar, ["fora-do-arquivo"]);
 }
 
 console.log("importTechnicalCatalog.test.ts: ok");
