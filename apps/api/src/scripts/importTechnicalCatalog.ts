@@ -4,7 +4,9 @@
  *
  * Regras:
  *   - upsert por slug; só culturas que estão no arquivo são lidas ou gravadas;
- *   - nunca apaga cultura e nunca muda isActive de cultura existente (cultura nova nasce ativa);
+ *   - nunca apaga cultura; cultura nova nasce ativa; isActive de cultura existente só muda para as
+ *     culturas da lista "desativar" do arquivo (slug + motivo), que ficam com isActive=false e não têm
+ *     nenhum outro campo gravado; o import nunca reativa (só o --restore volta a ativar);
  *   - grava label, category, kg/ha mín./máx., população, espaçamento, PMS, germinação, pureza,
  *     observações (notes) e faixas por objetivo (goalsJson); campo null no arquivo apaga o valor;
  *   - todo número do arquivo tem fonte; campo vazio tem motivo (o arquivo é recusado sem isso);
@@ -21,10 +23,12 @@
  *   node dist/scripts/importTechnicalCatalog.js --restore=<backup.json> --apply
  *   node dist/scripts/importTechnicalCatalog.js --file=<catalogo.json> --review        (revisão do arquivo, sem banco)
  *
- * N do --expect = culturas a criar + culturas a atualizar (o que a simulação mostra).
+ * N do --expect = culturas a criar + culturas a atualizar + culturas a desativar (o que a simulação mostra).
+ * Slug da lista "desativar" que não existe no banco aparece na simulação e impede o --apply.
  * O backup (JSON, permissão 600) com os valores antigos é gravado antes de gravar, na mesma transação;
  * se falhar, nada é gravado. A restauração devolve os valores antigos só se a cultura ainda estiver
- * exatamente como o import deixou; cultura criada pelo import é desativada (não apagada).
+ * exatamente como o import deixou; cultura criada pelo import é desativada (não apagada) e cultura
+ * desativada pelo import volta a ficar ativa.
  * Imports: @prisma/client, @salesforce-pro/shared e módulos do Node (teste de contrato em
  * importTechnicalCatalog.test.ts). A saída traz slugs, nomes de campo e contagens, nunca os textos.
  */
@@ -194,6 +198,31 @@ export function parseCatalogFile(content: string): CatalogEntry[] {
   });
 }
 
+/** Cultura que o import desativa (isActive=false). Nenhum outro campo dela é gravado. */
+export type Deactivation = { slug: string; motivo: string };
+
+const SLUG_PATTERN = /^[a-z0-9-]+$/;
+
+/** Lê a lista opcional "desativar" do arquivo: slug + motivo, sem repetição e fora de "culturas". */
+export function parseCatalogDeactivations(content: string): Deactivation[] {
+  const catalog = JSON.parse(content) as unknown;
+  if (!isRecord(catalog) || catalog.format !== CATALOG_FORMAT) throw new Error("Arquivo do catálogo em formato inesperado.");
+  if (catalog.desativar === undefined) return [];
+  if (!Array.isArray(catalog.desativar)) throw new Error('Lista "desativar" inválida.');
+  const inCultures = new Set(Array.isArray(catalog.culturas) ? catalog.culturas.filter(isRecord).map((item) => item.slug) : []);
+  const seen = new Set<string>();
+  return catalog.desativar.map((raw) => {
+    if (!isRecord(raw) || !nonEmptyText(raw.slug) || !SLUG_PATTERN.test(raw.slug)) throw new Error("Cultura a desativar sem slug válido.");
+    const slug = raw.slug;
+    for (const key of Object.keys(raw)) if (key !== "slug" && key !== "motivo") throw new Error(`${slug}: campo desconhecido ${key} na lista "desativar".`);
+    if (!nonEmptyText(raw.motivo)) throw new Error(`${slug}: desativação sem motivo.`);
+    if (seen.has(slug)) throw new Error(`Slug repetido na lista "desativar": ${slug}.`);
+    if (inCultures.has(slug)) throw new Error(`${slug}: está em "culturas" e em "desativar" ao mesmo tempo.`);
+    seen.add(slug);
+    return { slug, motivo: raw.motivo.trim() };
+  });
+}
+
 // ---------------------------------------------------------------------------------------------
 // Revisão automática (sem banco)
 
@@ -292,6 +321,12 @@ export type ImportPlan = {
   kept: Record<string, Record<string, number | { min: number; max: number } | null>>;
   /** Campos mantidos cujo valor no banco difere do valor anterior conhecido do arquivo. */
   keptDiffersFromFile: string[];
+  /** Culturas ativas da lista "desativar". */
+  toDeactivate: CatalogRow[];
+  /** Culturas da lista "desativar" que já estão inativas (nada a gravar). */
+  alreadyInactive: string[];
+  /** Slugs da lista "desativar" que não existem no banco: o --apply recusa. */
+  deactivateMissing: string[];
 };
 
 const canonical = (value: unknown): unknown => {
@@ -324,9 +359,24 @@ export function resolvePayload(entry: CulturePayload | CatalogEntry, row: Catalo
   return payload;
 }
 
-export function planImport(rows: CatalogRow[], entries: (CulturePayload | CatalogEntry)[]): ImportPlan {
+export function planImport(rows: CatalogRow[], entries: (CulturePayload | CatalogEntry)[], deactivations: Deactivation[] = []): ImportPlan {
   const bySlug = new Map(rows.map((row) => [row.slug, row]));
-  const plan: ImportPlan = { toCreate: [], toUpdate: [], unchanged: [], kept: {}, keptDiffersFromFile: [] };
+  const plan: ImportPlan = {
+    toCreate: [],
+    toUpdate: [],
+    unchanged: [],
+    kept: {},
+    keptDiffersFromFile: [],
+    toDeactivate: [],
+    alreadyInactive: [],
+    deactivateMissing: [],
+  };
+  for (const item of deactivations) {
+    const row = bySlug.get(item.slug);
+    if (!row) plan.deactivateMissing.push(item.slug);
+    else if (row.isActive) plan.toDeactivate.push(row);
+    else plan.alreadyInactive.push(item.slug);
+  }
   for (const entry of entries) {
     const row = bySlug.get(entry.slug);
     const payload = resolvePayload(entry, row);
@@ -358,7 +408,8 @@ export function summarizePlan(plan: ImportPlan) {
     criar: plan.toCreate.length,
     atualizar: plan.toUpdate.length,
     semMudanca: plan.unchanged.length,
-    expect: plan.toCreate.length + plan.toUpdate.length,
+    desativar: plan.toDeactivate.length,
+    expect: plan.toCreate.length + plan.toUpdate.length + plan.toDeactivate.length,
     camposQueFicamVazios: cleared,
     inativasNoArquivo: plan.toUpdate.filter((item) => !item.row.isActive).length,
     novas: plan.toCreate.map((item) => item.slug),
@@ -366,6 +417,9 @@ export function summarizePlan(plan: ImportPlan) {
     mudancasDeCategoria: plan.toUpdate.filter((item) => item.changed.includes("category")).map((item) => item.row.slug),
     mantidosSemFonte: plan.kept,
     mantidosDiferentesDoArquivo: plan.keptDiffersFromFile,
+    culturasParaDesativar: plan.toDeactivate.map((row) => row.slug),
+    jaInativas: plan.alreadyInactive,
+    desativarAusentesNoBanco: plan.deactivateMissing,
   };
 }
 
@@ -390,6 +444,8 @@ export type BackupFile = {
   createdAt: string;
   updated: { slug: string; before: FieldValues; after: FieldValues }[];
   created: { slug: string; after: FieldValues }[];
+  /** Culturas que estavam ativas e o import desativou (backup antigo sem a lista: vazia). */
+  deactivated: { slug: string }[];
 };
 
 const writeBackupFile = (backupDir: string, backup: BackupFile) => {
@@ -403,7 +459,11 @@ const writeBackupFile = (backupDir: string, backup: BackupFile) => {
     closeSync(fd);
   }
   const written = JSON.parse(readFileSync(file, "utf8")) as BackupFile;
-  if (written.updated.length !== backup.updated.length || written.created.length !== backup.created.length) {
+  if (
+    written.updated.length !== backup.updated.length ||
+    written.created.length !== backup.created.length ||
+    written.deactivated.length !== backup.deactivated.length
+  ) {
     throw new Error("Backup gravado não confere com o estado lido; nada foi gravado.");
   }
   return file;
@@ -412,11 +472,16 @@ const writeBackupFile = (backupDir: string, backup: BackupFile) => {
 export async function applyImport(
   runInTransaction: TransactionRunner,
   payloads: (CulturePayload | CatalogEntry)[],
-  options: { expected: number; backupDir: string; now?: Date },
+  options: { expected: number; backupDir: string; now?: Date; deactivate?: Deactivation[] },
 ) {
+  const deactivations = options.deactivate ?? [];
   return runInTransaction(async (tx) => {
-    const plan = planImport(await loadRows(tx, payloads.map((item) => item.slug)), payloads);
-    const total = plan.toCreate.length + plan.toUpdate.length;
+    const slugs = [...payloads.map((item) => item.slug), ...deactivations.map((item) => item.slug)];
+    const plan = planImport(await loadRows(tx, slugs), payloads, deactivations);
+    if (plan.deactivateMissing.length) {
+      throw new Error(`${plan.deactivateMissing.length} cultura(s) da lista "desativar" não existem no banco; nada foi gravado.`);
+    }
+    const total = plan.toCreate.length + plan.toUpdate.length + plan.toDeactivate.length;
     if (total !== options.expected) throw new Error(`Contagem divergente; nada foi gravado. esperado=${options.expected} encontrado=${total}`);
     // Backup antes de gravar: se a gravação falhar, a exceção desfaz a transação sem gravar nada.
     const backupFile = writeBackupFile(options.backupDir, {
@@ -424,43 +489,62 @@ export async function applyImport(
       createdAt: (options.now ?? new Date()).toISOString(),
       updated: plan.toUpdate.map((item) => ({ slug: item.row.slug, before: fieldValues(item.row), after: fieldValues(item.payload) })),
       created: plan.toCreate.map((item) => ({ slug: item.slug, after: fieldValues(item) })),
+      deactivated: plan.toDeactivate.map((row) => ({ slug: row.slug })),
     });
     for (const item of plan.toUpdate) await tx.cultureCatalog.update({ where: { slug: item.row.slug }, data: writeData(fieldValues(item.payload)) });
     for (const item of plan.toCreate) {
       await tx.cultureCatalog.create({ data: { slug: item.slug, isActive: true, tags: [], ...writeData(fieldValues(item)) } });
     }
+    for (const row of plan.toDeactivate) await tx.cultureCatalog.update({ where: { slug: row.slug }, data: { isActive: false } });
     return { summary: summarizePlan(plan), backupFile, gravadas: total };
   });
 }
 
 export function parseBackupFile(content: string): BackupFile {
   const backup = JSON.parse(content) as BackupFile;
+  if (isRecord(backup) && backup.deactivated === undefined) backup.deactivated = [];
   if (backup.format !== BACKUP_FORMAT || !Array.isArray(backup.updated) || !Array.isArray(backup.created)) throw new Error("Arquivo de backup em formato inesperado.");
   const hasAllFields = (values: unknown) => isRecord(values) && WRITTEN_FIELDS.every((field) => field in values);
   for (const item of backup.updated) if (!nonEmptyText(item.slug) || !hasAllFields(item.before) || !hasAllFields(item.after)) throw new Error("Backup incompleto.");
   for (const item of backup.created) if (!nonEmptyText(item.slug) || !hasAllFields(item.after)) throw new Error("Backup incompleto.");
+  if (!Array.isArray(backup.deactivated)) throw new Error("Arquivo de backup em formato inesperado.");
+  for (const item of backup.deactivated) if (!isRecord(item) || !nonEmptyText(item.slug)) throw new Error("Backup incompleto.");
   return backup;
 }
 
 /**
- * Sem `apply`, só confere e conta. Devolve os valores antigos das culturas atualizadas e desativa as
- * criadas, mas só se todas ainda estiverem exatamente como o import deixou (senão nada é gravado).
+ * Sem `apply`, só confere e conta. Devolve os valores antigos das culturas atualizadas, desativa as
+ * criadas e reativa as desativadas, mas só se todas ainda estiverem exatamente como o import deixou
+ * (senão nada é gravado).
  */
 export async function restoreFromBackup(runInTransaction: TransactionRunner, backup: BackupFile, apply: boolean) {
   return runInTransaction(async (tx) => {
-    const slugs = [...backup.updated, ...backup.created].map((item) => item.slug);
+    const slugs = [...backup.updated, ...backup.created, ...backup.deactivated].map((item) => item.slug);
     const rows = new Map((await loadRows(tx, slugs)).map((row) => [row.slug, row]));
     const changedSince = [...backup.updated, ...backup.created].filter((item) => {
       const row = rows.get(item.slug);
       return !row || !sameValue(fieldValues(row), item.after);
     });
-    if (changedSince.length) throw new Error(`${changedSince.length} cultura(s) mudaram ou sumiram depois do import; nada foi restaurado.`);
+    const reactivatedSince = backup.deactivated.filter((item) => rows.get(item.slug)?.isActive !== false);
+    const changed = changedSince.length + reactivatedSince.length;
+    if (changed) throw new Error(`${changed} cultura(s) mudaram ou sumiram depois do import; nada foi restaurado.`);
     if (!apply) {
-      return { modo: "simulação da restauração (nada foi gravado)", culturasParaVoltar: backup.updated.length, culturasParaDesativar: backup.created.length };
+      return {
+        modo: "simulação da restauração (nada foi gravado)",
+        culturasParaVoltar: backup.updated.length,
+        culturasParaDesativar: backup.created.length,
+        culturasParaReativar: backup.deactivated.length,
+      };
     }
     for (const item of backup.updated) await tx.cultureCatalog.update({ where: { slug: item.slug }, data: writeData(item.before) });
     for (const item of backup.created) await tx.cultureCatalog.update({ where: { slug: item.slug }, data: { isActive: false } });
-    return { modo: "restore concluído", culturasRestauradas: backup.updated.length, culturasDesativadas: backup.created.length };
+    for (const item of backup.deactivated) await tx.cultureCatalog.update({ where: { slug: item.slug }, data: { isActive: true } });
+    return {
+      modo: "restore concluído",
+      culturasRestauradas: backup.updated.length,
+      culturasDesativadas: backup.created.length,
+      culturasReativadas: backup.deactivated.length,
+    };
   });
 }
 
@@ -515,10 +599,15 @@ type ReadOnlyTx = CatalogDb & { $executeRaw(query: TemplateStringsArray): Promis
 export async function runCli(args: string[], createClient: () => CatalogClient, log: (line: string) => void = console.log) {
   const options = parseCliArgs(args);
   if (options.mode === "review") {
-    log(JSON.stringify({ modo: "revisão do arquivo (sem banco)", ...reviewCatalog(parseCatalogFile(readFileSync(options.file, "utf8"))) }, null, 2));
+    const content = readFileSync(options.file, "utf8");
+    const review = reviewCatalog(parseCatalogFile(content));
+    const desativar = parseCatalogDeactivations(content).map((item) => item.slug);
+    log(JSON.stringify({ modo: "revisão do arquivo (sem banco)", ...review, desativar }, null, 2));
     return;
   }
-  const payloads = options.mode === "restore" ? [] : parseCatalogFile(readFileSync(options.file, "utf8"));
+  const content = options.mode === "restore" ? null : readFileSync(options.file, "utf8");
+  const payloads = content === null ? [] : parseCatalogFile(content);
+  const deactivations = content === null ? [] : parseCatalogDeactivations(content);
   const backup = options.mode === "restore" ? parseBackupFile(readFileSync(options.backupFile, "utf8")) : null;
   const client = createClient();
   const runInTransaction: TransactionRunner = (fn) =>
@@ -532,10 +621,15 @@ export async function runCli(args: string[], createClient: () => CatalogClient, 
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: 60_000 });
   try {
     if (options.mode === "simulate") {
-      const plan = await runReadOnly(async (tx) => planImport(await loadRows(tx, payloads.map((item) => item.slug)), payloads));
+      const slugs = [...payloads.map((item) => item.slug), ...deactivations.map((item) => item.slug)];
+      const plan = await runReadOnly(async (tx) => planImport(await loadRows(tx, slugs), payloads, deactivations));
       log(JSON.stringify({ modo: "simulação (nada foi gravado)", ...summarizePlan(plan) }, null, 2));
     } else if (options.mode === "apply") {
-      const result = await applyImport(runInTransaction, payloads, { expected: options.expected, backupDir: options.backupDir });
+      const result = await applyImport(runInTransaction, payloads, {
+        expected: options.expected,
+        backupDir: options.backupDir,
+        deactivate: deactivations,
+      });
       log(JSON.stringify({ modo: "apply concluído", gravadas: result.gravadas, backup: result.backupFile, ...result.summary }, null, 2));
     } else {
       log(JSON.stringify(await restoreFromBackup(options.apply ? runInTransaction : runReadOnly, backup!, options.apply), null, 2));
