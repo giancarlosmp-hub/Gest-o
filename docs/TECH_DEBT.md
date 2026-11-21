@@ -2017,3 +2017,9 @@ continuam em `apps/web/src/lib/technicalAssistant.ts`. Fica pendente:
   depende de solteira, mistura ou lanço e ainda usa a conta por plantas/ha. Categoria é texto livre e as faixas por
   objetivo (`goalsJson`) não têm edição na tela.
 - **Sem registro de quem alterou** o catálogo nem de onde veio cada número, e a tabela não tem `tenantId`.
+- **Desativar cultura pelo import** (código pronto, aguardando merge, 20/11/2026): o `importTechnicalCatalog` aceita a
+  lista `"desativar": [{ "slug", "motivo" }]` no `technicalCatalog.json`. A simulação mostra
+  `culturasParaDesativar`, `jaInativas` e `desativarAusentesNoBanco`; o `--expect` conta criar + atualizar +
+  desativar; slug ausente do banco impede o `--apply`. Só grava `isActive=false` (nenhum outro campo, nunca apaga,
+  nunca reativa); o backup guarda a lista e o `--restore` reativa. Os dados da reestruturação (espécie/grupo no
+  lugar de cultivar) vêm em PR próprio.
