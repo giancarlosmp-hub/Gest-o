@@ -100,6 +100,15 @@ rejects([culture("cultura-a", {}, { goalsJson: sourced({ "Grão": { min: 1, max:
 rejects([culture("cultura-a", {}, { goalsJson: sourced({ grao: { min: 5, max: 2 } }) })], /faixa inválida/, "objetivo com máximo menor que mínimo");
 rejects([culture("cultura-a", {}, { extra: sourced(1) })], /campo desconhecido/, "campo fora do modelo");
 rejects([culture("cultura-a")], /sem órgão/, "fonte incompleta", { "FONTE-A": { orgao: "X", titulo: "", link: "https://example.invalid" } });
+// Link null só em fonte do tipo "comercial" (recomendação do fornecedor, sem documento publicado).
+assert.equal(
+  parseCatalogFile(catalogText([culture("cultura-a")], { "FONTE-A": { orgao: "Fornecedor fictício", titulo: "Recomendação comercial fictícia", ano: null, link: null, tipo: "comercial" } })).length,
+  1,
+  "fonte comercial sem link aceita"
+);
+rejects([culture("cultura-a")], /sem órgão, título ou link/, "link null sem tipo comercial", { "FONTE-A": { orgao: "X", titulo: "Y", ano: null, link: null } });
+rejects([culture("cultura-a")], /tipo inválido/, "tipo desconhecido", { "FONTE-A": { orgao: "X", titulo: "Y", ano: null, link: null, tipo: "outro" } });
+rejects([culture("cultura-a")], /sem órgão/, "fonte comercial ainda exige órgão", { "FONTE-A": { orgao: "", titulo: "Y", ano: null, link: null, tipo: "comercial" } });
 assert.throws(() => parseCatalogFile(JSON.stringify({ format: "outro", fontes: FONTES, culturas: [] })), /formato inesperado/);
 
 // Revisão automática com dados fictícios.
@@ -317,7 +326,11 @@ assert.throws(() => parseBackupFile(JSON.stringify({ format: BACKUP_FORMAT, upda
 {
   const withDeactivations = (culturas: unknown[], desativar: unknown) => JSON.stringify({ format: CATALOG_FORMAT, fontes: FONTES, culturas, desativar });
   assert.deepEqual(parseCatalogDeactivations(catalogText([culture("cultura-a")])), [], "sem lista, nada a desativar");
-  assert.deepEqual(parseCatalogDeactivations(readFileSync(DEFAULT_CATALOG_FILE, "utf8")), [], "arquivo do PR sem desativações");
+  const realDeactivations = parseCatalogDeactivations(readFileSync(DEFAULT_CATALOG_FILE, "utf8"));
+  assert.ok(
+    realDeactivations.every((item) => item.motivo && !realPayloads.some((payload) => payload.slug === item.slug)),
+    "arquivo do PR: cultura desativada tem motivo e fica fora de culturas"
+  );
   assert.deepEqual(
     parseCatalogDeactivations(withDeactivations([culture("cultura-a")], [{ slug: "antiga-x", motivo: " Motivo fictício. " }])),
     [{ slug: "antiga-x", motivo: "Motivo fictício." }]

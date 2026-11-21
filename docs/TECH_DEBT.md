@@ -2021,5 +2021,17 @@ continuam em `apps/web/src/lib/technicalAssistant.ts`. Fica pendente:
   lista `"desativar": [{ "slug", "motivo" }]` no `technicalCatalog.json`. A simulação mostra
   `culturasParaDesativar`, `jaInativas` e `desativarAusentesNoBanco`; o `--expect` conta criar + atualizar +
   desativar; slug ausente do banco impede o `--apply`. Só grava `isActive=false` (nenhum outro campo, nunca apaga,
-  nunca reativa); o backup guarda a lista e o `--restore` reativa. Os dados da reestruturação (espécie/grupo no
-  lugar de cultivar) vêm em PR próprio.
+  nunca reativa); o backup guarda a lista e o `--restore` reativa.
+- **Catálogo por espécie/grupo** (código pronto, aguardando merge, 20/11/2026): `technicalCatalog.json` com 47
+  culturas (22 novas), rótulos por espécie ("Braquiária híbrida", "Panicum híbrido", "Panicum maximum"), cultivares
+  só como exemplo nas observações e `sorgo-brs-661` na lista `desativar`. Fonte do tipo `"comercial"` (link null) só
+  para recomendação do fornecedor sem documento publicado (amendoim forrageiro). O script ainda não rodou na VPS
+  (simulação → apply com backup → conferência).
+- **`apps/api/prisma/seed.js` com rótulos antigos:** os slugs foram mantidos e só o catálogo mudou; o seed (banco
+  novo/preview) continua criando "Brachiaria Híbrida Mulato II", "Panicum Quênia", "Panicum Mombaça" e sem as
+  culturas novas. Mexer nele exige evidência de schema; fica para quando houver mudança em `prisma/`.
+- **`GET /technical-cultures` com `take: 50`:** com 47 culturas ativas o limite está perto; acima de 50 a rota corta
+  a lista (a tela do Assistente usa `/technical/cultures` com `pageSize: 100`).
+- **Ideia futura — mixes de sementes** (ex.: mixes de cobertura ou de trigos para silagem): hoje entram só como
+  exemplo nas observações da cultura. Um mix teria composição por espécie e dose própria; não entra no catálogo
+  atual.
