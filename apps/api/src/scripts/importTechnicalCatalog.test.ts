@@ -55,6 +55,21 @@ const realReview = reviewCatalog(realPayloads);
 assert.deepEqual(realReview.alertas, [], "arquivo do PR sem alertas na revisão");
 assert.ok(realReview.conferidas.every((item) => item.dentro), "toda cultura com conta fica dentro da faixa");
 
+// Aveia branca (3ª rodada): objetivos grão/pastejo/cobertura com fonte, PMS vazio (pede o do lote).
+{
+  const aveiaBranca = realPayloads.find((item) => item.slug === "aveia-branca");
+  assert.ok(aveiaBranca, "aveia branca no arquivo");
+  assert.deepEqual(aveiaBranca.goalsJson, { grao: { min: 62, max: 93 }, pastejo: { min: 60, max: 60 }, cobertura: { min: 60, max: 60 } });
+  assert.deepEqual([aveiaBranca.defaultKgHaMin, aveiaBranca.defaultKgHaMax], [60, 93], "faixa geral cobre os objetivos");
+  assert.equal(aveiaBranca.populationTargetDefault, 2500000);
+  assert.equal(aveiaBranca.rowSpacingCmDefault, 17);
+  assert.equal(aveiaBranca.pmsDefault, null);
+  assert.deepEqual(aveiaBranca.kept, [], "nenhum valor mantido sem fonte");
+  // Com o PMS do exemplo da CBPA (28 g) e os padrões do MAPA, a conta fica dentro do objetivo grão.
+  const kgHa = seedingKgHa(aveiaBranca.populationTargetDefault!, 28, aveiaBranca.germinationDefault!, aveiaBranca.purityDefault!);
+  assert.ok(kgHa >= 62 && kgHa <= 93, `conta com PMS 28 g dentro de 62–93 (${kgHa})`);
+}
+
 // ---------------------------------------------------------------------------------------------
 // Fixtures fictícias.
 const FONTES = { "FONTE-A": { orgao: "Órgão Fictício", titulo: "Publicação fictícia", ano: 2020, link: "https://example.invalid/a" } };

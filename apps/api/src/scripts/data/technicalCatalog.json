@@ -1,6 +1,6 @@
 {
   "format": "technicalCatalog/v1",
-  "revisadoEm": "2026-11-20",
+  "revisadoEm": "2026-11-21",
   "regras": [
     "Pureza e germinação padrão: o menor padrão mínimo do MAPA entre as categorias comercializadas (C1, C2, S1 e S2), ou seja, o piso legal do lote.",
     "Valor padrão tirado de uma faixa da fonte: ponto médio da faixa. A derivação fica escrita no campo.",
@@ -213,6 +213,54 @@
       "ano": null,
       "link": null,
       "tipo": "comercial"
+    },
+    "CBPA-INFORMACOES-AVEIA-2021": {
+      "orgao": "Comissão Brasileira de Pesquisa de Aveia (CBPA), org. SETREM",
+      "titulo": "Informações técnicas para a cultura da aveia — XL Reunião da CBPA (itens 3.1, 3.4.2, 3.4.3 e 9.2.4; Anexos I e II)",
+      "ano": 2021,
+      "link": "https://setrem.edu.br/wp-content/uploads/2021/11/INFORMACOES_TECNICAS_PARA_A_CULTURA_DA_AVEIA_SETREM_XL_RCBPA_2021-10-11-2021_compressed.pdf"
+    },
+    "IDR-IPR126-FOLDER": {
+      "orgao": "IAPAR (atual IDR-Paraná), obtentora",
+      "titulo": "Folder Aveia IPR 126 (reedição de novembro de 2016), Semeadura",
+      "ano": 2016,
+      "link": "https://www.idrparana.pr.gov.br/system/files/publico/pesquisa/publicacoes/folder/fld-ipr-126/Folder%20Aveia%20IPR%20126.pdf"
+    },
+    "IDR-IPR-SUPREMA-FOLDER": {
+      "orgao": "IDR-Paraná, obtentora",
+      "titulo": "Folder IPR Suprema, Para produção de forragem",
+      "ano": null,
+      "link": "https://www.idrparana.pr.gov.br/system/files/publico/pesquisa/publicacoes/folder/fld-ipr-suprema/Folder_IPR_Suprema.pdf"
+    },
+    "IDR-IPR-AFRODITE-FOLDER": {
+      "orgao": "IAPAR (atual IDR-Paraná), obtentora",
+      "titulo": "Folder Aveia IPR Afrodite (junho de 2012), Sugestões técnicas",
+      "ano": 2012,
+      "link": "https://www.idrparana.pr.gov.br/system/files/publico/pesquisa/publicacoes/folder/fld-ipr-afrodite/Folder%20Aveia%20IPR%20Afrodite.pdf"
+    },
+    "IDR-IPR-ANDROMEDA-FOLDER": {
+      "orgao": "IDR-Paraná, obtentora",
+      "titulo": "Folder Aveia granífera IPR Andrômeda (junho de 2022), Sugestões técnicas",
+      "ano": 2022,
+      "link": "https://www.idrparana.pr.gov.br/system/files/publico/pesquisa/publicacoes/folder/fld-ipr-andromeda/Folder%20IPR%20Andr%C3%B4meda%20Web%20-%2028-06-2022.pdf"
+    },
+    "PGW-IMPACTA": {
+      "orgao": "PGG Wrightson Sementes (detentora)",
+      "titulo": "Impacta — página da cultivar (aveia branca para pastejo e silagem)",
+      "ano": null,
+      "link": "https://www.pgwsementes.com.br/pastures/grasses/annual/aveia/90/impacta-/"
+    },
+    "RENASCER-AF1340": {
+      "orgao": "Sementes Renascer (revenda)",
+      "titulo": "Aveia Branca Forrageira AF 1340 — página do produto (só identificação)",
+      "ano": null,
+      "link": "https://sementesrenascer.com.br/sementes/aveia-branca-forrageira-af-1340/"
+    },
+    "REVISTA-CULTIVAR-AF1340": {
+      "orgao": "Revista Cultivar (notícia da Fundação Pró-Sementes e da Agroalpha)",
+      "titulo": "Fundação Pró-Sementes e Agroalpha colocam no mercado primeira cultivar registrada de aveia ucraniana (só identificação)",
+      "ano": 2019,
+      "link": "https://revistacultivar.com.br/noticias/fundacao-pro-sementes-e-agroalpha-colocam-no-mercado-primeira-cultivar-registrada-de-aveia-ucraniana"
     }
   },
   "culturas": [
@@ -220,16 +268,20 @@
       "slug": "aveia-branca",
       "label": "Aveia Branca",
       "category": "Grãos",
-      "notes": "Pureza e germinação: padrão mínimo do MAPA. Densidade de semeadura ainda sem fonte conferida.",
+      "notes": "Avena sativa. Grão: 200 a 300 sementes viáveis/m² (a densidade maior em semeadura tardia e regiões mais quentes) e 17 a 20 cm entre linhas (CBPA 2021). Ex.: URS Taura, URS Corona e URS Brava (UFRGS), IPR Afrodite e IPR Andrômeda (IDR-Paraná), todas graníferas indicadas pela CBPA. Pastejo/forragem: a CBPA indica 350 plantas/m² e 0,17 m; IPR Suprema, 280 sementes puras viáveis/m², e IPR 126, 300 sementes/m², cerca de 60 kg/ha. Ex.: IPR Suprema e IPR 126 (IDR-Paraná, forragem e cobertura); Impacta (PGW, pastejo e silagem; a detentora indica 160 a 185 plantas/m²); AF 1340 (aveia branca forrageira \"ucraniana\", Fundação Pró-Sementes e Agroalpha, pastoreio ou silagem). Cobertura: IPR 126, 300 sementes/m², cerca de 60 kg/ha. PMS por cultivar: IPR Afrodite 28 g, IPR Suprema 22 g, IPR 126 18 g; use o PMS do lote. Pureza e germinação: padrão mínimo do MAPA.",
       "campos": {
-        "defaultKgHaMin": { "value": null, "reason": "Indicações da Comissão Brasileira de Pesquisa de Aveia não conferidas no documento original nesta versão." },
-        "defaultKgHaMax": { "value": null, "reason": "Idem." },
-        "populationTargetDefault": { "value": null, "reason": "Idem (200 a 300 sementes viáveis/m² aparece só em citações secundárias)." },
-        "rowSpacingCmDefault": { "value": null, "reason": "Idem." },
-        "pmsDefault": { "value": null, "reason": "Sem fonte de PMS de referência conferida." },
+        "defaultKgHaMin": { "value": 60, "sources": ["IDR-IPR126-FOLDER", "IDR-IPR-SUPREMA-FOLDER"], "detail": "Menor valor entre os objetivos: forragem e cobertura, cerca de 60 kg/ha (IPR 126: 300 sementes/m², PMS 18 g, germinação 90%; IPR Suprema: 280 sementes puras viáveis/m²)." },
+        "defaultKgHaMax": { "value": 93, "sources": ["CBPA-INFORMACOES-AVEIA-2021"], "detail": "Maior valor entre os objetivos: grão, 300 sementes viáveis/m² × PMS 28 g ÷ germinação 90% = 93,3 kg/ha (exemplo do item 3.4.2), arredondado." },
+        "populationTargetDefault": { "value": 2500000, "sources": ["CBPA-INFORMACOES-AVEIA-2021"], "detail": "Item 3.4.2 (grão): 200 a 300 sementes viáveis/m²; ponto médio 250/m²." },
+        "rowSpacingCmDefault": { "value": 17, "sources": ["CBPA-INFORMACOES-AVEIA-2021", "IDR-IPR-SUPREMA-FOLDER"], "detail": "Item 3.4.3: 17 a 20 cm para grão, forragem, adubação verde e cobertura; item 9.2.4 (forragem) e folder IPR Suprema: 0,17 m. Padrão 17 cm (início da faixa, o valor que a CBPA usa na forragem), aprovado na revisão em vez do ponto médio." },
+        "pmsDefault": { "value": null, "reason": "As fontes trazem só PMS de cultivares isoladas (IPR Afrodite 28 g, IPR Suprema 22 g, IPR 126 18 g), que ficam nas observações. O PMS depende do lote; a tela pede o PMS do lote." },
         "germinationDefault": { "value": 80, "sources": ["MAPA-IN45-2013"], "detail": "Anexo VI (aveia branca e amarela): germinação mínima 80% em C1, C2, S1 e S2 (básica 70%)." },
         "purityDefault": { "value": 98, "sources": ["MAPA-IN45-2013"], "detail": "Anexo VI: semente pura mínima 98% em todas as categorias." },
-        "goalsJson": { "value": {}, "reason": "Sem faixas por finalidade com fonte conferida." }
+        "goalsJson": {
+          "value": { "grao": { "min": 62, "max": 93 }, "pastejo": { "min": 60, "max": 60 }, "cobertura": { "min": 60, "max": 60 } },
+          "sources": ["CBPA-INFORMACOES-AVEIA-2021", "IDR-IPR126-FOLDER", "IDR-IPR-SUPREMA-FOLDER"],
+          "detail": "Grão: derivado pela fórmula do item 3.4.2 da CBPA 2021 com o PMS de 28 g e a germinação de 90% do exemplo da própria CBPA: 200 sementes viáveis/m² = 62,2 kg/ha e 300/m² = 93,3 kg/ha, arredondados. Pastejo: cerca de 60 kg/ha (IPR 126, alimentação animal; IPR Suprema, produção de forragem). Cobertura: cerca de 60 kg/ha (IPR 126, alimentação animal e cobertura de solo). Silagem sem kg/ha nas fontes."
+        }
       }
     },
     {
