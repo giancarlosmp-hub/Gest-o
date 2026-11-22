@@ -148,8 +148,8 @@ import { COMMERCIAL_AUTOMATIONS_CONFIG_KEY, DEFAULT_COMMERCIAL_AUTOMATIONS_CONFI
 import { recordClientCodeChange } from "../services/clientCodeAuditService.js";
 import {
   buildClientDeleteBlockedMessage,
-  CLIENT_DELETE_LINK_COUNT_SELECT,
   CLIENT_DELETE_LINKED_FALLBACK_MESSAGE,
+  CLIENT_DELETE_SELECT,
   getClientDeleteBlockingReasons
 } from "../services/clientDeletion.js";
 import {
@@ -175,6 +175,14 @@ import {
   parsePortfolioCleanupArchivedAt,
   portfolioCleanupManualReactivationDescription,
 } from "../services/portfolioCleanupArchive.js";
+import {
+  buildManualArchiveBlockedMessage,
+  buildManualArchiveReason,
+  findManualArchiveProtections,
+  isManualArchiveReason,
+  manualArchiveDescription,
+  manualUnarchiveDescription,
+} from "../services/clientManualArchive.js";
 
 const router = createAsyncRouter();
 
@@ -4968,8 +4976,43 @@ router.post("/clients/import", async (req, res) => {
   res.json({ created, updated, ignored, conflicts, errors, results });
 });
 
-// Reativação manual de cliente arquivado pela limpeza da carteira. Duplicado arquivado (fusão ou limpeza de
-// duplicados) não volta: o histórico já está no cliente principal.
+// Arquivamento manual (gerente ou diretor): motivo "MANUAL:<data ISO>", evento na linha do tempo e nada apagado. Com
+// oportunidade aberta ou pedido pendente, 409 (mesma proteção da limpeza da carteira).
+router.post("/clients/:id/archive", authorize("diretor", "gerente"), async (req, res) => {
+  const tenantId = await resolveRequestTenantId(req, res);
+  if (!tenantId) return;
+  const client = await prisma.client.findFirst({
+    where: { id: req.params.id, tenantId, ...clientReadableForDetailsWhere(req) },
+    select: { id: true, isArchived: true, ownerSellerId: true },
+  });
+  if (!client) return res.status(404).json({ message: "Não encontrado" });
+  if (client.isArchived) return res.status(409).json({ message: "Cliente já está arquivado." });
+
+  const actor = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { name: true } });
+  const result = await prisma.$transaction(async (tx) => {
+    const protections = await findManualArchiveProtections(tx, client.id);
+    if (protections.length) return { kind: "blocked" as const, protections };
+    // O where repete isArchived: se o cliente mudou desde a leitura, nada é gravado.
+    const updated = await tx.client.updateMany({
+      where: { id: client.id, isArchived: false },
+      data: { isArchived: true, archiveReason: buildManualArchiveReason(new Date()) },
+    });
+    if (!updated.count) return null;
+    await tx.timelineEvent.create({ data: {
+      type: "status", clientId: client.id, ownerSellerId: client.ownerSellerId,
+      description: manualArchiveDescription(actor?.name || req.user!.email),
+    } });
+    return { kind: "archived" as const, client: await tx.client.findUnique({ where: { id: client.id } }) };
+  });
+  if (result?.kind === "blocked") {
+    return res.status(409).json({ message: buildManualArchiveBlockedMessage(result.protections), protectionReasons: result.protections });
+  }
+  if (!result?.client) return res.status(409).json({ message: "O cadastro mudou durante o arquivamento. Recarregue a página." });
+  return res.json(projectClientForResponse(result.client));
+});
+
+// Reativação manual de cliente arquivado pela limpeza da carteira ou arquivado manualmente ("Desarquivar"). Duplicado
+// arquivado (fusão ou limpeza de duplicados) não volta: o histórico já está no cliente principal.
 router.post("/clients/:id/reactivate", authorize("diretor", "gerente"), async (req, res) => {
   const client = await prisma.client.findFirst({
     where: { id: req.params.id, ...clientReadableForDetailsWhere(req) },
@@ -4977,9 +5020,11 @@ router.post("/clients/:id/reactivate", authorize("diretor", "gerente"), async (r
   });
   if (!client) return res.status(404).json({ message: "Não encontrado" });
   if (!client.isArchived) return res.status(409).json({ message: "Cliente não está arquivado." });
-  if (!isPortfolioCleanupArchiveReason(client.archiveReason)) return res.status(409).json({ message: ARCHIVED_DUPLICATE_REACTIVATION_MESSAGE });
+  const manualArchive = isManualArchiveReason(client.archiveReason);
+  if (!manualArchive && !isPortfolioCleanupArchiveReason(client.archiveReason)) return res.status(409).json({ message: ARCHIVED_DUPLICATE_REACTIVATION_MESSAGE });
 
   const actor = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { name: true } });
+  const actorName = actor?.name || req.user!.email;
   const reactivated = await prisma.$transaction(async (tx) => {
     // O where repete o motivo: se o cliente mudou desde a leitura, nada é gravado.
     const updated = await tx.client.updateMany({
@@ -4989,17 +5034,20 @@ router.post("/clients/:id/reactivate", authorize("diretor", "gerente"), async (r
     if (!updated.count) return null;
     await tx.timelineEvent.create({ data: {
       type: "status", clientId: client.id, ownerSellerId: client.ownerSellerId,
-      description: portfolioCleanupManualReactivationDescription(actor?.name || req.user!.email),
+      description: manualArchive ? manualUnarchiveDescription(actorName) : portfolioCleanupManualReactivationDescription(actorName),
     } });
-    await tx.clientCodeAudit.create({ data: {
-      clientId: client.id, oldValue: client.code, newValue: client.code, partnerErp: client.code,
-      origin: PORTFOLIO_CLEANUP_MANUAL_REACTIVATION_AUDIT_ORIGIN, actorUserId: req.user!.id, actorEmail: req.user!.email,
-      requestIp: req.ip, requestId: req.requestId || "request-id-unavailable",
-      metadata: {
-        operation: "portfolio_cleanup_manual_reactivation",
-        archivedAt: parsePortfolioCleanupArchivedAt(client.archiveReason)?.toISOString() ?? null,
-      },
-    } });
+    // Só a reativação da limpeza protege o cliente do script da limpeza; desarquivar um manual não protege.
+    if (!manualArchive) {
+      await tx.clientCodeAudit.create({ data: {
+        clientId: client.id, oldValue: client.code, newValue: client.code, partnerErp: client.code,
+        origin: PORTFOLIO_CLEANUP_MANUAL_REACTIVATION_AUDIT_ORIGIN, actorUserId: req.user!.id, actorEmail: req.user!.email,
+        requestIp: req.ip, requestId: req.requestId || "request-id-unavailable",
+        metadata: {
+          operation: "portfolio_cleanup_manual_reactivation",
+          archivedAt: parsePortfolioCleanupArchivedAt(client.archiveReason)?.toISOString() ?? null,
+        },
+      } });
+    }
     return tx.client.findUnique({ where: { id: client.id } });
   });
   if (!reactivated) return res.status(409).json({ message: "O cadastro mudou durante a reativação. Recarregue a página." });
@@ -5073,14 +5121,14 @@ router.put("/clients/:id", rejectClientCodeInBody, validateBody(clientSchema.par
   }
 });
 
-// Só exclui cliente sem nenhum vínculo (código ERP, histórico, agenda, contatos, conversas). Com vínculo: 409 legível
-// apontando para "Mesclar duplicado". Nada é apagado em cascata; o erro de banco vira 409, nunca 500/408.
+// Só exclui cliente sem nenhum vínculo (código ERP, auditoria, histórico, agenda, contatos, conversas). Com vínculo: 409
+// legível apontando para "Arquivar" e "Mesclar duplicado". Nada é apagado em cascata; o erro de banco vira 409, nunca 500/408.
 router.delete("/clients/:id", async (req, res) => {
   const tenantId = await resolveRequestTenantId(req, res);
   if (!tenantId) return;
   const old = await prisma.client.findFirst({
     where: { id: req.params.id, tenantId },
-    select: { id: true, code: true, ownerSellerId: true, _count: { select: CLIENT_DELETE_LINK_COUNT_SELECT } }
+    select: CLIENT_DELETE_SELECT
   });
   if (!old) return res.status(404).json({ message: "Não encontrado" });
   if (req.user!.role === "vendedor" && old.ownerSellerId !== req.user!.id) {

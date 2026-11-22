@@ -1631,7 +1631,11 @@ diretor e gerente. Pendente:
   15 s em vez de 500.~~ Resolvido: `createAsyncRouter` + mapeamento no handler final (ver STATUS_ATUAL).
   Restante: `router.route(path)` não é embrulhado (nenhuma rota usa hoje); o ramo de pedido ERP do handler final
   ainda devolve `err.message` no payload controlado.
-- "Arquivar" manual de cliente não existe; o 409 da exclusão cita só "Mesclar duplicado".
+- ~~"Arquivar" manual de cliente não existe; o 409 da exclusão cita só "Mesclar duplicado".~~ Resolvido: "Arquivar"
+  e "Desarquivar" na lista e na ficha (motivo `MANUAL:<data ISO>`), 409 indica "Arquivar" (ver STATUS_ATUAL).
+  Restante: cadastro com auditoria sem código (backfill de tenant) não pode ser excluído, só arquivado (a
+  auditoria não se apaga); a sincronização financeira não reativa arquivado manual que voltou a comprar (só o
+  `/partners`).
 - A sincronização não arquiva parceiro que saiu do ERP: um duplicado que ficou com o documento bloqueia o código
   antigo (ambíguo) até alguém mesclar.
 - `GET /clients/diagnostics/duplicate-documents` agrupa por `cnpjNormalized`, que tem índice único: não acha o caso

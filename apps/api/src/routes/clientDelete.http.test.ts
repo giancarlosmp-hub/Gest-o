@@ -17,7 +17,11 @@ const zero = { codeAuditEvents: 0, opportunities: 0, timelineEvents: 0, activiti
 const clients: Row[] = [
   { id: "client-livre", code: null, tenantId: "tenant-a", ownerSellerId: "seller-a", _count: { ...zero } },
   { id: "client-livre-2", code: "  ", tenantId: "tenant-a", ownerSellerId: "seller-a", _count: { ...zero } },
-  { id: "client-codigo", code: "90010", tenantId: "tenant-a", ownerSellerId: "seller-a", _count: { ...zero, codeAuditEvents: 1 } },
+  { id: "client-codigo", code: "90010", tenantId: "tenant-a", ownerSellerId: "seller-a", codeAudits: [{ oldValue: null, newValue: "90010" }], _count: { ...zero, codeAuditEvents: 1 } },
+  // Código removido depois: a auditoria guarda o código antigo, então ainda é "código ERP".
+  { id: "client-codigo-antigo", code: null, tenantId: "tenant-a", ownerSellerId: "seller-a", codeAudits: [{ oldValue: "90011", newValue: null }], _count: { ...zero, codeAuditEvents: 1 } },
+  // Cadastro manual que só ganhou o tenant pelo backfill: auditoria sem código não é "código ERP".
+  { id: "client-backfill", code: null, tenantId: "tenant-a", ownerSellerId: "seller-a", codeAudits: [{ oldValue: null, newValue: null }], _count: { ...zero, codeAuditEvents: 1 } },
   { id: "client-historico", code: null, tenantId: "tenant-a", ownerSellerId: "seller-a", _count: { ...zero, opportunities: 2, timelineEvents: 3, contacts: 1 } },
   { id: "client-corrida", code: null, tenantId: "tenant-a", ownerSellerId: "seller-a", _count: { ...zero } },
   { id: "client-outro-tenant", code: null, tenantId: "tenant-b", ownerSellerId: "seller-a", _count: { ...zero } },
@@ -34,9 +38,14 @@ setModel("user", {
 });
 setModel("tenantMembership", { findMany: async ({ where }: any) => (users[where?.userId] ? [{ tenantId: "tenant-a" }] : []) });
 setModel("client", {
-  findFirst: async ({ where }: any) => {
+  findFirst: async ({ where, select }: any) => {
     const row = clients.find((client) => client.id === where?.id && client.tenantId === where?.tenantId);
-    return row ? { id: row.id, code: row.code, ownerSellerId: row.ownerSellerId, _count: { ...row._count } } : null;
+    if (!row) return null;
+    // Mesmo filtro do select da rota: só auditoria com algum código.
+    const filter = select.codeAuditEvents.where.OR;
+    assert.deepEqual(filter, [{ oldValue: { not: null } }, { newValue: { not: null } }]);
+    const withCode = (row.codeAudits ?? []).filter((audit: Row) => audit.oldValue !== null || audit.newValue !== null);
+    return { id: row.id, code: row.code, ownerSellerId: row.ownerSellerId, codeAuditEvents: withCode.slice(0, 1).map((_: Row, index: number) => ({ id: `audit-${index}` })), _count: { ...row._count } };
   },
   delete: async ({ where }: any) => {
     if (where.id === "client-corrida") {
@@ -68,13 +77,21 @@ const remove = async (userId: string, clientId: string) => {
 };
 
 try {
-  // Código ERP (ou auditoria de código): 409 citando "Mesclar duplicado", nunca 500/408.
+  // Código ERP (ou auditoria com código): 409 citando "Arquivar" e "Mesclar duplicado", nunca 500/408.
   const withCode = await remove("manager-a", "client-codigo");
   assert.equal(withCode.status, 409);
   assert.deepEqual(withCode.json.blockingReasons, ["código ERP"]);
   assert.match(withCode.json.message, /código ERP/);
+  assert.match(withCode.json.message, /"Arquivar" \(gerente ou diretor\)/);
   assert.match(withCode.json.message, /Mesclar duplicado/);
-  assert.doesNotMatch(withCode.json.message, /Arquivar/);
+  assert.deepEqual((await remove("manager-a", "client-codigo-antigo")).json.blockingReasons, ["código ERP"]);
+
+  // Auditoria sem código (backfill de tenant): continua bloqueado (a auditoria não se apaga), mas não cita código ERP.
+  const backfill = await remove("seller-a", "client-backfill");
+  assert.equal(backfill.status, 409);
+  assert.deepEqual(backfill.json.blockingReasons, ["auditoria do cadastro"]);
+  assert.doesNotMatch(backfill.json.message, /código ERP/);
+  assert.match(backfill.json.message, /Arquivar/);
 
   // Histórico: lista os vínculos na ordem fixa.
   const withHistory = await remove("seller-a", "client-historico");
@@ -84,6 +101,7 @@ try {
   // Corrida com o banco: P2003 vira 409 legível.
   const race = await remove("manager-a", "client-corrida");
   assert.equal(race.status, 409);
+  assert.match(race.json.message, /Arquivar/);
   assert.match(race.json.message, /Mesclar duplicado/);
 
   // Escopo: outro tenant não existe para o usuário; vendedor só exclui o próprio.
@@ -103,4 +121,4 @@ try {
   await (prisma as any).$disconnect?.();
 }
 
-console.log("CLIENT_DELETE=PASS linked_409=PASS fk_race_409=PASS tenant_scope=PASS no_cascade=PASS");
+console.log("CLIENT_DELETE=PASS linked_409=PASS audit_without_code=PASS fk_race_409=PASS tenant_scope=PASS no_cascade=PASS");

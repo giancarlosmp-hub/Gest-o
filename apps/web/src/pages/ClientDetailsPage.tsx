@@ -10,7 +10,17 @@ import ClientAutoSummaryCard from "../components/clients/ClientAutoSummaryCard";
 import ClientCreditAlertBanner, { ClientCreditAlert } from "../components/clients/ClientCreditAlertBanner";
 import ClientErpPhones, { type ClientErpEmail, type ClientErpPhone } from "../components/clients/ClientErpPhones";
 import { useAuth } from "../context/AuthContext";
-import { canManageArchivedClients, canReactivateClient, clientArchiveBadgeLabel, isPortfolioCleanupArchivedClient } from "../lib/clientArchiveStatus";
+import {
+  canArchiveClient,
+  canManageArchivedClients,
+  canReactivateClient,
+  CLIENT_ARCHIVE_CONFIRM_MESSAGE,
+  clientArchiveBadgeLabel,
+  clientArchiveNotice,
+  clientReactivateActionLabel,
+  clientReactivateConfirmMessage,
+  isReactivatableArchivedClient,
+} from "../lib/clientArchiveStatus";
 import ClientMergeDuplicateDialog from "../components/clients/ClientMergeDuplicateDialog";
 import { PORTFOLIO_STATUS_LABELS, isValidOptionalContactEmail, type PortfolioStatus } from "@salesforce-pro/shared";
 import { portfolioStatusBadgeClass } from "../lib/portfolioStatusBadge";
@@ -196,6 +206,7 @@ export default function ClientDetailsPage() {
   const { user } = useAuth();
   const [client, setClient] = useState<Client | null>(null);
   const [reactivating, setReactivating] = useState(false);
+  const [archiving, setArchiving] = useState(false);
   const [isMergeOpen, setIsMergeOpen] = useState(false);
   const [events, setEvents] = useState<TimelineEventItem[]>([]);
   const [eventsCursor, setEventsCursor] = useState<string | null>(null);
@@ -473,6 +484,9 @@ export default function ClientDetailsPage() {
 
   const archiveBadgeLabel = clientArchiveBadgeLabel(client);
   const showReactivateButton = canReactivateClient(user?.role, client);
+  const reactivateLabel = clientReactivateActionLabel(client);
+  // "Arquivar": gerente e diretor, só em cadastro ativo.
+  const showArchiveButton = canArchiveClient(user?.role, client);
   // "Mesclar duplicado": gerente e diretor, só em cadastro ativo.
   const showMergeButton = canManageArchivedClients(user?.role) && !client.isArchived;
 
@@ -485,22 +499,43 @@ export default function ClientDetailsPage() {
   // Carteira = clientes não arquivados; o arquivado já mostra o próprio selo.
   const portfolioStatus = client.isArchived ? null : client.commercialSummary?.portfolioStatus ?? null;
 
+  const reloadEvents = async () => {
+    const eventsRes = await api.get(`/events?clientId=${id}&take=20`);
+    setEvents(eventsRes.data?.items || []);
+    setEventsCursor(eventsRes.data?.nextCursor || null);
+  };
+
   const reactivateClient = async () => {
     if (!id) return;
-    if (!window.confirm("Reativar este cliente? Ele volta para a carteira ativa do vendedor responsável.")) return;
+    if (!window.confirm(clientReactivateConfirmMessage(client))) return;
 
     setReactivating(true);
     try {
       await api.post(`/clients/${id}/reactivate`);
       setClient((current) => (current ? { ...current, isArchived: false, archiveReason: null } : current));
-      toast.success("Cliente reativado.");
-      const eventsRes = await api.get(`/events?clientId=${id}&take=20`);
-      setEvents(eventsRes.data?.items || []);
-      setEventsCursor(eventsRes.data?.nextCursor || null);
+      toast.success(reactivateLabel === "Desarquivar" ? "Cliente desarquivado." : "Cliente reativado.");
+      await reloadEvents();
     } catch (error: any) {
       toast.error(error?.response?.data?.message || "Não foi possível reativar o cliente.");
     } finally {
       setReactivating(false);
+    }
+  };
+
+  const archiveClient = async () => {
+    if (!id) return;
+    if (!window.confirm(CLIENT_ARCHIVE_CONFIRM_MESSAGE)) return;
+
+    setArchiving(true);
+    try {
+      const response = await api.post(`/clients/${id}/archive`);
+      setClient((current) => (current ? { ...current, isArchived: true, archiveReason: response.data?.archiveReason ?? null } : current));
+      toast.success("Cliente arquivado.");
+      await reloadEvents();
+    } catch (error: any) {
+      toast.error(error?.response?.data?.message || "Não foi possível arquivar o cliente.");
+    } finally {
+      setArchiving(false);
     }
   };
 
@@ -541,6 +576,16 @@ export default function ClientDetailsPage() {
               Mesclar duplicado
             </button>
           ) : null}
+          {showArchiveButton ? (
+            <button
+              type="button"
+              className="rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:opacity-60"
+              onClick={() => void archiveClient()}
+              disabled={archiving}
+            >
+              {archiving ? "Arquivando..." : "Arquivar"}
+            </button>
+          ) : null}
           <button
             type="button"
             className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
@@ -554,14 +599,10 @@ export default function ClientDetailsPage() {
       {archiveBadgeLabel ? (
         <section className="flex flex-col justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 sm:flex-row sm:items-center">
           <div>
-            <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ${isPortfolioCleanupArchivedClient(client) ? "bg-white text-amber-800 ring-amber-300" : "bg-slate-100 text-slate-700 ring-slate-300"}`}>
+            <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ${isReactivatableArchivedClient(client) ? "bg-white text-amber-800 ring-amber-300" : "bg-slate-100 text-slate-700 ring-slate-300"}`}>
               {archiveBadgeLabel}
             </span>
-            <p className="mt-2 text-sm text-slate-700">
-              {isPortfolioCleanupArchivedClient(client)
-                ? "Cliente fora da carteira ativa. Não recebe oportunidade nova enquanto estiver arquivado."
-                : "Cadastro duplicado arquivado: use o cliente principal."}
-            </p>
+            <p className="mt-2 text-sm text-slate-700">{clientArchiveNotice(client)}</p>
           </div>
           {showReactivateButton ? (
             <button
@@ -570,7 +611,7 @@ export default function ClientDetailsPage() {
               onClick={() => void reactivateClient()}
               disabled={reactivating}
             >
-              {reactivating ? "Reativando..." : "Reativar cliente"}
+              {reactivating ? (reactivateLabel === "Desarquivar" ? "Desarquivando..." : "Reativando...") : reactivateLabel}
             </button>
           ) : null}
         </section>

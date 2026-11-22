@@ -52,6 +52,7 @@ import {
   PORTFOLIO_CLEANUP_REACTIVATION_AUDIT_ORIGIN,
   PORTFOLIO_CLEANUP_REACTIVATION_DESCRIPTION,
 } from "./portfolioCleanupArchive.js";
+import { isManualArchiveReason, parseManualArchivedAt } from "./clientManualArchive.js";
 
 const ERP_SYNC_STATUS_KEY = "erp.ultrafv3.sync.status";
 const ERP_SYNC_LOCK_TTL_MS = 30 * 60 * 1000;
@@ -1570,9 +1571,9 @@ type PartnerPersistenceDiagnostics = {
   legacyTenantAdoptionRequired?: number;
   skippedNotCustomer?: number;
   skippedCustomerFlagMissing?: number;
-  /** Arquivados pela limpeza da carteira: cadastro atualizado, arquivamento mantido. */
+  /** Arquivados pela limpeza da carteira ou manualmente ("MANUAL:"): cadastro atualizado, arquivamento mantido. */
   portfolioCleanupKeptArchived?: number;
-  /** Arquivados pela limpeza da carteira reativados: vieram com IDN_CLIENTE = S e vendedor do ERP de usuário ativo. */
+  /** Arquivados pela limpeza da carteira ou manualmente reativados: vieram com IDN_CLIENTE = S e vendedor do ERP de usuário ativo. */
   portfolioCleanupReactivated?: number;
   /** Só contagem: clientes não arquivados do CRM com código vindo nesta rodada com IDN_CLIENTE = N. */
   existingClientsNotCustomer?: number;
@@ -2079,9 +2080,10 @@ async function persistPartnerPayload(
     });
     ownerSellerId = primary.ownerSellerId;
   }
-  // Arquivado pela limpeza da carteira: reativa só se o ERP diz que é cliente da carteira (IDN_CLIENTE = S e
-  // vendedor do ERP de um usuário ativo do CRM); senão atualiza o cadastro e mantém o arquivamento.
-  const portfolioCleanupArchived = Boolean(primary?.isArchived && isPortfolioCleanupArchiveReason(primary.archiveReason));
+  // Arquivado pela limpeza da carteira ou manualmente ("MANUAL:"): reativa só se o ERP diz que é cliente da carteira
+  // (IDN_CLIENTE = S e vendedor do ERP de um usuário ativo do CRM); senão atualiza o cadastro e mantém o arquivamento.
+  const manualArchived = Boolean(primary?.isArchived && isManualArchiveReason(primary.archiveReason));
+  const portfolioCleanupArchived = manualArchived || Boolean(primary?.isArchived && isPortfolioCleanupArchiveReason(primary.archiveReason));
   const reactivatePortfolioCleanup = portfolioCleanupArchived && isErpPortfolioCustomer(payload, await loadActiveErpSellerCodes());
   const keepPortfolioCleanupArchive = portfolioCleanupArchived && !reactivatePortfolioCleanup;
 
@@ -2151,9 +2153,9 @@ async function persistPartnerPayload(
           clientId: primary.id, oldValue: primary.code, newValue: data.code, partnerErp: data.code,
           origin: PORTFOLIO_CLEANUP_REACTIVATION_AUDIT_ORIGIN, requestId: correlationId,
           metadata: {
-            operation: "portfolio_cleanup_reactivation",
+            operation: manualArchived ? "manual_archive_reactivation" : "portfolio_cleanup_reactivation",
             trigger: "partners",
-            archivedAt: parsePortfolioCleanupArchivedAt(primary.archiveReason)?.toISOString() ?? null,
+            archivedAt: (manualArchived ? parseManualArchivedAt(primary.archiveReason) : parsePortfolioCleanupArchivedAt(primary.archiveReason))?.toISOString() ?? null,
           },
         } });
       }

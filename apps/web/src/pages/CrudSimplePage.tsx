@@ -16,7 +16,16 @@ import {
 } from "../components/ClientImportColumnMappingStep";
 import QuickCreateClientSection from "../components/clients/QuickCreateClientSection";
 import { buildDuplicateClientMessage, checkClientDuplicate } from "../lib/clientDuplicateCheck";
-import { canManageArchivedClients, clientArchiveBadgeLabel, isPortfolioCleanupArchivedClient } from "../lib/clientArchiveStatus";
+import {
+  canArchiveClient,
+  canManageArchivedClients,
+  canReactivateClient,
+  CLIENT_ARCHIVE_CONFIRM_MESSAGE,
+  clientArchiveBadgeLabel,
+  clientReactivateActionLabel,
+  clientReactivateConfirmMessage,
+  isReactivatableArchivedClient,
+} from "../lib/clientArchiveStatus";
 import { getApiErrorMessage } from "../lib/apiError";
 import { portfolioStatusBadgeClass } from "../lib/portfolioStatusBadge";
 import { crudModalHeading } from "../lib/crudModalHeading";
@@ -596,7 +605,7 @@ export default function CrudSimplePage({
   const renderArchiveBadge = (item: ClientListItem) => {
     const label = clientArchiveBadgeLabel(item);
     if (!label) return null;
-    const tone = isPortfolioCleanupArchivedClient(item) ? "bg-amber-50 text-amber-800 ring-amber-200" : "bg-slate-100 text-slate-700 ring-slate-300";
+    const tone = isReactivatableArchivedClient(item) ? "bg-amber-50 text-amber-800 ring-amber-200" : "bg-slate-100 text-slate-700 ring-slate-300";
     return <span className={`mt-1 flex w-fit whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ${tone}`}>{label}</span>;
   };
 
@@ -1792,6 +1801,36 @@ export default function CrudSimplePage({
     }
   };
 
+  // "Arquivar" e "Desarquivar"/"Reativar cliente" na lista de clientes (gerente e diretor), com confirmação.
+  const onArchiveClient = async (item: any) => {
+    if (!window.confirm(CLIENT_ARCHIVE_CONFIRM_MESSAGE)) return;
+    setDeletingId(item.id);
+    try {
+      await api.post(`/clients/${item.id}/archive`);
+      toast.success("Cliente arquivado.");
+      await loadClients();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || "Não foi possível arquivar o cliente.");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const onReactivateClient = async (item: any) => {
+    if (!window.confirm(clientReactivateConfirmMessage(item))) return;
+    const label = clientReactivateActionLabel(item);
+    setDeletingId(item.id);
+    try {
+      await api.post(`/clients/${item.id}/reactivate`);
+      toast.success(label === "Desarquivar" ? "Cliente desarquivado." : "Cliente reativado.");
+      await loadClients();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || "Não foi possível reativar o cliente.");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   const disconnectUserWhatsapp = async (item: any) => {
     if (!window.confirm(`Desconectar o WhatsApp de ${item.name}?`)) return;
     try {
@@ -2323,6 +2362,32 @@ export default function CrudSimplePage({
                                 >
                                   Editar
                                 </button>
+                                {isClientsPage && canArchiveClient(user?.role, it) ? (
+                                  <button
+                                    type="button"
+                                    className="block w-full px-3 py-1.5 text-left text-sm text-amber-700 hover:bg-amber-50"
+                                    onClick={() => {
+                                      setOpenActionsMenuId(null);
+                                      void onArchiveClient(it);
+                                    }}
+                                    disabled={saving || deletingId === it.id}
+                                  >
+                                    Arquivar
+                                  </button>
+                                ) : null}
+                                {isClientsPage && canReactivateClient(user?.role, it) ? (
+                                  <button
+                                    type="button"
+                                    className="block w-full px-3 py-1.5 text-left text-sm text-emerald-700 hover:bg-emerald-50"
+                                    onClick={() => {
+                                      setOpenActionsMenuId(null);
+                                      void onReactivateClient(it);
+                                    }}
+                                    disabled={saving || deletingId === it.id}
+                                  >
+                                    {clientReactivateActionLabel(it)}
+                                  </button>
+                                ) : null}
                                 <button
                                   type="button"
                                   className="block w-full px-3 py-1.5 text-left text-sm text-rose-700 hover:bg-rose-50"
@@ -2449,6 +2514,32 @@ export default function CrudSimplePage({
                                     >
                                       Editar
                                     </button>
+                                    {isClientsPage && canArchiveClient(user?.role, it) ? (
+                                      <button
+                                        type="button"
+                                        className="block w-full px-3 py-1.5 text-left text-sm text-amber-700 hover:bg-amber-50"
+                                        onClick={() => {
+                                          setOpenActionsMenuId(null);
+                                          void onArchiveClient(it);
+                                        }}
+                                        disabled={saving || deletingId === it.id}
+                                      >
+                                        Arquivar
+                                      </button>
+                                    ) : null}
+                                    {isClientsPage && canReactivateClient(user?.role, it) ? (
+                                      <button
+                                        type="button"
+                                        className="block w-full px-3 py-1.5 text-left text-sm text-emerald-700 hover:bg-emerald-50"
+                                        onClick={() => {
+                                          setOpenActionsMenuId(null);
+                                          void onReactivateClient(it);
+                                        }}
+                                        disabled={saving || deletingId === it.id}
+                                      >
+                                        {clientReactivateActionLabel(it)}
+                                      </button>
+                                    ) : null}
                                     {isUsersPage && it.isActive === false ? (
                                       <button
                                         type="button"
