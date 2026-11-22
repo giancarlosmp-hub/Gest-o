@@ -15,13 +15,20 @@ jobs. Tudo é leitura, e o log nunca mostra URL, IP ou nome de máquina.
 
 | Verificação | Como | Resultado |
 |---|---|---|
-| ERP | De dentro da API (`docker exec` no container `gest-o-production`/`api`): `GET` em `ULTRAFV3_BASE_URL` + `/health`, sem credenciais, timeout 8 s | 2xx, 401 ou 403 = `ERP: ok (HTTP N)`; outro status = `[CRITICAL] ERP: HTTP N.`; sem conexão ou timeout = `[CRITICAL] ERP: sem resposta.` |
+| ERP | De dentro da API (`docker exec` no container `gest-o-production`/`api`): `GET` em `ULTRAFV3_BASE_URL` + `/salesmen`, sem credenciais, timeout 8 s | HTTP de 200 a 499 = `ERP: ok (HTTP N)`; 5xx = `[CRITICAL] ERP: HTTP N.`; sem conexão ou timeout = `[CRITICAL] ERP: sem resposta.` |
 | DNS dos containers | De dentro da API: resolução de `api.groq.com` | `DNS da API (api.groq.com): ok` ou `[CRITICAL] … falha (CÓDIGO)` (ex.: `EAI_AGAIN`) |
 | API ausente | `docker ps` sem o container | `[CRITICAL] … container da API não encontrado.` |
 
-O `/health` sem credenciais pode responder 401/403 (a integração o chama com token); qualquer resposta HTTP 2xx,
-401 ou 403 prova que a rede até o ERP funciona. Cada falha é repetida até 3 vezes, com 20 s entre as tentativas
-(cobre a recriação da API no cutover): `[INFO] Tentativa N de 3 com falha`. Só reprova se a última também falhar.
+`/salesmen` é a rota do preflight da integração (`SALESMEN_ORDER_SEQUENCE_ENDPOINT` em `erpOrderService.ts`) e do
+`scripts/diagnose-ultrafv3-reachability.sh`; sem token ela responde 401. O objetivo é saber se a rede chega ao ERP,
+não validar a rota: qualquer HTTP de 200 a 499 = rede ok; o alerta é só para 5xx, sem resposta ou timeout. Cada
+falha é repetida até 3 vezes, com 20 s entre as tentativas (cobre a recriação da API no cutover):
+`[INFO] Tentativa N de 3 com falha`. Só reprova se a última também falhar.
+
+**Alarme falso de 22/11/2026.** A primeira versão (#1056) chamava `ULTRAFV3_BASE_URL` + `/health`, rota que não
+existe no ERP. O run manual de 22/11 deu `[CRITICAL] ERP: HTTP 404.` com DNS da API ok, Tailscale `Running` e peer
+do ERP online: o ERP respondia, e o alerta falharia a cada hora. O #1057 trocou a rota para `/salesmen` e a regra
+para 200 a 499 = rede ok.
 
 **Diagnóstico (só quando falha).** `tailscale status --json` na VPS, e o host do ERP lido da API só para comparar:
 
@@ -45,9 +52,10 @@ em horário de pico, então a detecção leva de 1 a algumas horas. Se o e-mail 
 prevista é um alerta por ausência de sinal (Healthchecks.io ou similar) avisado pelo runner, em PR separado.
 
 **Testes:** `scripts/smoke/production-deploy-safety.mjs` roda o script real do job com `docker` e `tailscale`
-falsos e um servidor HTTP local no papel do ERP: HTTP 200/204/401/403, 500, 404, sem resposta, URL ausente, API
-recriada na 1ª tentativa, DNS sem resposta e os estados do diagnóstico. Confere que o log não mostra host, IP ou
-porta e que só há `docker ps`/`docker exec` e `tailscale status --json`.
+falsos e um servidor HTTP local no papel do ERP, que só responde em `/salesmen` (outra rota = 599): HTTP 200, 204,
+301, 401, 403, 404 e 499 passam; 500, 503, rota errada, sem resposta e URL ausente reprovam; API recriada na 1ª
+tentativa, DNS sem resposta e os estados do diagnóstico. Confere que o log não mostra host, IP ou porta e que só há
+`docker ps`/`docker exec` e `tailscale status --json`.
 
 ## WhatsApp Evolution: workflow de subida e checagem no Drift (06/11/2026)
 

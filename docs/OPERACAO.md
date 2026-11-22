@@ -1069,8 +1069,9 @@ No Windows, revisar os paths e criar uma tarefa **SYSTEM**, no boot, para PowerS
 
 ### Alerta de rede da VPS (22/11/2026)
 
-O job `check-network` do **VPS Drift Detection** verifica de hora em hora, de dentro da API, o `GET /health` do ERP
-e o DNS dos containers, e falha o run (e-mail do GitHub) quando um deles não responde depois de 3 tentativas. Na
+O job `check-network` do **VPS Drift Detection** verifica de hora em hora, de dentro da API, o `GET /salesmen` do ERP
+sem credenciais (HTTP de 200 a 499 = rede ok) e o DNS dos containers, e falha o run (e-mail do GitHub) com 5xx, sem
+resposta ou timeout depois de 3 tentativas. Na
 falha, o log diz se o Tailscale da VPS está logado e se o peer do ERP aparece online. O DNS do host não depende do
 Tailscale (aponta para DNS públicos do Google); só os containers herdam o resolvedor do Tailscale (MagicDNS). O que
 fazer em cada caso: `DEPLOY_GUIDE.md`, seção "Alerta de rede (ERP, DNS e Tailscale)".

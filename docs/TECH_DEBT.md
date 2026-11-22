@@ -1993,9 +1993,11 @@ ficaram sem DNS: IA, transcrição de áudio do WhatsApp, Evolution e ERP parara
 Tailscale está desativada. O DNS do host não depende do Tailscale (aponta para DNS públicos do Google); só os
 containers herdam o resolvedor do Tailscale (MagicDNS).
 
-~~Falta alerta.~~ Desde 22/11/2026 (código pronto, aguardando merge) o job `check-network` do VPS Drift Detection
-verifica de hora em hora o `GET /health` do ERP e o DNS de dentro da API e, na falha, diz se o Tailscale da VPS
-está logado e se o peer do ERP está online. Detalhes em `DEPLOY_GUIDE.md`, seção "Alerta de rede (ERP, DNS e
+~~Falta alerta.~~ Desde 22/11/2026 (#1056, rota corrigida no #1057) o job `check-network` do VPS Drift Detection
+verifica de hora em hora o `GET /salesmen` do ERP sem credenciais (200 a 499 = rede ok; alerta com 5xx, sem
+resposta ou timeout) e o DNS de dentro da API e, na falha, diz se o Tailscale da VPS está logado e se o peer do ERP
+está online. A 1ª versão chamava `/health`, que não existe no ERP, e deu alarme falso (HTTP 404) no run manual de
+22/11. Detalhes em `DEPLOY_GUIDE.md`, seção "Alerta de rede (ERP, DNS e
 Tailscale)".
 
 Pendências:
