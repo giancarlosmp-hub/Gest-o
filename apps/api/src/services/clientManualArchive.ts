@@ -13,6 +13,15 @@ export const isManualArchiveReason = (reason: string | null | undefined): reason
 
 export const buildManualArchiveReason = (archivedAt: Date) => `${MANUAL_ARCHIVE_REASON_PREFIX}${archivedAt.toISOString()}`;
 
+/** Data do arquivamento manual gravada no motivo; null se o motivo for outro ou a data não for legível. */
+export function parseManualArchivedAt(reason: string | null | undefined): Date | null {
+  if (!isManualArchiveReason(reason)) return null;
+  const match = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z/.exec(reason.slice(MANUAL_ARCHIVE_REASON_PREFIX.length));
+  if (!match) return null;
+  const date = new Date(match[0]);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 export const manualArchiveDescription = (userName: string) => `Cliente arquivado por ${userName}`;
 export const manualUnarchiveDescription = (userName: string) => `Cliente desarquivado por ${userName}`;
 
