@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
@@ -66,12 +66,20 @@ assert.deepEqual(scriptStopFound, [],
 // deploy are reported as [INFO].  Run that exact logic against throwaway git repositories, with a
 // fake curl on PATH standing in for the health endpoint (no network).
 const driftPath = ".github/workflows/vps-drift-detection.yml";
-const driftSteps = workflowSteps(read(driftPath), driftPath).filter(step => step.script !== null);
-assert.equal(driftSteps.length, 1);
-const [drift] = driftSteps;
-assert.equal(drift.scriptStop, false, "VPS Drift Detection não pode usar script_stop (o drone-ssh injeta checagem de $? por linha)");
-assert.deepEqual(scriptStopHazards(drift.script), [], "VPS Drift Detection não usa else/elif em linha própria nem case multi-linha");
-assert.equal(drift.script.split("\n")[0], "set -Eeuo pipefail");
+const driftWorkflow = read(driftPath);
+const driftSteps = workflowSteps(driftWorkflow, driftPath).filter(step => step.script !== null);
+assert.equal(driftSteps.length, 2);
+const [drift, network] = driftSteps;
+for (const step of driftSteps) {
+  assert.equal(step.scriptStop, false, "VPS Drift Detection não pode usar script_stop (o drone-ssh injeta checagem de $? por linha)");
+  assert.deepEqual(scriptStopHazards(step.script), [], "VPS Drift Detection não usa else/elif em linha própria nem case multi-linha");
+  assert.equal(step.script.split("\n")[0], "set -Eeuo pipefail");
+}
+// Dois crons no minuto 17 (o GitHub atrasa a hora cheia): drift diário e rede de hora em hora, cada um
+// no seu job; o disparo manual roda os dois.
+assert.deepEqual([...driftWorkflow.matchAll(/^\s+- cron: '([^']+)'$/gm)].map(match => match[1]), ["17 9 * * *", "17 * * * *"]);
+assert.match(driftWorkflow, /\n  check-drift:\n(?:    #[^\n]*\n)*    if: github\.event_name == 'workflow_dispatch' \|\| github\.event\.schedule == '17 9 \* \* \*'\n/);
+assert.match(driftWorkflow, /\n  check-network:\n    if: github\.event_name == 'workflow_dispatch' \|\| github\.event\.schedule == '17 \* \* \* \*'\n/);
 const driftCd = "cd /apps/gest-o", driftHealthUrl = "http://127.0.0.1:4000/health/version";
 assert.equal(drift.script.split("\n").filter(line => line === driftCd).length, 1);
 assert.ok(drift.script.includes(`curl -fsS --max-time 5 ${driftHealthUrl}`));
@@ -248,6 +256,131 @@ try {
   assert.doesNotMatch(unmerged.stdout, /\[OK\]|\[INFO\] main/);
 } finally {
   rmSync(driftTmp, { recursive: true, force: true });
+}
+
+// Alerta de rede (TD-VPS-TAILSCALE-DEPENDENCY): roda o script real do job check-network. O docker falso
+// executa o JS do `docker exec` no node local (com a URL fictícia do ERP e, no DNS, um host de teste no
+// lugar de api.groq.com); um servidor HTTP local faz o papel do ERP: /s<status>/health devolve <status>
+// e 599 se vier método diferente de GET ou Authorization. tailscale falso devolve JSON fictício.
+const retryLine = "retry_delay=20";
+assert.equal(network.script.split("\n").filter(line => line === retryLine).length, 1);
+assert.match(network.script, /^attempts=3$/m);
+for (const forbidden of [/tailscale\s+(?:up|down|login|logout|set|switch|cert|serve|funnel|ping|file|debug|update)\b/, /(?:^|\$\(|timeout \d+ )\s*tailscale\s+(?!status --json)/m, /docker\s+(?!ps -q |exec "\$api_cid" node -e )/, /\bcurl\b/, /\bsystemctl\b/, /\bPOST\b/, /Authorization/]) {
+  assert.doesNotMatch(network.script.replace(/^\s*#.*$/gm, ""), forbidden, `alerta de rede só lê: ${forbidden}`);
+}
+const erpServer = spawn(process.execPath, ["-e", 'require("http").createServer((q,s)=>{const m=q.url.match(/^\\/s(\\d{3})\\/health$/);s.writeHead(q.method!=="GET"||q.headers.authorization?599:m?Number(m[1]):404);s.end()}).listen(0,"127.0.0.1",function(){console.log(this.address().port)})'], { stdio: ["ignore", "pipe", "inherit"] });
+const netTmp = mkdtempSync(join(tmpdir(), "vps-network-"));
+try {
+  const erpPort = await new Promise((resolvePort, rejectPort) => {
+    erpServer.once("error", rejectPort);
+    erpServer.stdout.once("data", data => resolvePort(Number(String(data).trim())));
+  });
+  const netBin = join(netTmp, "bin");
+  mkdirSync(netBin);
+  writeFileSync(join(netBin, "docker"), [
+    "#!/usr/bin/env bash",
+    'printf \'%s\\n\' "$1" >>"$FAKE_NET_CALLS"',
+    'case "$1" in',
+    '  ps) n=$(( $(cat "$FAKE_NET_COUNTER" 2>/dev/null || echo 0) + 1 )); echo "$n" >"$FAKE_NET_COUNTER"; if [[ "${FAKE_API:-up}" == up ]] && (( n > ${FAKE_API_MISSING_FIRST:-0} )); then echo cid-api; fi; exit 0 ;;',
+    '  exec) [[ "$2" == cid-api && "$3" == node && "$4" == -e ]] || exit 96; js="${5//api.groq.com/${FAKE_DNS_HOST:-localhost}}"; ULTRAFV3_BASE_URL="${FAKE_ERP_URL-}" exec node -e "$js" ;;',
+    "  *) exit 97 ;;",
+    "esac",
+    "",
+  ].join("\n"));
+  writeFileSync(join(netBin, "tailscale"), [
+    "#!/usr/bin/env bash",
+    'printf \'%s\\n\' "$*" >>"$FAKE_TS_CALLS"',
+    '[[ "$*" == "status --json" ]] || exit 98',
+    '[[ -n "${FAKE_TS_JSON:-}" ]] || exit 1',
+    'printf \'%s\' "$FAKE_TS_JSON"',
+    "",
+  ].join("\n"));
+  for (const name of ["docker", "tailscale"]) chmodSync(join(netBin, name), 0o755);
+  const netCalls = join(netTmp, "docker-calls"), tsCalls = join(netTmp, "tailscale-calls"), counter = join(netTmp, "ps-counter");
+  const erpUrl = status => `http://127.0.0.1:${erpPort}/s${status}`;
+  const tsJson = (state, peer) => JSON.stringify({ BackendState: state, Peer: peer ? { chave: peer } : {} });
+  const leaks = [/127\.0\.0\.1/, new RegExp(`\\b${erpPort}\\b`), /erp-ficticio/, /100\.64\./];
+  const runNetwork = extra => {
+    for (const file of [netCalls, tsCalls, counter]) writeFileSync(file, "");
+    const result = spawnSync("bash", ["-s"], {
+      input: network.script.replace(retryLine, "retry_delay=0"),
+      env: { ...process.env, PATH: `${netBin}${delimiter}${process.env.PATH}`, FAKE_NET_CALLS: netCalls, FAKE_TS_CALLS: tsCalls, FAKE_NET_COUNTER: counter, FAKE_ERP_URL: erpUrl(200), FAKE_TS_JSON: tsJson("Running"), ...extra },
+      encoding: "utf8",
+    });
+    for (const leak of leaks) assert.doesNotMatch(result.stdout + result.stderr, leak, `alerta de rede vazou host/IP/porta (${JSON.stringify(extra)})`);
+    assert.deepEqual([...new Set(readFileSync(netCalls, "utf8").trim().split("\n").filter(Boolean))].filter(call => !["ps", "exec"].includes(call)), [], "docker só com ps e exec");
+    assert.deepEqual([...new Set(readFileSync(tsCalls, "utf8").trim().split("\n").filter(Boolean))].filter(call => call !== "status --json"), [], "tailscale só com status --json");
+    return result;
+  };
+
+  for (const status of [200, 204, 401, 403]) {
+    const ok = runNetwork({ FAKE_ERP_URL: erpUrl(status) });
+    assert.equal(ok.status, 0, `ERP HTTP ${status}: ${ok.stderr}`);
+    assert.match(ok.stdout, new RegExp(`^ERP: ok \\(HTTP ${status}\\)$`, "m"));
+    assert.match(ok.stdout, /^DNS da API \(api\.groq\.com\): ok$/m);
+    assert.match(ok.stdout, /^\[OK\] ERP respondendo e DNS da API funcionando\.$/m);
+    assert.doesNotMatch(ok.stdout + ok.stderr, /\[CRITICAL\]|Tentativa|Diagnóstico/);
+    assert.equal(readFileSync(tsCalls, "utf8"), "", "tailscale só no diagnóstico de falha");
+  }
+
+  // API recriada (cutover): falha na 1ª tentativa e passa na 2ª.
+  const recreated = runNetwork({ FAKE_API_MISSING_FIRST: "1" });
+  assert.equal(recreated.status, 0, `API recriada: ${recreated.stderr}`);
+  assert.match(recreated.stdout, /^\[INFO\] Tentativa 1 de 3 com falha; nova tentativa em 0 s\.$/m);
+  assert.doesNotMatch(recreated.stdout, /Tentativa 2/);
+
+  for (const [extra, message] of [
+    [{ FAKE_ERP_URL: erpUrl(500) }, /^\[CRITICAL\] ERP: HTTP 500\.$/m],
+    [{ FAKE_ERP_URL: `http://127.0.0.1:${erpPort}/outra-base` }, /^\[CRITICAL\] ERP: HTTP 404\.$/m],
+    [{ FAKE_ERP_URL: "http://127.0.0.1:1/s200" }, /^\[CRITICAL\] ERP: sem resposta\.$/m],
+    [{ FAKE_ERP_URL: "" }, /^\[CRITICAL\] ERP: ULTRAFV3_BASE_URL ausente na API\.$/m],
+  ]) {
+    const result = runNetwork(extra);
+    assert.equal(result.status, 1, `ERP com falha ${JSON.stringify(extra)}: ${result.stdout}`);
+    assert.match(result.stderr, message);
+    assert.match(result.stdout, /^\[INFO\] Tentativa 1 de 3 com falha/m);
+    assert.match(result.stdout, /^\[INFO\] Tentativa 2 de 3 com falha/m);
+    assert.doesNotMatch(result.stdout, /Tentativa 3|\[OK\]/);
+    assert.match(result.stdout, /^DNS da API \(api\.groq\.com\): ok$/m);
+    assert.match(result.stderr, /^--- Diagnóstico ---\nTailscale da VPS: logado e rodando \(Running\)\n/m);
+  }
+
+  // Diagnóstico do Tailscale: estado da VPS e peer do ERP (por IP do tailnet ou por nome MagicDNS).
+  const down = { FAKE_ERP_URL: "http://erp-ficticio.invalid/s200" };
+  const peerByName = online => ({ DNSName: "erp-ficticio.invalid.", HostName: "outro-nome", TailscaleIPs: ["100.64.0.10"], Online: online });
+  for (const [extra, tsLine, peerLine] of [
+    [{ ...down, FAKE_TS_JSON: tsJson("Running", peerByName(true)) }, "logado e rodando (Running)", "online"],
+    [{ ...down, FAKE_TS_JSON: tsJson("Running", peerByName(false)) }, "logado e rodando (Running)", "OFFLINE: conferir a máquina do ERP e o Tailscale nela"],
+    [{ FAKE_ERP_URL: erpUrl(503), FAKE_TS_JSON: tsJson("Running", { DNSName: "outro.invalid.", TailscaleIPs: ["127.0.0.1"], Online: false }) }, "logado e rodando (Running)", "OFFLINE: conferir a máquina do ERP e o Tailscale nela"],
+    [{ ...down, FAKE_TS_JSON: tsJson("NeedsLogin") }, "DESLOGADO (NeedsLogin): refazer o login do Tailscale na VPS", "não identificado na lista de peers"],
+    [{ ...down, FAKE_TS_JSON: tsJson("Stopped") }, "estado Stopped", "não identificado na lista de peers"],
+    [{ ...down, FAKE_TS_JSON: "" }, "sem resposta do tailscale status", "não verificado (sem resposta do tailscale status)"],
+    [{ ...down, FAKE_TS_JSON: "não é json" }, "sem resposta do tailscale status", "não verificado (sem resposta do tailscale status)"],
+  ]) {
+    const result = runNetwork(extra);
+    assert.equal(result.status, 1, `diagnóstico ${JSON.stringify(extra)}`);
+    assert.match(result.stderr, /^\[CRITICAL\] ERP: (sem resposta|HTTP 503)\.$/m);
+    assert.ok(result.stderr.includes(`Tailscale da VPS: ${tsLine}\nPeer do ERP no Tailscale: ${peerLine}\n`), `diagnóstico ${JSON.stringify(extra)}: ${result.stderr}`);
+    assert.match(result.stderr, /Ver DEPLOY_GUIDE, seção "Alerta de rede \(ERP, DNS e Tailscale\)"\./);
+    assert.deepEqual(readFileSync(tsCalls, "utf8").trim().split("\n"), ["status --json"], "tailscale uma vez, só no diagnóstico");
+  }
+
+  // DNS dos containers sem resposta (caso de 15/11/2026): reprova mesmo com o ERP respondendo.
+  const noDns = runNetwork({ FAKE_DNS_HOST: "nao-existe.invalid", FAKE_TS_JSON: tsJson("NeedsLogin") });
+  assert.equal(noDns.status, 1, `sem DNS: ${noDns.stdout}`);
+  assert.match(noDns.stdout, /^ERP: ok \(HTTP 200\)$/m);
+  assert.match(noDns.stderr, /^\[CRITICAL\] DNS da API \(api\.groq\.com\): falha \([A-Z_]+\)\.$/m);
+  assert.match(noDns.stderr, /^Tailscale da VPS: DESLOGADO \(NeedsLogin\)/m);
+
+  const noApi = runNetwork({ FAKE_API: "down" });
+  assert.equal(noApi.status, 1);
+  assert.match(noApi.stderr, /^\[CRITICAL\] ERP: container da API não encontrado\.$/m);
+  assert.match(noApi.stderr, /^\[CRITICAL\] DNS da API \(api\.groq\.com\): container da API não encontrado\.$/m);
+  assert.match(noApi.stderr, /^Peer do ERP no Tailscale: não verificado \(host do ERP não lido da API\)$/m);
+  assert.deepEqual([...new Set(readFileSync(netCalls, "utf8").trim().split("\n"))], ["ps"]);
+} finally {
+  erpServer.kill();
+  rmSync(netTmp, { recursive: true, force: true });
 }
 const compose=read("docker-compose.production.yml"), deploy=read("scripts/deploy-production.sh"), schemaEvidence=read("scripts/schema-evidence-validation.sh"), pre=read("scripts/production-preflight.sh"), rollback=read("scripts/production-rollback.sh"), preview=read("scripts/production-schema-preview.sh"), envSource=read("apps/api/src/config/env.ts"), unit=read("docs/ops/gest-o.service"), workflow=read(".github/workflows/deploy-production.yml"), api=read("apps/api/src/app.ts");
 const erpEnvPreflight=read("scripts/erp-production-env-preflight.sh");
