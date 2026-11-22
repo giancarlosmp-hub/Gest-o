@@ -1,3 +1,13 @@
+# Alerta de rede da VPS (ERP, DNS e Tailscale) — código pronto, aguardando merge — 22/11/2026
+
+- VPS Drift Detection ganha o job `check-network`, de hora em hora (`17 * * * *`): de dentro da API, `GET /health`
+  do ERP sem credenciais e DNS de `api.groq.com`, 3 tentativas com 20 s entre elas. Na falha, diz se o Tailscale da
+  VPS está logado e se o peer do ERP está online. O aviso é o e-mail de falha do GitHub, que não depende do
+  Tailscale nem dos containers. Só leitura; log sem URL, IP ou host.
+- Drift diário passa de `0 9 * * *` para `17 9 * * *` (o GitHub atrasava o run em 3 a 10 horas).
+- Detalhes e o que fazer na falha: [DEPLOY_GUIDE.md](DEPLOY_GUIDE.md), seção "Alerta de rede (ERP, DNS e
+  Tailscale)". Pendências em `TD-VPS-TAILSCALE-DEPENDENCY` ([TECH_DEBT.md](TECH_DEBT.md)).
+
 # Catálogo Técnico por espécie/grupo (2ª rodada de dados) — código pronto, aguardando merge — 20/11/2026
 
 - `technicalCatalog.json`: 47 culturas, 22 novas (crotalárias ochroleuca e breviflora, ervilha forrageira, capim

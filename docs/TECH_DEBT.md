@@ -1987,13 +1987,26 @@ Perguntas para o fornecedor do UltraFV3:
 
 ### TD-VPS-TAILSCALE-DEPENDENCY — ERP e DNS dos containers dependem do Tailscale da VPS
 
-**Prioridade alta.** A integração com o ERP (`ULTRAFV3_BASE_URL`) passa pelo Tailscale da VPS, e o DNS dos
-containers também depende dele. Em 15/11/2026 a VPS saiu da conta do Tailscale e os containers ficaram sem DNS:
-IA, transcrição de áudio do WhatsApp e ERP pararam juntos. A expiração de chave do Tailscale está desativada.
+**Prioridade média** (era alta antes do alerta). A integração com o ERP (`ULTRAFV3_BASE_URL`) passa pelo Tailscale
+da VPS, e o DNS dos containers também depende dele. Em 15/11/2026 a VPS saiu da conta do Tailscale e os containers
+ficaram sem DNS: IA, transcrição de áudio do WhatsApp, Evolution e ERP pararam juntos. A expiração de chave do
+Tailscale está desativada. O DNS do host não depende do Tailscale (aponta para DNS públicos do Google); só os
+containers herdam o resolvedor do Tailscale (MagicDNS).
 
-Falta alerta ou monitoramento que avise quando a VPS sai do Tailscale ou quando os containers perdem o DNS. O
-diagnóstico existente (`scripts/diagnose-ultrafv3-reachability.sh`) olha o alcance do UltraFV3, não o Tailscale da
-VPS nem o DNS dos containers.
+~~Falta alerta.~~ Desde 22/11/2026 (código pronto, aguardando merge) o job `check-network` do VPS Drift Detection
+verifica de hora em hora o `GET /health` do ERP e o DNS de dentro da API e, na falha, diz se o Tailscale da VPS
+está logado e se o peer do ERP está online. Detalhes em `DEPLOY_GUIDE.md`, seção "Alerta de rede (ERP, DNS e
+Tailscale)".
+
+Pendências:
+
+- Confirmar se o e-mail de falha do GitHub chega (o GitHub avisa quem criou ou alterou o cron por último). Se não
+  chegar: alerta por ausência de sinal (Healthchecks.io ou similar) avisado pelo runner, em PR separado.
+- Tirar a dependência: containers com DNS próprio que não passe pelo resolvedor do Tailscale (mudança de compose,
+  com aprovação).
+- Opcional: mostrar o DNS dos containers na Saúde da Plataforma, só como informação.
+- `scripts/smoke/vps-drift-detection-safety.mjs` está desatualizado (espera textos e cron antigos) e não é chamado
+  por nenhum script do `package.json`; quem cobre o workflow é `scripts/smoke/production-deploy-safety.mjs`.
 
 Relacionado: incidente de 31/08/2026 (máquina do ERP fora do Tailscale) em `docs/DEPLOY_GUIDE.md`, seção "PR827
 final — histórico legado e incidente UltraFV3/Tailscale".
