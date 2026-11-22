@@ -148,8 +148,8 @@ import { COMMERCIAL_AUTOMATIONS_CONFIG_KEY, DEFAULT_COMMERCIAL_AUTOMATIONS_CONFI
 import { recordClientCodeChange } from "../services/clientCodeAuditService.js";
 import {
   buildClientDeleteBlockedMessage,
-  CLIENT_DELETE_LINK_COUNT_SELECT,
   CLIENT_DELETE_LINKED_FALLBACK_MESSAGE,
+  CLIENT_DELETE_SELECT,
   getClientDeleteBlockingReasons
 } from "../services/clientDeletion.js";
 import {
@@ -5073,14 +5073,14 @@ router.put("/clients/:id", rejectClientCodeInBody, validateBody(clientSchema.par
   }
 });
 
-// Só exclui cliente sem nenhum vínculo (código ERP, histórico, agenda, contatos, conversas). Com vínculo: 409 legível
-// apontando para "Mesclar duplicado". Nada é apagado em cascata; o erro de banco vira 409, nunca 500/408.
+// Só exclui cliente sem nenhum vínculo (código ERP, auditoria, histórico, agenda, contatos, conversas). Com vínculo: 409
+// legível apontando para "Arquivar" e "Mesclar duplicado". Nada é apagado em cascata; o erro de banco vira 409, nunca 500/408.
 router.delete("/clients/:id", async (req, res) => {
   const tenantId = await resolveRequestTenantId(req, res);
   if (!tenantId) return;
   const old = await prisma.client.findFirst({
     where: { id: req.params.id, tenantId },
-    select: { id: true, code: true, ownerSellerId: true, _count: { select: CLIENT_DELETE_LINK_COUNT_SELECT } }
+    select: CLIENT_DELETE_SELECT
   });
   if (!old) return res.status(404).json({ message: "Não encontrado" });
   if (req.user!.role === "vendedor" && old.ownerSellerId !== req.user!.id) {
