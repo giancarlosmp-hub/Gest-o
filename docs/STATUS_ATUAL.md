@@ -1,3 +1,24 @@
+# Arquivar cliente pela tela e mensagem da exclusão — código pronto, aguardando merge — 22/11/2026
+
+- Excluir cadastro manual antigo sem código ERP e sem histórico respondia "há histórico em: código ERP". Causa: a
+  regra contava qualquer linha de `ClientCodeAudit`, e o `backfillClientTenant` (#1000) gravou uma auditoria sem
+  código (`operation: "tenant_backfill"`) em cada cliente que preencheu. Agora "código ERP" só com `code` preenchido
+  ou auditoria com código; auditoria sem código vira "auditoria do cadastro". Continua bloqueando (a relação é
+  `onDelete: Restrict` e auditoria não se apaga). A mensagem indica "Arquivar" e, para cadastro repetido,
+  "Mesclar duplicado".
+- "Arquivar" (gerente e diretor), no menu "…" da lista e na ficha, com confirmação: `POST /clients/:id/archive`
+  grava `isArchived` e o motivo `MANUAL:<data ISO>`, evento "Cliente arquivado por <usuário>" e não apaga nada.
+  **409** com oportunidade aberta ou pedido pendente (mesma proteção da limpeza da carteira).
+- "Desarquivar" (com "Mostrar arquivados" e na ficha) usa `POST /clients/:id/reactivate`, com o evento "Cliente
+  desarquivado por <usuário>" e sem a auditoria "Manual Portfolio Reactivation" (não protege da limpeza da
+  carteira). Selo "Arquivado manualmente".
+- Sincronização de parceiros: o arquivo manual segue a regra da limpeza da carteira. Só reativa se o `/partners`
+  disser IDN_CLIENTE = S com vendedor do ERP de usuário ativo; senão atualiza o cadastro e mantém arquivado
+  (auditoria `manual_archive_reactivation`; as contagens `portfolioCleanup*` incluem o arquivo manual).
+  Sincronização financeira sem mudança (não mexe em arquivado manual).
+- Sem migration. Testes com dados fictícios em scripts que já rodam no CI (`test:client-reactivation`,
+  `test:portfolio-cleanup-reactivation`, web `test:client-archive-status`).
+
 # Alerta de rede da VPS (ERP, DNS e Tailscale) — mergeado (#1056), correção da rota no #1057 — 22/11/2026
 
 - VPS Drift Detection ganha o job `check-network`, de hora em hora (`17 * * * *`): de dentro da API, `GET /salesmen`

@@ -1853,3 +1853,16 @@ depois) conta como contato com o cliente; mensagem só recebida não conta; nada
 Detalhes em
 [communications/whatsapp-evolution.md](communications/whatsapp-evolution.md#whatsapp-como-contato-com-o-cliente);
 limites conhecidos em `TD-WHATSAPP-CRM-SEND` ([TECH_DEBT.md](TECH_DEBT.md)).
+
+# Arquivar cliente manualmente — código pronto, aguardando merge (22/11/2026)
+
+Gerente e diretor arquivam um cliente pela lista (menu "…") ou pela ficha, sempre com confirmação. O cadastro fica
+com `isArchived = true` e o motivo `MANUAL:<data ISO>`; nada é apagado e a linha do tempo registra "Cliente
+arquivado por <usuário>". Não arquiva com oportunidade aberta ou pedido pendente (mesma proteção da limpeza da
+carteira). "Desarquivar" volta o cadastro com o evento "Cliente desarquivado por <usuário>" e não protege da limpeza
+da carteira.
+
+A sincronização de parceiros trata o arquivo manual como o da limpeza: só reativa quando o ERP diz que é cliente
+(IDN_CLIENTE = S) de um vendedor do ERP que é usuário ativo do CRM. A exclusão continua só para cadastro sem nenhum
+vínculo; com vínculo (inclusive auditoria sem código, como a do preenchimento de tenant), o caminho é "Arquivar" ou,
+para cadastro repetido, "Mesclar duplicado". Pendências em `TD-CLIENT-DELETE-MERGE` ([TECH_DEBT.md](TECH_DEBT.md)).
