@@ -1,10 +1,13 @@
-# Alerta de rede da VPS (ERP, DNS e Tailscale) — código pronto, aguardando merge — 22/11/2026
+# Alerta de rede da VPS (ERP, DNS e Tailscale) — mergeado (#1056), correção da rota no #1057 — 22/11/2026
 
-- VPS Drift Detection ganha o job `check-network`, de hora em hora (`17 * * * *`): de dentro da API, `GET /health`
-  do ERP sem credenciais e DNS de `api.groq.com`, 3 tentativas com 20 s entre elas. Na falha, diz se o Tailscale da
+- VPS Drift Detection ganha o job `check-network`, de hora em hora (`17 * * * *`): de dentro da API, `GET /salesmen`
+  do ERP sem credenciais (HTTP de 200 a 499 = rede ok; alerta só com 5xx, sem resposta ou timeout) e DNS de
+  `api.groq.com`, 3 tentativas com 20 s entre elas. Na falha, diz se o Tailscale da
   VPS está logado e se o peer do ERP está online. O aviso é o e-mail de falha do GitHub, que não depende do
   Tailscale nem dos containers. Só leitura; log sem URL, IP ou host.
 - Drift diário passa de `0 9 * * *` para `17 9 * * *` (o GitHub atrasava o run em 3 a 10 horas).
+- Alarme falso no run manual de 22/11: a 1ª versão chamava `/health`, que não existe no ERP (`ERP: HTTP 404` com
+  DNS ok, Tailscale `Running` e peer online). Corrigido no #1057 (rota `/salesmen`, regra 200 a 499).
 - Detalhes e o que fazer na falha: [DEPLOY_GUIDE.md](DEPLOY_GUIDE.md), seção "Alerta de rede (ERP, DNS e
   Tailscale)". Pendências em `TD-VPS-TAILSCALE-DEPENDENCY` ([TECH_DEBT.md](TECH_DEBT.md)).
 
