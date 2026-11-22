@@ -260,7 +260,7 @@ try {
 
 // Alerta de rede (TD-VPS-TAILSCALE-DEPENDENCY): roda o script real do job check-network. O docker falso
 // executa o JS do `docker exec` no node local (com a URL fictícia do ERP e, no DNS, um host de teste no
-// lugar de api.groq.com); um servidor HTTP local faz o papel do ERP: /s<status>/health devolve <status>
+// lugar de api.groq.com); um servidor HTTP local faz o papel do ERP: /s<status>/salesmen devolve <status>
 // e 599 se vier método diferente de GET ou Authorization. tailscale falso devolve JSON fictício.
 const retryLine = "retry_delay=20";
 assert.equal(network.script.split("\n").filter(line => line === retryLine).length, 1);
@@ -268,7 +268,7 @@ assert.match(network.script, /^attempts=3$/m);
 for (const forbidden of [/tailscale\s+(?:up|down|login|logout|set|switch|cert|serve|funnel|ping|file|debug|update)\b/, /(?:^|\$\(|timeout \d+ )\s*tailscale\s+(?!status --json)/m, /docker\s+(?!ps -q |exec "\$api_cid" node -e )/, /\bcurl\b/, /\bsystemctl\b/, /\bPOST\b/, /Authorization/]) {
   assert.doesNotMatch(network.script.replace(/^\s*#.*$/gm, ""), forbidden, `alerta de rede só lê: ${forbidden}`);
 }
-const erpServer = spawn(process.execPath, ["-e", 'require("http").createServer((q,s)=>{const m=q.url.match(/^\\/s(\\d{3})\\/health$/);s.writeHead(q.method!=="GET"||q.headers.authorization?599:m?Number(m[1]):404);s.end()}).listen(0,"127.0.0.1",function(){console.log(this.address().port)})'], { stdio: ["ignore", "pipe", "inherit"] });
+const erpServer = spawn(process.execPath, ["-e", 'require("http").createServer((q,s)=>{const m=q.url.match(/^\\/s(\\d{3})\\/salesmen$/);s.writeHead(q.method!=="GET"||q.headers.authorization||!m?599:Number(m[1]));s.end()}).listen(0,"127.0.0.1",function(){console.log(this.address().port)})'], { stdio: ["ignore", "pipe", "inherit"] });
 const netTmp = mkdtempSync(join(tmpdir(), "vps-network-"));
 try {
   const erpPort = await new Promise((resolvePort, rejectPort) => {
@@ -313,7 +313,8 @@ try {
     return result;
   };
 
-  for (const status of [200, 204, 401, 403]) {
+  // Rede ok = qualquer HTTP de 200 a 499 (sem token, /salesmen responde 401).
+  for (const status of [200, 204, 301, 401, 403, 404, 499]) {
     const ok = runNetwork({ FAKE_ERP_URL: erpUrl(status) });
     assert.equal(ok.status, 0, `ERP HTTP ${status}: ${ok.stderr}`);
     assert.match(ok.stdout, new RegExp(`^ERP: ok \\(HTTP ${status}\\)$`, "m"));
@@ -331,7 +332,8 @@ try {
 
   for (const [extra, message] of [
     [{ FAKE_ERP_URL: erpUrl(500) }, /^\[CRITICAL\] ERP: HTTP 500\.$/m],
-    [{ FAKE_ERP_URL: `http://127.0.0.1:${erpPort}/outra-base` }, /^\[CRITICAL\] ERP: HTTP 404\.$/m],
+    [{ FAKE_ERP_URL: erpUrl(503) }, /^\[CRITICAL\] ERP: HTTP 503\.$/m],
+    [{ FAKE_ERP_URL: `http://127.0.0.1:${erpPort}/outra-base` }, /^\[CRITICAL\] ERP: HTTP 599\.$/m],
     [{ FAKE_ERP_URL: "http://127.0.0.1:1/s200" }, /^\[CRITICAL\] ERP: sem resposta\.$/m],
     [{ FAKE_ERP_URL: "" }, /^\[CRITICAL\] ERP: ULTRAFV3_BASE_URL ausente na API\.$/m],
   ]) {
