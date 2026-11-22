@@ -1,3 +1,54 @@
+## Alerta de rede (ERP, DNS e Tailscale) no VPS Drift Detection (22/11/2026)
+
+**Por quê.** O ERP (`ULTRAFV3_BASE_URL`) é acessado pelo Tailscale da VPS, e o DNS dos containers também depende
+dele. Em 15/11/2026 a VPS saiu da conta do Tailscale ("Logged out"): os containers ficaram sem DNS (`EAI_AGAIN`) e
+pararam juntos a IA, a transcrição de áudio, o Evolution/WhatsApp e a sincronização com o ERP. Só se descobriu
+quando um deploy falhou. O DNS do **host** não depende do Tailscale: o `/etc/resolv.conf` da VPS aponta direto para
+servidores DNS públicos do Google. Só os containers herdaram o resolvedor do Tailscale (MagicDNS). A expiração da
+chave do Tailscale da VPS está desligada no painel.
+
+**Como funciona.** Job `check-network` do workflow **VPS Drift Detection**, de hora em hora (`17 * * * *`). Sai do
+runner do GitHub pelo mesmo SSH público do drift: não depende do Tailscale, do DNS dos containers, da API nem do
+WhatsApp do CRM. O aviso é a falha do run (e-mail de falha do GitHub). O drift diário passou para `17 9 * * *`
+(06:17 BRT), porque o GitHub atrasava o agendamento de `0 9 * * *` em 3 a 10 horas; o disparo manual roda os dois
+jobs. Tudo é leitura, e o log nunca mostra URL, IP ou nome de máquina.
+
+| Verificação | Como | Resultado |
+|---|---|---|
+| ERP | De dentro da API (`docker exec` no container `gest-o-production`/`api`): `GET` em `ULTRAFV3_BASE_URL` + `/health`, sem credenciais, timeout 8 s | 2xx, 401 ou 403 = `ERP: ok (HTTP N)`; outro status = `[CRITICAL] ERP: HTTP N.`; sem conexão ou timeout = `[CRITICAL] ERP: sem resposta.` |
+| DNS dos containers | De dentro da API: resolução de `api.groq.com` | `DNS da API (api.groq.com): ok` ou `[CRITICAL] … falha (CÓDIGO)` (ex.: `EAI_AGAIN`) |
+| API ausente | `docker ps` sem o container | `[CRITICAL] … container da API não encontrado.` |
+
+O `/health` sem credenciais pode responder 401/403 (a integração o chama com token); qualquer resposta HTTP 2xx,
+401 ou 403 prova que a rede até o ERP funciona. Cada falha é repetida até 3 vezes, com 20 s entre as tentativas
+(cobre a recriação da API no cutover): `[INFO] Tentativa N de 3 com falha`. Só reprova se a última também falhar.
+
+**Diagnóstico (só quando falha).** `tailscale status --json` na VPS, e o host do ERP lido da API só para comparar:
+
+- `Tailscale da VPS: logado e rodando (Running)`, `DESLOGADO (NeedsLogin): refazer o login do Tailscale na VPS`,
+  `estado <X>` ou `sem resposta do tailscale status`.
+- `Peer do ERP no Tailscale: online`, `OFFLINE: conferir a máquina do ERP e o Tailscale nela`, `não identificado na
+  lista de peers` ou `não verificado (…)`. O peer é achado pelo IP do tailnet ou pelo nome MagicDNS da URL.
+
+**O que fazer quando falhar.**
+
+1. `DESLOGADO (NeedsLogin)` e DNS da API com falha: o caso de 15/11. Refazer o login do Tailscale na VPS (ação
+   manual, com aprovação) e conferir no painel se a expiração da chave continua desligada.
+2. Tailscale `Running`, peer `OFFLINE`: a máquina do ERP saiu do tailnet (incidente de 31/08, seção "PR827 final —
+   histórico legado e incidente UltraFV3/Tailscale").
+3. Tailscale `Running`, peer `online` e `ERP: HTTP 5xx` ou `sem resposta`: problema no UltraFV3Rest da máquina do
+   ERP, não na rede.
+4. `container da API não encontrado` fora de um deploy: ver a API antes de olhar a rede.
+
+Frequência e ruído: enquanto a falha durar chega 1 e-mail por hora. O GitHub também atrasa ou pula agendamentos
+em horário de pico, então a detecção leva de 1 a algumas horas. Se o e-mail de falha não chegar, a alternativa
+prevista é um alerta por ausência de sinal (Healthchecks.io ou similar) avisado pelo runner, em PR separado.
+
+**Testes:** `scripts/smoke/production-deploy-safety.mjs` roda o script real do job com `docker` e `tailscale`
+falsos e um servidor HTTP local no papel do ERP: HTTP 200/204/401/403, 500, 404, sem resposta, URL ausente, API
+recriada na 1ª tentativa, DNS sem resposta e os estados do diagnóstico. Confere que o log não mostra host, IP ou
+porta e que só há `docker ps`/`docker exec` e `tailscale status --json`.
+
 ## WhatsApp Evolution: workflow de subida e checagem no Drift (06/11/2026)
 
 O projeto `docker-compose.whatsapp.yml` (`gest-o-whatsapp`) sobe, é consultado e é parado só pelo workflow
@@ -35,7 +86,7 @@ existir e o artefato da release tiver sido salvo. No `exit 3` (artefato incomple
   o próprio log dela, no mesmo diretório. Com `FAILED`, o runtime continua como está, **não**
   execute rollback: leia o `reason` e, se for o caso, rode a retenção manual abaixo.
 
-**2. Alerta de disco no VPS Drift Detection** (diário, 06:00 BRT). O run mostra o uso de `/`,
+**2. Alerta de disco no VPS Drift Detection** (diário, 06:17 BRT). O run mostra o uso de `/`,
 `/var/lib/docker` e `/var/log/gest-o` e **falha** quando qualquer um passa de 80%, e o GitHub manda o
 e-mail de falha. Na falha, o log traz `[CRITICAL] Disco acima de 80% na VPS!` com:
 
@@ -344,6 +395,8 @@ O script continua inline (não depende de arquivos do checkout que ele verifica)
 | `whatsapp.env` presente e container `evolution-api` ou `evolution-db` parado ou ausente | `[WARN] … não está rodando`, não reprova |
 | `whatsapp.env` presente e container rodando sem `healthy` | exit 1, `[CRITICAL] WhatsApp … rodando sem healthy` |
 | `whatsapp.env` presente e qualquer porta publicada nos dois containers | exit 1, `[CRITICAL] WhatsApp … com porta publicada` |
+
+ERP, DNS dos containers e Tailscale ficam no job `check-network`, de hora em hora (seção "Alerta de rede (ERP, DNS e Tailscale)" no início deste guia).
 
 O commit é lido como no deploy (`node -pe '…commit'`). O teste executa a lógica inline extraída do workflow em repositórios git temporários, com um `curl` falso no `PATH` no lugar do health (sem rede), cobrindo os seis casos acima e respostas sem JSON ou com commit inválido.
 

@@ -2,8 +2,12 @@ name: VPS Drift Detection
 
 on:
   schedule:
-    # 06:00 BRT (UTC-3) = 09:00 UTC
-    - cron: '0 9 * * *'
+    # Minuto 17: o GitHub atrasa mais os agendamentos na hora cheia (o de 09:00 UTC chegava a começar
+    # 3 a 10 horas depois). Cada cron dispara o seu job (ver `if:` de cada job).
+    # Drift diário: 06:17 BRT (UTC-3) = 09:17 UTC.
+    - cron: '17 9 * * *'
+    # Rede (ERP, DNS da API e Tailscale): de hora em hora.
+    - cron: '17 * * * *'
   workflow_dispatch:
 
 permissions:
@@ -15,6 +19,8 @@ concurrency:
 
 jobs:
   check-drift:
+    # Disparo manual roda os dois jobs.
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '17 9 * * *'
     environment: production-backup-recovery
     runs-on: ubuntu-latest
     steps:
@@ -166,3 +172,103 @@ jobs:
               printf '[INFO] main %s commits à frente da produção (origin/main %s).\n' "$ahead" "$remote_sha"
             fi
             printf '[OK] VPS working tree limpo e HEAD igual ao commit em produção (%s).\n' "$local_sha"
+
+  # Alerta de rede (TD-VPS-TAILSCALE-DEPENDENCY). O ERP e o DNS dos containers dependem do Tailscale da
+  # VPS; o aviso é a falha deste run (e-mail do GitHub), que sai do runner pelo SSH público e não depende
+  # do Tailscale, do DNS dos containers, da API nem do WhatsApp do CRM.
+  check-network:
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '17 * * * *'
+    environment: production-backup-recovery
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verificação de rede (ERP, DNS da API e Tailscale)
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST || secrets.VPS_HOST }}
+          username: ${{ secrets.SSH_USER || secrets.VPS_USER }}
+          key: ${{ secrets.SSH_KEY || secrets.VPS_KEY }}
+          port: ${{ secrets.SSH_PORT || secrets.VPS_PORT || '22022' }}
+          # Sem script_stop, como no job acima; o script não usa `else`.
+          command_timeout: 5m
+          debug: true
+          script: |
+            set -Eeuo pipefail
+            # Somente leitura. De dentro da API: GET em ULTRAFV3_BASE_URL + /health, sem credenciais
+            # (2xx, 401 e 403 = ERP respondeu), e resolução de api.groq.com (DNS dos containers).
+            # Até 3 tentativas, 20 s entre elas (cobre a recriação da API no cutover). Na falha, o log
+            # diz se o Tailscale da VPS está logado e se o peer do ERP aparece online.
+            # O log nunca mostra URL, IP ou nome de máquina.
+            attempts=3
+            retry_delay=20
+            erp_js='const b=(process.env.ULTRAFV3_BASE_URL||"").replace(/\/+$/,"");if(!b){console.log("sem-config");process.exit(0)}fetch(b+"/health",{method:"GET",redirect:"manual",signal:AbortSignal.timeout(8000)}).then(r=>console.log("http "+r.status),()=>console.log("sem-resposta"))'
+            dns_js='require("dns").promises.lookup("api.groq.com").then(()=>console.log("ok"),e=>console.log("falha "+String(e.code||"ERRO").replace(/[^A-Z_]/g,"")))'
+            erp_host_js='try{console.log(new URL(process.env.ULTRAFV3_BASE_URL).hostname.replace(/^\[|\]$/g,""))}catch{}'
+            ts_js='let s;try{s=JSON.parse(require("fs").readFileSync(0,"utf8"))}catch{console.log("sem-resposta");process.exit(0)}const n=v=>String(v||"").toLowerCase().replace(/\.$/,"");const h=n(process.env.ERP_HOST);const p=h?Object.values(s.Peer||{}).find(x=>(x.TailscaleIPs||[]).includes(h)||n(x.DNSName)===h||n(x.DNSName).split(".")[0]===h||n(x.HostName)===h):null;console.log(String(s.BackendState||"desconhecido").replace(/[^A-Za-z]/g,"")+" "+(!h?"sem-host":p?(p.Online?"online":"offline"):"nao-identificado"))'
+            erp_ok_re='^http (2[0-9][0-9]|401|403)$'
+            erp_http_re='^http ([0-9]{3})$'
+            dns_fail_re='^falha ([A-Z_]+)$'
+
+            api_cid=""
+            erp_result=""
+            dns_result=""
+            erp_ok=false
+            dns_ok=false
+            for attempt in $(seq 1 "$attempts"); do
+              api_cid="$(docker ps -q --filter label=com.docker.compose.project=gest-o-production --filter label=com.docker.compose.service=api 2>/dev/null | head -n 1 || true)"
+              erp_result=api-ausente
+              dns_result=api-ausente
+              if [[ -n "$api_cid" ]]; then
+                erp_result="$(timeout 20 docker exec "$api_cid" node -e "$erp_js" 2>/dev/null || true)"
+                dns_result="$(timeout 20 docker exec "$api_cid" node -e "$dns_js" 2>/dev/null || true)"
+              fi
+              erp_ok=false
+              dns_ok=false
+              if [[ "$erp_result" =~ $erp_ok_re ]]; then erp_ok=true; fi
+              if [[ "$dns_result" == ok ]]; then dns_ok=true; fi
+              if [[ "$erp_ok" == true && "$dns_ok" == true ]]; then break; fi
+              if (( attempt < attempts )); then
+                printf '[INFO] Tentativa %s de %s com falha; nova tentativa em %s s.\n' "$attempt" "$attempts" "$retry_delay"
+                sleep "$retry_delay"
+              fi
+            done
+
+            erp_label="sem resposta"
+            if [[ "$erp_result" =~ $erp_http_re ]]; then erp_label="HTTP ${BASH_REMATCH[1]}"; fi
+            if [[ "$erp_result" == sem-config ]]; then erp_label="ULTRAFV3_BASE_URL ausente na API"; fi
+            if [[ "$erp_result" == api-ausente ]]; then erp_label="container da API não encontrado"; fi
+            dns_label="sem resposta"
+            if [[ "$dns_result" == ok ]]; then dns_label=ok; fi
+            if [[ "$dns_result" =~ $dns_fail_re ]]; then dns_label="falha (${BASH_REMATCH[1]})"; fi
+            if [[ "$dns_result" == api-ausente ]]; then dns_label="container da API não encontrado"; fi
+
+            if [[ "$erp_ok" == true ]]; then printf 'ERP: ok (%s)\n' "$erp_label"; fi
+            if [[ "$erp_ok" != true ]]; then printf '[CRITICAL] ERP: %s.\n' "$erp_label" >&2; fi
+            if [[ "$dns_ok" == true ]]; then printf 'DNS da API (api.groq.com): ok\n'; fi
+            if [[ "$dns_ok" != true ]]; then printf '[CRITICAL] DNS da API (api.groq.com): %s.\n' "$dns_label" >&2; fi
+
+            if [[ "$erp_ok" == true && "$dns_ok" == true ]]; then
+              printf '[OK] ERP respondendo e DNS da API funcionando.\n'
+              exit 0
+            fi
+
+            # Diagnóstico: só tailscale status (leitura). O host do ERP fica só em variável.
+            erp_host=""
+            if [[ -n "$api_cid" ]]; then erp_host="$(timeout 20 docker exec "$api_cid" node -e "$erp_host_js" 2>/dev/null || true)"; fi
+            ts_json="$(timeout 10 tailscale status --json 2>/dev/null || true)"
+            ts_report="$(printf '%s' "$ts_json" | ERP_HOST="$erp_host" node -e "$ts_js" 2>/dev/null || true)"
+            ts_state="${ts_report%% *}"
+            ts_peer="${ts_report#* }"
+            ts_label="sem resposta do tailscale status"
+            if [[ "$ts_state" =~ ^[A-Za-z]+$ ]]; then ts_label="estado $ts_state"; fi
+            if [[ "$ts_state" == Running ]]; then ts_label="logado e rodando (Running)"; fi
+            if [[ "$ts_state" == NeedsLogin ]]; then ts_label="DESLOGADO (NeedsLogin): refazer o login do Tailscale na VPS"; fi
+            peer_label="não verificado (sem resposta do tailscale status)"
+            if [[ "$ts_label" != "sem resposta do tailscale status" ]]; then peer_label="não identificado na lista de peers"; fi
+            if [[ "$ts_peer" == online ]]; then peer_label=online; fi
+            if [[ "$ts_peer" == offline ]]; then peer_label="OFFLINE: conferir a máquina do ERP e o Tailscale nela"; fi
+            if [[ "$ts_peer" == sem-host ]]; then peer_label="não verificado (host do ERP não lido da API)"; fi
+            printf '%s\n' '--- Diagnóstico ---' >&2
+            printf 'Tailscale da VPS: %s\n' "$ts_label" >&2
+            printf 'Peer do ERP no Tailscale: %s\n' "$peer_label" >&2
+            printf 'Ver DEPLOY_GUIDE, seção "Alerta de rede (ERP, DNS e Tailscale)".\n' >&2
+            exit 1

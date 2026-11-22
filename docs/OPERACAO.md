@@ -1066,6 +1066,14 @@ Alternativas documentadas, não implementadas: manter Tailscale com autostart/wa
 Na VPS, após revisão do operador, instalar o probe a cada minuto com um timer systemd que execute `ULTRAFV3_BASE_URL` via arquivo de ambiente protegido e `scripts/diagnose-ultrafv3-reachability.sh`. Tratar exit code diferente de zero como alerta e montar `/var/run/gest-o/ultrafv3-reachability.json` read-only na API. O probe usa somente `GET /salesmen`, timeout 1–10 s e jamais autentica, persiste tentativa ou reenvia pedido.
 
 No Windows, revisar os paths e criar uma tarefa **SYSTEM**, no boot, para PowerShell `-NoProfile -ExecutionPolicy AllSigned -File C:\Gest-o\Ensure-UltraFV3Connectivity.ps1`. A mesma tarefa pode repetir a cada minuto: o script é idempotente, mantém `Tailscale` em `Automatic`, só inicia UltraFV3Rest quando não há processo e registra estado sanitizado. Não instalar remotamente nesta entrega.
+
+### Alerta de rede da VPS (22/11/2026)
+
+O job `check-network` do **VPS Drift Detection** verifica de hora em hora, de dentro da API, o `GET /health` do ERP
+e o DNS dos containers, e falha o run (e-mail do GitHub) quando um deles não responde depois de 3 tentativas. Na
+falha, o log diz se o Tailscale da VPS está logado e se o peer do ERP aparece online. O DNS do host não depende do
+Tailscale (aponta para DNS públicos do Google); só os containers herdam o resolvedor do Tailscale (MagicDNS). O que
+fazer em cada caso: `DEPLOY_GUIDE.md`, seção "Alerta de rede (ERP, DNS e Tailscale)".
 ## Prova de backup exigida pelo apply PR827
 
 Dispare **Prepare Production Recovery Backup** somente após merge e `main` verde, com confirmação e SHA completo aprovados. O workflow deve terminar com `PRODUCTION_BACKUP_PR827_PROOF=PASS` e `PRODUCTION_BACKUP_FINAL_FILESYSTEM_VALIDATION=PASS`. O único contrato aceito é `/var/log/gest-o/backup/latest/result.tsv`, dentro do bundle v1 que contém também `dump.sql.gz` e `dump.sql.gz.sha256`. Não crie o resultado manualmente, não copie resultados antigos e não use evidências de `schema`, `tenancy` ou `control-plane`. O apply continua proibido até que uma execução nova publique e releia com o parser compartilhado uma prova íntegra, protegida, do SHA aprovado, banco `salesforce_pro` e dentro da janela de freshness.
