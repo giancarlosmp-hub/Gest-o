@@ -193,18 +193,20 @@ jobs:
           debug: true
           script: |
             set -Eeuo pipefail
-            # Somente leitura. De dentro da API: GET em ULTRAFV3_BASE_URL + /health, sem credenciais
-            # (2xx, 401 e 403 = ERP respondeu), e resolução de api.groq.com (DNS dos containers).
+            # Somente leitura. De dentro da API: GET em ULTRAFV3_BASE_URL + /salesmen (a rota do preflight
+            # da integração e do diagnose-ultrafv3-reachability.sh), sem credenciais, e resolução de
+            # api.groq.com (DNS dos containers). Qualquer HTTP de 200 a 499 = a rede chega ao ERP (sem
+            # token a rota responde 401); alerta só com 5xx, sem resposta ou timeout.
             # Até 3 tentativas, 20 s entre elas (cobre a recriação da API no cutover). Na falha, o log
             # diz se o Tailscale da VPS está logado e se o peer do ERP aparece online.
             # O log nunca mostra URL, IP ou nome de máquina.
             attempts=3
             retry_delay=20
-            erp_js='const b=(process.env.ULTRAFV3_BASE_URL||"").replace(/\/+$/,"");if(!b){console.log("sem-config");process.exit(0)}fetch(b+"/health",{method:"GET",redirect:"manual",signal:AbortSignal.timeout(8000)}).then(r=>console.log("http "+r.status),()=>console.log("sem-resposta"))'
+            erp_js='const b=(process.env.ULTRAFV3_BASE_URL||"").replace(/\/+$/,"");if(!b){console.log("sem-config");process.exit(0)}fetch(b+"/salesmen",{method:"GET",redirect:"manual",signal:AbortSignal.timeout(8000)}).then(r=>console.log("http "+r.status),()=>console.log("sem-resposta"))'
             dns_js='require("dns").promises.lookup("api.groq.com").then(()=>console.log("ok"),e=>console.log("falha "+String(e.code||"ERRO").replace(/[^A-Z_]/g,"")))'
             erp_host_js='try{console.log(new URL(process.env.ULTRAFV3_BASE_URL).hostname.replace(/^\[|\]$/g,""))}catch{}'
             ts_js='let s;try{s=JSON.parse(require("fs").readFileSync(0,"utf8"))}catch{console.log("sem-resposta");process.exit(0)}const n=v=>String(v||"").toLowerCase().replace(/\.$/,"");const h=n(process.env.ERP_HOST);const p=h?Object.values(s.Peer||{}).find(x=>(x.TailscaleIPs||[]).includes(h)||n(x.DNSName)===h||n(x.DNSName).split(".")[0]===h||n(x.HostName)===h):null;console.log(String(s.BackendState||"desconhecido").replace(/[^A-Za-z]/g,"")+" "+(!h?"sem-host":p?(p.Online?"online":"offline"):"nao-identificado"))'
-            erp_ok_re='^http (2[0-9][0-9]|401|403)$'
+            erp_ok_re='^http [234][0-9][0-9]$'
             erp_http_re='^http ([0-9]{3})$'
             dns_fail_re='^falha ([A-Z_]+)$'
 
