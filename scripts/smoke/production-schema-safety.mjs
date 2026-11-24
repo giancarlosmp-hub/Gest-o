@@ -103,6 +103,10 @@ const whatsappMessagesSql = readFileSync(resolve(root, "apps/api/prisma/migratio
 const whatsappMessagesPreview = runPreview(whatsappMessagesSql);
 assert.equal(whatsappMessagesPreview.status, 0, `WhatsApp messages migration must pass the preview validator: ${whatsappMessagesPreview.stdout}${whatsappMessagesPreview.stderr}`);
 assert.match(whatsappMessagesPreview.stdout, /RESUMO aditivas=11 destrutivas=0 bloqueadas=0/);
+const marketingConsentSql = readFileSync(resolve(root, "apps/api/prisma/migrations/20261124120000_whatsapp_marketing_consent/migration.sql"), "utf8");
+const marketingConsentPreview = runPreview(marketingConsentSql);
+assert.equal(marketingConsentPreview.status, 0, `WhatsApp marketing consent migration must pass the preview validator: ${marketingConsentPreview.stdout}${marketingConsentPreview.stderr}`);
+assert.match(marketingConsentPreview.stdout, /RESUMO aditivas=11 destrutivas=0 bloqueadas=0/);
 // The gate only accepts lowercase enum values: the uppercase spelling of the same value stays blocked.
 const whatsappMessagesUpperEnum = runPreview(`ALTER TYPE "CommunicationProviderType" ADD VALUE IF NOT EXISTS 'EVOLUTION_WHATSAPP';\n`);
 assert.notEqual(whatsappMessagesUpperEnum.status, 0, "uppercase enum value must stay blocked by the preview validator");
@@ -293,6 +297,11 @@ assert.equal(whatsappMessagesSql.match(/ALTER TYPE/g)?.length, 1, "WhatsApp mess
 assert.match(whatsappMessagesSql, /^ALTER TYPE "CommunicationProviderType" ADD VALUE IF NOT EXISTS 'evolution_whatsapp';$/m, "enum addition must be the exact idempotent one-line form");
 assert.equal(whatsappMessagesSql.match(/evolution_whatsapp/g)?.length, 1, "the new enum value must not be used inside the migration (single-transaction apply)");
 assert.doesNotMatch(whatsappMessagesSql.match(/ALTER TABLE "CommunicationConversation" ADD COLUMN[^;]+;/)[0], /NOT NULL|DEFAULT/, "new conversation columns must be nullable without defaults");
+const marketingConsentEntry = spawnSync("node", [registry, "20261124120000_whatsapp_marketing_consent"], { cwd: root, encoding: "utf8" });
+assert.equal(marketingConsentEntry.status, 0, marketingConsentEntry.stderr);
+assert.equal(JSON.parse(marketingConsentEntry.stdout).sha256, "541ea45162f35ee13941b0886fcd012940e9d67dba8ca9e4cf310360318a0117");
+assert.doesNotMatch(marketingConsentSql.replace(/ON (DELETE|UPDATE) (CASCADE|SET NULL|RESTRICT)/g, "ON_FK_ACTION"), /\b(UPDATE|DELETE|INSERT|DROP|RENAME|TRUNCATE|CONCURRENTLY|ALTER TYPE|ALTER COLUMN|ADD COLUMN)\b/i, "WhatsApp marketing consent migration must only create new enums, tables, indexes and their foreign keys");
+assert.equal(marketingConsentSql.match(/^(CREATE|ALTER) /gm)?.length, 11, "WhatsApp marketing consent migration has exactly eleven statements");
 
 const apply = readFileSync(resolve(root, "scripts/production-schema-apply.sh"), "utf8");
 const productPricePostgres = readFileSync(resolve(root, "scripts/smoke/product-price-authority-migration-postgres.sh"), "utf8");
@@ -311,6 +320,8 @@ for (const whatsappConnectionPostcondition of ["migration conexão WhatsApp parc
 assert.match(apply, /whatsapp_connection_state" == 1:1 \]\]; then\n  log "migration conexão WhatsApp já presente; DDL ignorado[\s\S]*else[\s\S]*admin_psql --single-transaction/, "already-applied WhatsApp connection path must not repeat DDL");
 for (const whatsappMessagesPostcondition of ["migration mensagens WhatsApp parcialmente aplicada", "whatsapp_messages_state\" == 0:0:0", "whatsapp_messages_state\" == 1:6:1", "migration mensagens WhatsApp já presente; DDL ignorado", "e.enumlabel='evolution_whatsapp'", "confdeltype='n'", "confdeltype='c'", "SELECT count(*) FROM \\\"ClientPhoneIndex\\\"", "1:6:1:6:7:2:0"]) assert.ok(apply.includes(whatsappMessagesPostcondition), `missing WhatsApp messages postcondition ${whatsappMessagesPostcondition}`);
 assert.match(apply, /whatsapp_messages_state" == 1:6:1 \]\]; then\n  log "migration mensagens WhatsApp já presente; DDL ignorado[\s\S]*else[\s\S]*admin_psql --single-transaction/, "already-applied WhatsApp messages path must not repeat DDL");
+for (const marketingConsentPostcondition of ["migration aceite de boletins WhatsApp parcialmente aplicada", "marketing_consent_state\" == 0:0", "marketing_consent_state\" == 2:2", "migration aceite de boletins WhatsApp já presente; DDL ignorado", "ACEITE,DESCADASTRO", "VENDEDOR_MANUAL,WHATSAPP_LINK,WHATSAPP_BOTAO,WHATSAPP_PALAVRA,OUTRO", "confdeltype='r'", "(SELECT count(*) FROM \"ClientCulture\")", "2:12:5:4:0"]) assert.ok(apply.includes(marketingConsentPostcondition), `missing WhatsApp marketing consent postcondition ${marketingConsentPostcondition}`);
+assert.match(apply, /marketing_consent_state" == 2:2 \]\]; then\n  log "migration aceite de boletins WhatsApp já presente; DDL ignorado[\s\S]*else[\s\S]*admin_psql --single-transaction/, "already-applied WhatsApp marketing consent path must not repeat DDL");
 assert.match(apply, /production-schema-migrations\.mjs "\$MIGRATION_ID_REQUESTED"/);
 for (const ordersPostcondition of ["orders-counts.before.tsv", "tenant_not_null", "tenant_nulls", "ErpOperationalOrderStatus", "ErpRequestAuthorizationStatus", "ErpOrderSync_tenantId_fkey", "ErpOrderSync_tenantId_createdAt_idx", "ErpOrderSync_tenantId_sellerId_createdAt_idx", "ErpOrderStatusHistory", "ErpOrderStatusHistory_erpOrderSyncId_fkey", "ErpOrderStatusHistory_opportunityId_fkey", "ErpOrderStatusHistory_erpOrderSyncId_occurredAt_idx", "ErpOrderStatusHistory_opportunityId_occurredAt_idx", "migration-backfill"]) assert.ok(apply.includes(ordersPostcondition), `missing Orders postcondition ${ordersPostcondition}`);
 assert.match(apply, /20260731150000_safe_production_schema_transition\)[\s\S]*required_tables/, "the historical migration must retain its dedicated postconditions");
@@ -683,6 +694,31 @@ assertWhatsappMessagesDiff("unexpected extra column", `${whatsappMessagesFullDif
 assertWhatsappMessagesDiff("changed column type", whatsappMessagesFullDiff.replace('"phone" VARCHAR(13) NOT NULL', '"phone" TEXT NOT NULL'), false);
 assertWhatsappMessagesDiff("owner foreign key with cascade", whatsappMessagesFullDiff.replace("ON DELETE SET NULL", "ON DELETE CASCADE"), false);
 assertWhatsappMessagesDiff("unrelated drift", `${whatsappMessagesFullDiff}ALTER TABLE "User" ALTER COLUMN "region" SET DATA TYPE VARCHAR(10);\n`, false);
+
+function assertMarketingConsentDiff(name, sql, accepted) {
+  const testDir = mkdtempSync(resolve(tmpdir(), "gesto-whatsapp-marketing-consent-diff-"));
+  const input = resolve(testDir, "input.sql");
+  const output = resolve(testDir, "output.sql");
+  writeFileSync(input, sql);
+  const result = spawnSync("node", [resolve(root, "scripts/schema-diff-filter.mjs"), input, output, "pre", "20261124120000_whatsapp_marketing_consent"], { encoding: "utf8" });
+  rmSync(testDir, { recursive: true });
+  assert.equal(result.status === 0, accepted, `${name}: ${result.stdout}${result.stderr}`);
+}
+// What `prisma migrate diff` emits for this migration against the previous schema is the migration
+// itself (minus its header comment), so the full diff is the checksummed file.
+const marketingConsentFullDiff = marketingConsentSql;
+const marketingConsentIndexLine = `CREATE INDEX "ClientCulture_cultureId_idx" ON "ClientCulture"("cultureId");`;
+assertMarketingConsentDiff("complete WhatsApp marketing consent diff", marketingConsentFullDiff, true);
+assertMarketingConsentDiff("already applied (empty diff)", "", true);
+assertMarketingConsentDiff("public-qualified identifiers", marketingConsentFullDiff.replace(/ON "ClientCulture"/g, 'ON "public"."ClientCulture"'), true);
+assertMarketingConsentDiff("missing index (partial)", marketingConsentFullDiff.replace(marketingConsentIndexLine, ""), false);
+assertMarketingConsentDiff("tables only, enums already present (partial)", marketingConsentFullDiff.replace(/CREATE TYPE[^;]+;/g, ""), false);
+assertMarketingConsentDiff("duplicated index", `${marketingConsentFullDiff}${marketingConsentIndexLine}\n`, false);
+assertMarketingConsentDiff("other enum value", marketingConsentFullDiff.replace("'DESCADASTRO'", "'OUTRA_SITUACAO'"), false);
+assertMarketingConsentDiff("unexpected extra column", `${marketingConsentFullDiff}ALTER TABLE "User" ADD COLUMN "unexpected" TEXT;\n`, false);
+assertMarketingConsentDiff("changed column type", marketingConsentFullDiff.replace('"phone" VARCHAR(13) NOT NULL', '"phone" TEXT NOT NULL'), false);
+assertMarketingConsentDiff("culture foreign key with cascade", marketingConsentFullDiff.replace("ON DELETE RESTRICT", "ON DELETE CASCADE"), false);
+assertMarketingConsentDiff("unrelated drift", `${marketingConsentFullDiff}ALTER TABLE "User" ALTER COLUMN "region" SET DATA TYPE VARCHAR(10);\n`, false);
 const bootstrap = readFileSync(resolve(root, "apps/api/src/scripts/bootstrap.ts"), "utf8");
 assert.match(bootstrap, /type DatabaseSchemaMode = "external" \| "ephemeral-push"/);
 assert.match(bootstrap, /if \(value === "external" \|\| value === "ephemeral-push"\) return value/);

@@ -6,6 +6,19 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 export const migrations = Object.freeze({
+  "20261124120000_whatsapp_marketing_consent": Object.freeze({
+    id: "20261124120000_whatsapp_marketing_consent",
+    path: "apps/api/prisma/migrations/20261124120000_whatsapp_marketing_consent/migration.sql",
+    sha256: "541ea45162f35ee13941b0886fcd012940e9d67dba8ca9e4cf310360318a0117",
+    objects: Object.freeze({
+      enums: Object.freeze(["MarketingConsentStatus", "MarketingConsentSource"]),
+      tables: Object.freeze(["MarketingConsentEvent", "ClientCulture"]),
+      indexes: Object.freeze(["MarketingConsentEvent_tenantId_phone_createdAt_idx", "MarketingConsentEvent_clientId_createdAt_idx", "ClientCulture_cultureId_idx"]),
+      foreignKeys: Object.freeze(["MarketingConsentEvent_clientId_fkey", "MarketingConsentEvent_recordedById_fkey", "ClientCulture_clientId_fkey", "ClientCulture_cultureId_fkey"])
+    }),
+    postconditions: Object.freeze(["existing-rows-preserved", "catalog-exact", "new-table-empty", "managed-diff-empty", "old-api-compatible"]),
+    evidenceVersion: 1
+  }),
   "20261107120000_whatsapp_messages": Object.freeze({
     id: "20261107120000_whatsapp_messages",
     path: "apps/api/prisma/migrations/20261107120000_whatsapp_messages/migration.sql",

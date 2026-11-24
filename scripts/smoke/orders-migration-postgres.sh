@@ -78,6 +78,10 @@ apply_whatsapp_messages_migration() {
   local db=$1 phase=$2
   run_observed "$phase" "$phase" 20261107120000_whatsapp_messages psql docker exec -i "$pg" psql -X -v ON_ERROR_STOP=1 -U postgres -d "$db" --single-transaction <apps/api/prisma/migrations/20261107120000_whatsapp_messages/migration.sql
 }
+apply_whatsapp_marketing_consent_migration() {
+  local db=$1 phase=$2
+  run_observed "$phase" "$phase" 20261124120000_whatsapp_marketing_consent psql docker exec -i "$pg" psql -X -v ON_ERROR_STOP=1 -U postgres -d "$db" --single-transaction <apps/api/prisma/migrations/20261124120000_whatsapp_marketing_consent/migration.sql
+}
 
 intro=$(git log --all --format=%H --diff-filter=A -- apps/api/prisma/migrations/20260904120000_orders_operational_view/migration.sql)
 [[ -n "$intro" && "$intro" != *$'\n'* ]]
@@ -104,6 +108,7 @@ apply_opportunity_origin_migration fresh complete_relevant_sequence
 apply_user_phone_migration fresh complete_relevant_sequence
 apply_whatsapp_connection_migration fresh complete_relevant_sequence
 apply_whatsapp_messages_migration fresh complete_relevant_sequence
+apply_whatsapp_marketing_consent_migration fresh complete_relevant_sequence
 run_observed fresh_sequence final_schema_diff current_schema prisma_diff run_tooling fresh ./node_modules/.bin/prisma migrate diff --from-url "$(url fresh)" --to-schema-datamodel /app/apps/api/prisma/schema.prisma --exit-code
 
 for db in upgrade invalid historical; do run_tooling "$db" ./node_modules/.bin/prisma db push --schema /work/previous/schema.prisma --skip-generate >/dev/null; done
@@ -137,6 +142,7 @@ apply_opportunity_origin_migration upgrade complete_relevant_sequence
 apply_user_phone_migration upgrade complete_relevant_sequence
 apply_whatsapp_connection_migration upgrade complete_relevant_sequence
 apply_whatsapp_messages_migration upgrade complete_relevant_sequence
+apply_whatsapp_marketing_consent_migration upgrade complete_relevant_sequence
 run_observed upgrade_from_previous final_schema_diff current_schema prisma_diff run_tooling upgrade ./node_modules/.bin/prisma migrate diff --from-url "$(url upgrade)" --to-schema-datamodel /app/apps/api/prisma/schema.prisma --exit-code
 [[ $(docker exec "$pg" psql -X -U postgres -d upgrade -qAt -c 'SELECT count(*) FROM "Activity" WHERE id='"'"'activity-a'"'"' AND type='"'"'followup'"'"' AND "noNextStepReason" IS NULL') == 1 ]]
 
