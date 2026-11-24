@@ -14,6 +14,8 @@ export type NormalizedCommunicationEvent = {
   direction: CommunicationDirection;
   messageType: CommunicationMessageType;
   textContent?: string;
+  /** Payload do botão de resposta rápida de um modelo (mensagem type "button"), sem o texto do botão. */
+  buttonPayload?: string;
   providerTimestamp?: Date;
   contact: NormalizedContactResult;
   contactName?: string;

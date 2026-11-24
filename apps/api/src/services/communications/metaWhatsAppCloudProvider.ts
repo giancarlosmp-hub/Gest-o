@@ -42,6 +42,7 @@ export class MetaWhatsAppCloudProvider implements CommunicationProvider {
           externalConversationKey: String(msg.from), externalAccountId: account,
           externalMessageId: String(msg.id), direction: CommunicationDirection.INBOUND, messageType,
           textContent: typeof msg?.text?.body === "string" ? msg.text.body.slice(0, 4000) : undefined,
+          buttonPayload: typeof msg?.button?.payload === "string" ? msg.button.payload.slice(0, 256) : undefined,
           providerTimestamp: msg.timestamp ? new Date(Number(msg.timestamp) * 1000) : undefined,
           contact: this.normalizeExternalContact(String(msg.from ?? contact?.wa_id ?? "")),
           contactName: typeof contact?.profile?.name === "string" ? contact.profile.name.slice(0, 120) : undefined,

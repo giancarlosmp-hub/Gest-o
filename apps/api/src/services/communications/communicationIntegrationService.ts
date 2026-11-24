@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { CommunicationMessageStatus, CommunicationWebhookStatus, EventType, Prisma } from "@prisma/client";
+import { CommunicationDirection, CommunicationMessageStatus, CommunicationWebhookStatus, EventType, Prisma } from "@prisma/client";
 import { prisma as defaultPrisma } from "../../config/prisma.js";
 import { env } from "../../config/env.js";
 import { logApiEvent } from "../../utils/logger.js";
@@ -7,6 +7,7 @@ import { MetaWhatsAppCloudProvider, sanitizeError } from "./metaWhatsAppCloudPro
 import { hashContact, hashPhoneForTenant, maskContact } from "./phoneNormalization.js";
 import { communicationTenantResolver, type CommunicationTenantResolver } from "./communicationTenantResolver.js";
 import type { CommunicationProvider, NormalizedCommunicationEvent } from "./types.js";
+import { processInboundMarketingConsent } from "../marketingConsent/marketingConsent.js";
 
 const statusOrder = { RECEIVED: 0, QUEUED: 1, SENT: 2, DELIVERED: 3, READ: 4, FAILED: -1 } as const;
 const timelineDescription = "Nova mensagem recebida pelo WhatsApp oficial.";
@@ -77,6 +78,8 @@ export class CommunicationIntegrationService {
     if (!msg) return;
     await tx.communicationConversation.update({ where: { id: conversation.id }, data: { unreadCount: { increment: 1 }, lastMessageAt: event.providerTimestamp ?? new Date(), lastInboundAt: event.providerTimestamp ?? new Date(), previewSanitized: event.textContent ? "Mensagem de texto recebida" : "Mensagem recebida" } });
     if (link.clientId && link.sellerId) await tx.timelineEvent.create({ data: { type: EventType.comentario, description: timelineDescription, clientId: link.clientId, ownerSellerId: link.sellerId } });
+    // Campanhas WhatsApp Fase 1: frase de aceite, palavra de descadastro ou botão OPT_OUT_MARKETING. Só grava, nunca responde.
+    if (event.direction === CommunicationDirection.INBOUND) await processInboundMarketingConsent(tx, { tenantId: event.tenantId, phone: normalizedPhone, text: event.textContent, buttonPayload: event.buttonPayload });
   }
 
   async findSafeClientLink(tx: Prisma.TransactionClient, tenantId: string | null, phone?: string) {
