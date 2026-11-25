@@ -91,5 +91,6 @@ psql --single-transaction <apps/api/prisma/migrations/20261103120000_opportunity
 psql --single-transaction <apps/api/prisma/migrations/20261105120000_user_phone/migration.sql
 psql --single-transaction <apps/api/prisma/migrations/20261106120000_whatsapp_connection/migration.sql
 psql --single-transaction <apps/api/prisma/migrations/20261107120000_whatsapp_messages/migration.sql
+psql --single-transaction <apps/api/prisma/migrations/20261124120000_whatsapp_marketing_consent/migration.sql
 docker run --rm --pull=never --network "$net" -e DATABASE_URL="$url" "$image" ./node_modules/.bin/prisma migrate diff --from-url "$url" --to-schema-datamodel /app/apps/api/prisma/schema.prisma --exit-code
 printf '%s\n' PRODUCT_PRICE_AUTHORITY_PREDECESSOR_SCHEMA=PASS PRODUCT_PRICE_AUTHORITY_EXISTING_ROWS=PRESERVED PRODUCT_PRICE_AUTHORITY_OLD_API_COMPATIBILITY=PASS PRODUCT_PRICE_AUTHORITY_FINAL_SCHEMA_DIFF=PASS PRODUCT_PRICE_AUTHORITY_MIGRATION_POSTGRES=PASS

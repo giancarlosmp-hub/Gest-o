@@ -144,6 +144,12 @@ if [[ "$MIGRATION_ID_REQUESTED" == 20261107120000_whatsapp_messages ]]; then
   whatsapp_messages_state="$(admin_psql -Atc "$whatsapp_messages_enum_sql"):$(admin_psql -Atc "$whatsapp_messages_columns_sql"):$(admin_psql -Atc "$whatsapp_messages_table_sql")"
   [[ "$whatsapp_messages_state" == 0:0:0 || "$whatsapp_messages_state" == 1:6:1 ]] || die "migration mensagens WhatsApp parcialmente aplicada"
 fi
+marketing_consent_enums_sql="SELECT count(*) FROM pg_type WHERE typnamespace='public'::regnamespace AND typname IN ('MarketingConsentStatus','MarketingConsentSource')"
+marketing_consent_tables_sql="SELECT count(*) FROM pg_class WHERE relnamespace='public'::regnamespace AND relkind='r' AND relname IN ('MarketingConsentEvent','ClientCulture')"
+if [[ "$MIGRATION_ID_REQUESTED" == 20261124120000_whatsapp_marketing_consent ]]; then
+  marketing_consent_state="$(admin_psql -Atc "$marketing_consent_enums_sql"):$(admin_psql -Atc "$marketing_consent_tables_sql")"
+  [[ "$marketing_consent_state" == 0:0 || "$marketing_consent_state" == 2:2 ]] || die "migration aceite de boletins WhatsApp parcialmente aplicada"
+fi
 
 # Repeat every mutable safety gate immediately before granting the migration its short-lived
 # administrative authority. The runtime URL remains in use for Prisma and incident reads.
@@ -170,6 +176,8 @@ elif [[ "$MIGRATION_ID_REQUESTED" == 20261106120000_whatsapp_connection && "$wha
   log "migration conexão WhatsApp já presente; DDL ignorado e pós-condições serão revalidadas"
 elif [[ "$MIGRATION_ID_REQUESTED" == 20261107120000_whatsapp_messages && "$whatsapp_messages_state" == 1:6:1 ]]; then
   log "migration mensagens WhatsApp já presente; DDL ignorado e pós-condições serão revalidadas"
+elif [[ "$MIGRATION_ID_REQUESTED" == 20261124120000_whatsapp_marketing_consent && "$marketing_consent_state" == 2:2 ]]; then
+  log "migration aceite de boletins WhatsApp já presente; DDL ignorado e pós-condições serão revalidadas"
 else
   log "aplicando migration versionada isoladamente; containers da aplicação não serão iniciados"
   admin_psql --single-transaction -f - < "$MIGRATION"
@@ -280,6 +288,29 @@ rows_using_new_objects	%s
 existing_rows_preserved	PASS
 old_api_compatible	PASS
 ' "$enum_value" "$columns" "$table" "$table_columns" "$indexes" "$foreign_keys" "$touched_rows" >"$evidence/post-validation.tsv"
+    ;;
+  20261124120000_whatsapp_marketing_consent)
+    status_labels=$(admin_psql -Atc "SELECT string_agg(e.enumlabel, ',' ORDER BY e.enumsortorder) FROM pg_enum e JOIN pg_type t ON t.oid=e.enumtypid WHERE t.typnamespace='public'::regnamespace AND t.typname='MarketingConsentStatus'")
+    source_labels=$(admin_psql -Atc "SELECT string_agg(e.enumlabel, ',' ORDER BY e.enumsortorder) FROM pg_enum e JOIN pg_type t ON t.oid=e.enumtypid WHERE t.typnamespace='public'::regnamespace AND t.typname='MarketingConsentSource'")
+    tables=$(admin_psql -Atc "$marketing_consent_tables_sql")
+    columns=$(admin_psql -Atc "SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name IN ('MarketingConsentEvent','ClientCulture')")
+    indexes=$(admin_psql -Atc "SELECT count(*) FROM pg_indexes WHERE schemaname='public' AND indexname IN ('MarketingConsentEvent_pkey','ClientCulture_pkey','MarketingConsentEvent_tenantId_phone_createdAt_idx','MarketingConsentEvent_clientId_createdAt_idx','ClientCulture_cultureId_idx')")
+    foreign_keys=$(admin_psql -Atc "SELECT count(*) FROM pg_constraint WHERE connamespace='public'::regnamespace AND contype='f' AND ((conname='MarketingConsentEvent_clientId_fkey' AND confdeltype='n') OR (conname='MarketingConsentEvent_recordedById_fkey' AND confdeltype='n') OR (conname='ClientCulture_clientId_fkey' AND confdeltype='c') OR (conname='ClientCulture_cultureId_fkey' AND confdeltype='r'))")
+    # The running (old) API does not know the tables, so any row would mean the migration
+    # itself wrote data. Race-free, unlike row counts of existing tables.
+    touched_rows=$(admin_psql -Atc 'SELECT (SELECT count(*) FROM "MarketingConsentEvent") + (SELECT count(*) FROM "ClientCulture")')
+    [[ "$status_labels" == ACEITE,DESCADASTRO && "$source_labels" == VENDEDOR_MANUAL,WHATSAPP_LINK,WHATSAPP_BOTAO,WHATSAPP_PALAVRA,OUTRO ]] || die "pós-condições da migration aceite de boletins WhatsApp divergentes (enum)"
+    [[ "$tables:$columns:$indexes:$foreign_keys:$touched_rows" == 2:12:5:4:0 ]] || die "pós-condições da migration aceite de boletins WhatsApp divergentes"
+    printf 'status_labels	%s
+source_labels	%s
+tables	%s
+columns	%s
+indexes	%s
+foreign_keys	%s
+rows_using_new_objects	%s
+existing_rows_preserved	PASS
+old_api_compatible	PASS
+' "$status_labels" "$source_labels" "$tables" "$columns" "$indexes" "$foreign_keys" "$touched_rows" >"$evidence/post-validation.tsv"
     ;;
   *) die "migration sem pós-condições cadastradas" ;;
 esac

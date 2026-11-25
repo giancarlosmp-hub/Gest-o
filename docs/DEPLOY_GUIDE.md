@@ -1,3 +1,69 @@
+## Campanhas WhatsApp Fase 1: aceite dos boletins e culturas do cliente (24/11/2026)
+
+**O que entra.** Nada é enviado nesta fase. Só recebe boletim de marketing (Fase 2, pela Cloud API da Meta num
+número oficial separado) o telefone cujo registro **mais recente** é um aceite: `canReceiveMarketing` em
+`apps/api/src/services/marketingConsent/marketingConsent.ts` é a única regra. O histórico é por telefone
+(55 + DDD + número) e tenant, só de inclusão, nunca apagado. A ficha do cliente ganha o card **Boletins WhatsApp**:
+situação de cada telefone, "Registrar aceite"/"Registrar descadastro" (origem e observação), histórico recolhido e
+as culturas do cliente (catálogo técnico `CultureCatalog`). Vendedor só nos clientes da própria carteira; gerente e
+diretor em todos; sempre no tenant do usuário. Cada registro com cliente vira um evento `comentario` na linha do
+tempo, sem telefone e sem a observação.
+
+**Migration `20261124120000_whatsapp_marketing_consent`.** Só aditiva, sem `UPDATE`/`DELETE`: enums
+`MarketingConsentStatus` e `MarketingConsentSource`, tabelas `MarketingConsentEvent` e `ClientCulture`, 3 índices e
+4 chaves estrangeiras (cliente apagado: histórico fica sem cliente, culturas do cliente saem; cultura do catálogo
+não pode ser apagada com cliente ligado, e o catálogo só desativa). A API do mesmo PR lê as tabelas novas, então
+**a migration precisa estar aplicada antes do cutover**; a gate de evidência garante isso.
+
+Cadastro: manifesto `scripts/production-schema-migrations.mjs` (SHA-256
+`541ea45162f35ee13941b0886fcd012940e9d67dba8ca9e4cf310360318a0117`), apply, filtro pre-apply, evidência do cutover
+e opção no workflow **Production Schema PR827**.
+
+Ordem, tudo no **mesmo SHA do merge**, sem mesclar nada na `main` no meio:
+
+1. **Prepare Production Recovery Backup** na `main` do merge. Conferir run verde.
+2. **Deploy Production** `phase=build` no mesmo SHA. Conferir `gest-o-api:<sha>` construída.
+3. **Production Schema PR827** `mode=preview`, `migration=20261124120000_whatsapp_marketing_consent`, `confirm`
+   vazio. Conferir `RESUMO aditivas=11 destrutivas=0 bloqueadas=0` e o diff pre-apply com exatamente os 11 comandos
+   da migration.
+4. **Production Schema PR827** `mode=apply`, mesma migration, `confirm=PRODUCTION_SCHEMA_APPLY`. Evidência em
+   `/var/log/gest-o/schema/<sha>/`: `post-validation.tsv` com `status_labels ACEITE,DESCADASTRO`,
+   `source_labels VENDEDOR_MANUAL,WHATSAPP_LINK,WHATSAPP_BOTAO,WHATSAPP_PALAVRA,OUTRO`, `tables 2`, `columns 12`,
+   `indexes 5`, `foreign_keys 4`, `rows_using_new_objects 0`; `post-apply-diff.sql` vazio.
+5. **Deploy Production** `phase=cutover` no mesmo SHA. Conferir `evidência de schema validada para o SHA atual`.
+
+**Falha no apply:** `psql --single-transaction`; erro desfaz tudo e o cutover continua bloqueado. Depois do commit o
+estado é `2:2` (enums:tabelas) e o reapply só revalida; estado parcial é recusado antes de qualquer DDL.
+**Voltar:** a API anterior não conhece as tabelas novas e continua compatível.
+
+### Link de aceite (wa.me) e descadastro pelo WhatsApp oficial
+
+O cliente dá o aceite mandando a frase pronta para o **número oficial dos boletins** (não o número de um vendedor).
+Link para site, material impresso ou mensagem do vendedor, com o número como placeholder:
+
+```text
+https://wa.me/55DDNNNNNNNNN?text=Quero%20receber%20os%20boletins%20da%20Demetra
+```
+
+`55DDNNNNNNNNN` = 55 + DDD + número oficial, só dígitos. O webhook de entrada da Cloud API
+(`POST /webhooks/communications/meta-whatsapp`) só registra, nunca responde, e nunca grava o telefone em log:
+
+| Mensagem recebida no número oficial | Registro |
+|---|---|
+| Só a frase "Quero receber os boletins da Demetra" (ignora acentos, maiúsculas, espaços e pontuação nas pontas) | `ACEITE`, origem `WHATSAPP_LINK` |
+| Botão de resposta rápida de um modelo com payload `OPT_OUT_MARKETING` | `DESCADASTRO`, origem `WHATSAPP_BOTAO` |
+| Só uma destas, ignorando acentos, maiúsculas, espaços, pontuação e emojis: parar, sair, cancelar, descadastrar, remover, stop, não quero receber, não quero mais receber | `DESCADASTRO`, origem `WHATSAPP_PALAVRA` |
+| Qualquer outra | nada |
+
+O cliente vem do `ClientPhoneIndex` do mesmo tenant (cliente não arquivado). Sem cliente ou com mais de um cliente no
+telefone, o registro fica só no telefone (aparece na ficha quando o telefone entrar no cadastro do cliente). Todo
+modelo de marketing da Fase 2 deve ter o botão de resposta rápida com payload `OPT_OUT_MARKETING`.
+
+O processamento roda dentro do webhook que já existe: só com `COMMUNICATIONS_ENABLED=true`,
+`WHATSAPP_INTEGRATION_ENABLED=true`, `WHATSAPP_WEBHOOK_VERIFY_TOKEN`/`WHATSAPP_APP_SECRET` preenchidos e a conta do
+número oficial cadastrada em `CommunicationIntegrationAccount`. Este PR não muda nenhuma dessas configurações; com
+elas desligadas, só o registro manual pela ficha funciona.
+
 ## Alerta de rede (ERP, DNS e Tailscale) no VPS Drift Detection (22/11/2026)
 
 **Por quê.** O ERP (`ULTRAFV3_BASE_URL`) é acessado pelo Tailscale da VPS, e o DNS dos containers também depende

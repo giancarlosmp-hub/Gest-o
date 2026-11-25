@@ -9,6 +9,7 @@ import { useWhatsAppDayCards } from "../components/whatsapp/WhatsAppDayCard";
 import ClientAutoSummaryCard from "../components/clients/ClientAutoSummaryCard";
 import ClientCreditAlertBanner, { ClientCreditAlert } from "../components/clients/ClientCreditAlertBanner";
 import ClientErpPhones, { type ClientErpEmail, type ClientErpPhone } from "../components/clients/ClientErpPhones";
+import ClientWhatsAppBulletinsCard from "../components/clients/ClientWhatsAppBulletinsCard";
 import { useAuth } from "../context/AuthContext";
 import {
   canArchiveClient,
@@ -692,6 +693,8 @@ export default function ClientDetailsPage() {
           </div>
         </section>
       ) : null}
+
+      <ClientWhatsAppBulletinsCard clientId={client.id} />
 
       {client.financialProfile ? (
         <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">

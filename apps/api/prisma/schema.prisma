@@ -126,6 +126,7 @@ model User {
   knowledgeDocuments         KnowledgeDocument[]
   tenantMemberships          TenantMembership[]
   whatsAppConnection         WhatsAppConnection?
+  marketingConsentEvents     MarketingConsentEvent[]
 }
 
 model Tenant {
@@ -237,6 +238,8 @@ model Client {
   agendaStops                AgendaStop[]
   activities                 Activity[]
   codeAuditEvents            ClientCodeAudit[]
+  marketingConsentEvents     MarketingConsentEvent[]
+  cultures                   ClientCulture[]
 
   @@index([code])
   @@index([fantasyName])
@@ -532,6 +535,7 @@ model CultureCatalog {
   tags                    String[] @default([])
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
+  clients                 ClientCulture[]
 
   @@index([isActive])
 }
@@ -1026,4 +1030,49 @@ model ClientPhoneIndex {
   @@unique([phone, clientId, source])
   @@index([phone])
   @@index([clientId])
+}
+
+// Campanhas WhatsApp Fase 1: aceite e descadastro dos boletins de marketing, por telefone (55 + DDD +
+// número). Histórico só de inclusão: nunca é apagado nem editado. A situação atual é o registro mais
+// recente do telefone no tenant (canReceiveMarketing em services/marketingConsent).
+enum MarketingConsentStatus {
+  ACEITE
+  DESCADASTRO
+}
+
+enum MarketingConsentSource {
+  VENDEDOR_MANUAL
+  WHATSAPP_LINK
+  WHATSAPP_BOTAO
+  WHATSAPP_PALAVRA
+  OUTRO
+}
+
+model MarketingConsentEvent {
+  id           String                 @id @default(cuid())
+  tenantId     String                 @db.VarChar(64)
+  phone        String                 @db.VarChar(13)
+  clientId     String?
+  client       Client?                @relation(fields: [clientId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  status       MarketingConsentStatus
+  source       MarketingConsentSource
+  note         String?                @db.VarChar(280)
+  recordedById String?
+  recordedBy   User?                  @relation(fields: [recordedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  createdAt    DateTime               @default(now())
+
+  @@index([tenantId, phone, createdAt])
+  @@index([clientId, createdAt])
+}
+
+// Culturas do cliente (catálogo técnico CultureCatalog), para segmentar campanhas.
+model ClientCulture {
+  clientId  String
+  client    Client         @relation(fields: [clientId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  cultureId String
+  culture   CultureCatalog @relation(fields: [cultureId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  createdAt DateTime       @default(now())
+
+  @@id([clientId, cultureId])
+  @@index([cultureId])
 }
