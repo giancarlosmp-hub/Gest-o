@@ -75,7 +75,7 @@ setModel("marketingConsentEvent", {
   findMany: async ({ where, distinct }: any) => {
     assert.ok(where.tenantId, "histórico sempre filtrado por tenant");
     const rows = consentEvents.filter((row) => matches(row, where)).sort((a, b) => b.createdAt - a.createdAt);
-    const out = rows.map((row) => ({ ...row, recordedBy: row.recordedById ? { name: users[row.recordedById]?.name ?? null } : null }));
+    const out: Row[] = rows.map((row) => ({ ...row, recordedBy: row.recordedById ? { name: users[row.recordedById]?.name ?? null } : null }));
     if (distinct) return [...new Map(out.map((row) => [row.phone, row])).values()];
     return out;
   },
